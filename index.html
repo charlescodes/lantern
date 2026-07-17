@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101511">
+    <title>Lantern M0 · Debug Arena</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body data-mode="play">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">Project Lantern / MVP 0</p>
+          <h1>Debug Arena</h1>
+        </div>
+      </div>
+      <div class="run-summary" aria-label="Simulation status">
+        <span id="run-status" class="status-pill">RUNNING</span>
+        <span>tick <strong id="tick-value">0</strong></span>
+        <span>seed <strong id="seed-value">--</strong></span>
+      </div>
+      <nav class="toolbar" aria-label="Arena controls">
+        <button id="pause-button" type="button">Pause</button>
+        <button id="step-button" type="button">Step</button>
+        <button id="reset-button" type="button">Reset</button>
+        <button id="mode-button" class="accent-button" type="button">Enter edit</button>
+        <button id="focus-button" type="button">Focus</button>
+      </nav>
+    </header>
+
+    <main class="workspace">
+      <section class="arena-shell" aria-label="Lantern simulation viewport">
+        <canvas id="arena" tabindex="0"></canvas>
+        <div class="viewport-rail">
+          <span id="pointer-value">x -- z -- · cell --</span>
+          <span class="mode-hint play-hint">RMB move · LMB cast · click pins</span>
+          <span class="mode-hint edit-hint">LMB paints wall · RMB erases</span>
+        </div>
+        <div class="corner-readout" aria-hidden="true">
+          <span>X</span><i></i><span>Z</span>
+        </div>
+      </section>
+
+      <aside class="instrument-panel">
+        <section class="panel-section telemetry-section">
+          <div class="section-heading">
+            <h2>Frame instrument</h2>
+            <span>p50 / p95 / p99</span>
+          </div>
+          <pre id="telemetry-output">Waiting for first frame…</pre>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><h2>Bounded pools</h2><span>dense SoA</span></div>
+          <div class="pool-readout">
+            <div><span>Projectiles</span><output id="projectile-pool">0 / 128</output></div>
+            <div class="meter"><i id="projectile-bar"></i></div>
+          </div>
+          <div class="pool-readout">
+            <div><span>Particles</span><output id="particle-pool">0 / 4096</output></div>
+            <div class="meter particle-meter"><i id="particle-bar"></i></div>
+          </div>
+        </section>
+
+        <section class="panel-section inspector-section">
+          <div class="section-heading"><h2>Inspector</h2><span>stable identity</span></div>
+          <pre id="inspector-output">Move over the arena to inspect. Click to pin.</pre>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><h2>Debug layers</h2><span>tick commands</span></div>
+          <div class="flag-grid">
+            <label><input type="checkbox" data-debug-flag="gridCoordinates" checked> Coordinates</label>
+            <label><input type="checkbox" data-debug-flag="velocityVectors" checked> Vectors</label>
+            <label><input type="checkbox" data-debug-flag="contacts" checked> Contacts</label>
+            <label><input type="checkbox" data-debug-flag="particleStems" checked> Height stems</label>
+            <label><input type="checkbox" data-debug-flag="particleBounce"> Ground bounce</label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading"><h2>Recent impacts</h2><span>ring buffer</span></div>
+          <pre id="events-output">No impacts recorded.</pre>
+        </section>
+
+        <section class="panel-section data-section">
+          <div class="section-heading"><h2>Artifacts</h2><span>JSON-safe</span></div>
+          <div class="button-grid">
+            <button id="save-map-button" type="button">Save map</button>
+            <button id="load-map-button" type="button">Load map</button>
+            <button id="snapshot-button" type="button">Snapshot</button>
+            <button id="command-log-button" type="button">Command log</button>
+          </div>
+          <input id="map-file-input" type="file" accept="application/json,.json" hidden>
+        </section>
+
+        <section class="panel-section shortcut-section">
+          <div class="section-heading"><h2>Shortcuts</h2><span>window.__lantern</span></div>
+          <p><kbd>Space</kbd> pause <kbd>.</kbd> one tick <kbd>R</kbd> reset <kbd>⇧R</kbd> new seed <kbd>E</kbd> mode <kbd>F</kbd> focus</p>
+          <p><kbd>Wheel</kbd> zoom <kbd>MMB</kbd> pan</p>
+        </section>
+
+        <p id="error-output" class="error-output" role="alert" hidden></p>
+      </aside>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
