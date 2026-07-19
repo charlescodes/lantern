@@ -180,6 +180,7 @@ export class ParticlePool {
     this.activeCount = 0;
     this.dropped = 0;
     this.wallBounces = 0;
+    this.groundBounces = 0;
     this.collisionDiscards = 0;
     this.nextId = 1;
     this.id = new Uint32Array(capacity);
@@ -200,6 +201,7 @@ export class ParticlePool {
     this.activeCount = 0;
     this.dropped = 0;
     this.wallBounces = 0;
+    this.groundBounces = 0;
     this.collisionDiscards = 0;
     this.nextId = 1;
   }

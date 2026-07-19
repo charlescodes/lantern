@@ -46,6 +46,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
 test("particle swap-and-pop copies every component and flags", () => {
   const pool = new ParticlePool(2);
   assert.equal(pool.wallBounces, 0);
+  assert.equal(pool.groundBounces, 0);
   assert.equal(pool.collisionDiscards, 0);
   pool.spawn({ x: 1, y: 2, z: 3, vx: 4, vy: 5, vz: 6, lifetime: 7, size: 0.1 });
   const lastId = pool.spawn({ x: 10, y: 20, z: 30, vx: 40, vy: 50, vz: 60, lifetime: 70, size: 0.25 });
@@ -53,6 +54,7 @@ test("particle swap-and-pop copies every component and flags", () => {
   pool.bounced[1] = 1;
   pool.wallBounceCount[1] = 9;
   pool.wallBounces = 14;
+  pool.groundBounces = 6;
   pool.collisionDiscards = 3;
   pool.removeSwap(0);
   assert.equal(pool.activeCount, 1);
@@ -78,9 +80,11 @@ test("particle swap-and-pop copies every component and flags", () => {
     },
   );
   assert.equal(pool.wallBounces, 14);
+  assert.equal(pool.groundBounces, 6);
   assert.equal(pool.collisionDiscards, 3);
   pool.reset();
   assert.equal(pool.wallBounces, 0);
+  assert.equal(pool.groundBounces, 0);
   assert.equal(pool.collisionDiscards, 0);
 });
 

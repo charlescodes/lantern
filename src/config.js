@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 2;
 
@@ -13,7 +13,6 @@ export const SIMULATION = Object.freeze({
 export const WORLD = Object.freeze({
   width: 24,
   height: 24,
-  pixelsPerMeter: 32,
 });
 
 export const PLAYER = Object.freeze({
@@ -39,12 +38,60 @@ export const PARTICLE = Object.freeze({
   burstCount: 224,
   gravity: -9.81,
   initialY: 0.1,
+  minimumSize: 0.025,
+  maximumSize: 0.085,
   maximumHorizontalSpeed: 7,
   wallNormalRetention: 0.8,
   wallTangentialRetention: 0.95,
   maximumWallContactsPerTick: 4,
   wallSeparationEpsilon: 1e-5,
   spawnCorrectionPasses: 8,
+});
+
+export const PARTICLE_PROFILE_M02 = "m0.2";
+export const PARTICLE_PROFILE_M0_2_5 = "m0.2.5-balanced";
+const PARTICLE_PROFILE_M0_25_TYPO = "m0.25-balanced";
+export const DEFAULT_PARTICLE_PROFILE = PARTICLE_PROFILE_M0_2_5;
+
+/** @param {unknown} value */
+export function normalizeParticleProfile(value) {
+  const profile = String(value);
+  return profile === PARTICLE_PROFILE_M0_25_TYPO
+    ? PARTICLE_PROFILE_M0_2_5
+    : profile;
+}
+
+export const PARTICLE_PROFILES = Object.freeze({
+  [PARTICLE_PROFILE_M02]: Object.freeze({
+    verticalMinimum: 2.2,
+    verticalRange: 5.3,
+    verticalPower: 1,
+    lifetimeMinimum: 0.25,
+    lifetimeMaximum: 0.8,
+    lifetimeBase: 0.525,
+    lifetimeSizeScale: 0,
+    lifetimeJitter: 0.55,
+    shrinkExponent: 0,
+    groundVerticalRetention: 0.35,
+    groundHorizontalRetention: 0.75,
+    groundSettlesAfterBounce: false,
+    defaultGroundBounce: false,
+  }),
+  [PARTICLE_PROFILE_M0_2_5]: Object.freeze({
+    verticalMinimum: 0.6,
+    verticalRange: 5.9,
+    verticalPower: 2,
+    lifetimeMinimum: 0.18,
+    lifetimeMaximum: 1.1,
+    lifetimeBase: 0.22,
+    lifetimeSizeScale: 0.83,
+    lifetimeJitter: 0.12,
+    shrinkExponent: 0.65,
+    groundVerticalRetention: 0.45,
+    groundHorizontalRetention: 0.82,
+    groundSettlesAfterBounce: true,
+    defaultGroundBounce: true,
+  }),
 });
 
 export const ROCK_DENSITY_KG_M3 = 2_600;
@@ -98,6 +145,6 @@ export const DEFAULT_DEBUG_FLAGS = Object.freeze({
   contacts: true,
   explosionForces: true,
   particleStems: true,
-  particleBounce: false,
+  particleBounce: true,
   particleWallCollision: true,
 });

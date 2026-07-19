@@ -39,5 +39,5 @@ createServer(async (request, response) => {
     response.end(code === 404 ? "Not found" : "Internal server error");
   }
 }).listen(port, host, () => {
-  console.log(`Lantern M0.2 running at http://${host}:${port}/`);
+  console.log(`Lantern M0.2.5 running at http://${host}:${port}/`);
 });

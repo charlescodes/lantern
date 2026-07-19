@@ -31,6 +31,11 @@ const COLORS = Object.freeze({
   text: "#91a797",
 });
 
+const GRID_LABEL_MINIMUM_VIEWPORT_SIZE = 26;
+const GRID_LABEL_FONT = "10px 'Iosevka', 'Cascadia Code', monospace";
+const HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER = 0.72;
+const MAXIMUM_CANVAS_BACKING_SCALE = 2;
+
 /** @param {number} value @param {number} min @param {number} max */
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -46,20 +51,29 @@ export class DebugRenderer {
     this.camera = camera;
     this.width = 1;
     this.height = 1;
-    this.dpr = 1;
+    this.backingScale = 1;
   }
 
   resize() {
     const bounds = this.canvas.getBoundingClientRect();
     const width = Math.max(1, Math.round(bounds.width));
     const height = Math.max(1, Math.round(bounds.height));
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    if (width === this.width && height === this.height && dpr === this.dpr) return;
+    const backingScale = Math.min(
+      MAXIMUM_CANVAS_BACKING_SCALE,
+      window.devicePixelRatio || 1,
+    );
+    if (
+      width === this.width
+      && height === this.height
+      && backingScale === this.backingScale
+    ) {
+      return;
+    }
     this.width = width;
     this.height = height;
-    this.dpr = dpr;
-    this.canvas.width = Math.round(width * dpr);
-    this.canvas.height = Math.round(height * dpr);
+    this.backingScale = backingScale;
+    this.canvas.width = Math.round(width * backingScale);
+    this.canvas.height = Math.round(height * backingScale);
     this.camera.resize(width, height);
   }
 
@@ -71,17 +85,17 @@ export class DebugRenderer {
   render(snapshot, alpha, view) {
     this.resize();
     const context = this.context;
-    const scale = this.camera.pixelsPerMeter;
+    const scale = this.camera.worldToViewportScale;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = COLORS.void;
     context.fillRect(0, 0, this.canvas.width, this.canvas.height);
     context.setTransform(
-      this.dpr * scale,
+      this.backingScale * scale,
       0,
       0,
-      this.dpr * scale,
-      this.dpr * (this.width / 2 - this.camera.centerX * scale),
-      this.dpr * (this.height / 2 - this.camera.centerZ * scale),
+      this.backingScale * scale,
+      this.backingScale * (this.width / 2 - this.camera.centerX * scale),
+      this.backingScale * (this.height / 2 - this.camera.centerZ * scale),
     );
     context.lineCap = "round";
     context.lineJoin = "round";
@@ -105,13 +119,13 @@ export class DebugRenderer {
     const { map } = snapshot;
     context.fillStyle = COLORS.floorA;
     context.fillRect(0, 0, map.width, map.height);
-    const topLeft = this.camera.screenToWorld(0, 0);
-    const bottomRight = this.camera.screenToWorld(this.width, this.height);
+    const topLeft = this.camera.viewportToWorld(0, 0);
+    const bottomRight = this.camera.viewportToWorld(this.width, this.height);
     const minX = clamp(Math.floor(topLeft.x) - 1, 0, map.width - 1);
     const maxX = clamp(Math.ceil(bottomRight.x) + 1, 0, map.width - 1);
     const minZ = clamp(Math.floor(topLeft.z) - 1, 0, map.height - 1);
     const maxZ = clamp(Math.ceil(bottomRight.z) + 1, 0, map.height - 1);
-    const line = 1 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1);
 
     for (let cz = minZ; cz <= maxZ; cz += 1) {
       for (let cx = minX; cx <= maxX; cx += 1) {
@@ -147,15 +161,11 @@ export class DebugRenderer {
     context.lineWidth = line * 2;
     context.strokeRect(0, 0, map.width, map.height);
 
-    if (snapshot.debugFlags.gridCoordinates && this.camera.pixelsPerMeter >= 26) {
-      context.fillStyle = COLORS.text;
-      context.font = "0.22px 'Iosevka', 'Cascadia Code', monospace";
-      context.textBaseline = "top";
-      for (let cz = minZ; cz <= maxZ; cz += 1) {
-        for (let cx = minX; cx <= maxX; cx += 1) {
-          context.fillText(`${cx},${cz}`, cx + 0.08, cz + 0.07);
-        }
-      }
+    if (
+      snapshot.debugFlags.gridCoordinates
+      && this.camera.worldLengthToViewport(1) >= GRID_LABEL_MINIMUM_VIEWPORT_SIZE
+    ) {
+      this.#drawGridLabels(minX, maxX, minZ, maxZ);
     }
 
     context.beginPath();
@@ -176,16 +186,18 @@ export class DebugRenderer {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
   #drawParticles(snapshot) {
     const context = this.context;
-    const line = 1 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1);
     for (const particle of snapshot.particles) {
       const life = 1 - particle.age / particle.lifetime;
-      const liftedZ = particle.z - particle.y * 0.72;
+      const liftedZ =
+        particle.z
+        - particle.y * HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER;
       context.save();
       context.globalAlpha = clamp(life * 0.45, 0, 0.45);
       context.translate(particle.x, particle.z);
       context.scale(1, 0.38);
       context.beginPath();
-      context.arc(0, 0, Math.max(0.025, particle.size * 0.8), 0, Math.PI * 2);
+      context.arc(0, 0, particle.currentSize * 0.8, 0, Math.PI * 2);
       context.fillStyle = "#000000";
       context.fill();
       context.restore();
@@ -198,7 +210,7 @@ export class DebugRenderer {
         context.stroke();
       }
       context.beginPath();
-      context.arc(particle.x, liftedZ, particle.size, 0, Math.PI * 2);
+      context.arc(particle.x, liftedZ, particle.currentSize, 0, Math.PI * 2);
       context.fillStyle = life > 0.55 ? COLORS.particle : COLORS.projectile;
       context.globalAlpha = clamp(life, 0, 1);
       context.fill();
@@ -209,7 +221,7 @@ export class DebugRenderer {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #drawRocks(snapshot, alpha) {
     const context = this.context;
-    const line = 1 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1);
     for (const rock of snapshot.rocks) {
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
@@ -252,7 +264,7 @@ export class DebugRenderer {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
   #drawExplosionForces(snapshot) {
     const context = this.context;
-    const line = 1 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1);
     for (const event of snapshot.recentEvents) {
       if (event.type !== "explosion") continue;
       const age = snapshot.tick - event.tick;
@@ -298,7 +310,7 @@ export class DebugRenderer {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
   #drawProjectiles(snapshot) {
     const context = this.context;
-    const line = 1 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1);
     for (const projectile of snapshot.projectiles) {
       context.beginPath();
       context.moveTo(projectile.previousX, projectile.previousZ);
@@ -327,7 +339,7 @@ export class DebugRenderer {
     const player = snapshot.player;
     const x = player.previousX + (player.x - player.previousX) * alpha;
     const z = player.previousZ + (player.z - player.previousZ) * alpha;
-    const line = 1 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1);
     context.beginPath();
     context.arc(x, z, player.radius, 0, Math.PI * 2);
     context.fillStyle = COLORS.player;
@@ -362,7 +374,7 @@ export class DebugRenderer {
     const endX = x + vx;
     const endZ = z + vz;
     const head = 0.12;
-    const line = 1.8 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(1.8);
     context.beginPath();
     context.moveTo(x, z);
     context.lineTo(endX, endZ);
@@ -377,7 +389,7 @@ export class DebugRenderer {
   /** @param {Array<{x:number,z:number,nx:number,nz:number,penetration:number}>} contacts */
   #drawContacts(contacts) {
     const context = this.context;
-    const line = 2 / this.camera.pixelsPerMeter;
+    const line = this.camera.viewportLengthToWorld(2);
     for (const contact of contacts) {
       const length = Math.max(0.18, contact.penetration * 3);
       context.beginPath();
@@ -403,7 +415,9 @@ export class DebugRenderer {
       context.beginPath();
       context.arc(position.x, position.z, radius + 0.1, 0, Math.PI * 2);
       context.strokeStyle = entity === selected ? COLORS.selected : COLORS.hover;
-      context.lineWidth = (entity === selected ? 2.5 : 1.5) / this.camera.pixelsPerMeter;
+      context.lineWidth = this.camera.viewportLengthToWorld(
+        entity === selected ? 2.5 : 1.5,
+      );
       context.stroke();
     }
   }
@@ -416,7 +430,7 @@ export class DebugRenderer {
    */
   #drawMouse(mouse, mode, editorTool, placementValid) {
     const context = this.context;
-    const size = 7 / this.camera.pixelsPerMeter;
+    const size = this.camera.viewportLengthToWorld(7);
     if (mode === "edit") {
       const definition = Object.hasOwn(ROCK_ARCHETYPES, editorTool)
         ? ROCK_ARCHETYPES[editorTool]
@@ -429,14 +443,14 @@ export class DebugRenderer {
         context.fillStyle = placementValid ? "rgba(107, 200, 168, 0.2)" : "rgba(255, 111, 103, 0.2)";
         context.fill();
         context.strokeStyle = placementValid ? COLORS.hover : COLORS.blocked;
-        context.lineWidth = 1.5 / this.camera.pixelsPerMeter;
+        context.lineWidth = this.camera.viewportLengthToWorld(1.5);
         context.stroke();
         return;
       }
       const cx = Math.floor(mouse.x);
       const cz = Math.floor(mouse.z);
       context.strokeStyle = editorTool === "erase" ? COLORS.blocked : COLORS.projectile;
-      context.lineWidth = 1.5 / this.camera.pixelsPerMeter;
+      context.lineWidth = this.camera.viewportLengthToWorld(1.5);
       context.strokeRect(cx + size * 0.2, cz + size * 0.2, 1 - size * 0.4, 1 - size * 0.4);
       return;
     }
@@ -446,7 +460,31 @@ export class DebugRenderer {
     context.moveTo(mouse.x, mouse.z - size);
     context.lineTo(mouse.x, mouse.z + size);
     context.strokeStyle = COLORS.hover;
-    context.lineWidth = 1 / this.camera.pixelsPerMeter;
+    context.lineWidth = this.camera.viewportLengthToWorld(1);
     context.stroke();
+  }
+
+  /** @param {number} minX @param {number} maxX @param {number} minZ @param {number} maxZ */
+  #drawGridLabels(minX, maxX, minZ, maxZ) {
+    const context = this.context;
+    context.save();
+    context.setTransform(
+      this.backingScale,
+      0,
+      0,
+      this.backingScale,
+      0,
+      0,
+    );
+    context.fillStyle = COLORS.text;
+    context.font = GRID_LABEL_FONT;
+    context.textBaseline = "top";
+    for (let cz = minZ; cz <= maxZ; cz += 1) {
+      for (let cx = minX; cx <= maxX; cx += 1) {
+        const position = this.camera.worldToViewport(cx + 0.08, cz + 0.07);
+        context.fillText(`${cx},${cz}`, position.x, position.y);
+      }
+    }
+    context.restore();
   }
 }

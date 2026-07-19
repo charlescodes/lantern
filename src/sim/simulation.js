@@ -2,11 +2,15 @@
 
 import {
   DEFAULT_DEBUG_FLAGS,
+  DEFAULT_PARTICLE_PROFILE,
   DYNAMIC_PHYSICS,
   EXPLOSION,
   HISTORY,
   MAP_VERSION,
+  normalizeParticleProfile,
   PARTICLE,
+  PARTICLE_PROFILES,
+  PARTICLE_PROFILE_M02,
   PLAYER,
   PROJECTILE,
   ROCK,
@@ -188,6 +192,23 @@ function clampMagnitude(value, maximum) {
   return Math.max(-maximum, Math.min(maximum, value));
 }
 
+/** @param {number} value @param {number} minimum @param {number} maximum */
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+/**
+ * @param {Record<string, number | boolean>} tuning
+ * @param {number} maximumSize
+ * @param {number} age
+ * @param {number} lifetime
+ */
+function currentParticleSize(tuning, maximumSize, age, lifetime) {
+  if (tuning.shrinkExponent === 0) return maximumSize;
+  const remainingLife = 1 - clamp(age / lifetime, 0, 1);
+  return maximumSize * remainingLife ** Number(tuning.shrinkExponent);
+}
+
 /** @param {number} code */
 function bodyKindName(code) {
   if (code === BODY_PLAYER) return "player";
@@ -205,6 +226,8 @@ export class Simulation {
    * projectileCapacity?:number,
    * particleCapacity?:number,
    * particleBurstCount?:number,
+   * particleProfile?:string,
+   * particleBounce?:boolean,
    * particleWallCollision?:boolean
    * }} [options]
    */
@@ -225,6 +248,13 @@ export class Simulation {
     this.projectiles = new ProjectilePool(options.projectileCapacity ?? PROJECTILE.capacity);
     this.particles = new ParticlePool(options.particleCapacity ?? PARTICLE.capacity);
     this.particleBurstCount = options.particleBurstCount ?? PARTICLE.burstCount;
+    this.particleProfile = normalizeParticleProfile(
+      options.particleProfile ?? DEFAULT_PARTICLE_PROFILE,
+    );
+    if (!Object.hasOwn(PARTICLE_PROFILES, this.particleProfile)) {
+      throw new RangeError(`Unsupported particle profile: ${this.particleProfile}`);
+    }
+    this.particleTuning = PARTICLE_PROFILES[this.particleProfile];
     this.impactEvents = new RingBuffer(HISTORY.events);
     this.commandLog = new RingBuffer(HISTORY.commands);
     this.commandLogDropped = 0;
@@ -232,9 +262,13 @@ export class Simulation {
     this.commandLogMap = this.map.toJSON();
     this.debugFlags = {
       ...DEFAULT_DEBUG_FLAGS,
+      particleBounce:
+        options.particleBounce ?? this.particleTuning.defaultGroundBounce,
       particleWallCollision:
         options.particleWallCollision ?? DEFAULT_DEBUG_FLAGS.particleWallCollision,
     };
+    this.commandLogParticleProfile = this.particleProfile;
+    this.commandLogParticleBounce = this.debugFlags.particleBounce;
     this.commandLogParticleWallCollision = this.debugFlags.particleWallCollision;
     this.tickCount = 0;
     this.nextExplosionId = 1;
@@ -304,6 +338,8 @@ export class Simulation {
       this.commandLogDropped = 0;
       this.commandLogScenario = this.scenario.toJSON();
       this.commandLogMap = this.map.toJSON();
+      this.commandLogParticleProfile = this.particleProfile;
+      this.commandLogParticleBounce = this.debugFlags.particleBounce;
       this.commandLogParticleWallCollision = this.debugFlags.particleWallCollision;
     }
     this.lastError = null;
@@ -1121,9 +1157,26 @@ export class Simulation {
         vx -= 2 * inwardSpeed * outwardX;
         vz -= 2 * inwardSpeed * outwardZ;
       }
-      const vy = this.rng.range(2.2, 7.5);
-      const lifetime = this.rng.range(0.25, 0.8);
-      const size = this.rng.range(0.025, 0.085);
+      const verticalRoll = this.rng.nextFloat();
+      const lifetimeRoll = this.rng.nextFloat();
+      const sizeRoll = this.rng.nextFloat();
+      const size =
+        PARTICLE.minimumSize
+        + (PARTICLE.maximumSize - PARTICLE.minimumSize) * sizeRoll;
+      const normalizedSize =
+        (size - PARTICLE.minimumSize)
+        / (PARTICLE.maximumSize - PARTICLE.minimumSize);
+      const vy =
+        Number(this.particleTuning.verticalMinimum)
+        + Number(this.particleTuning.verticalRange)
+          * verticalRoll ** Number(this.particleTuning.verticalPower);
+      const lifetime = clamp(
+        Number(this.particleTuning.lifetimeBase)
+          + Number(this.particleTuning.lifetimeSizeScale) * normalizedSize
+          + (lifetimeRoll - 0.5) * Number(this.particleTuning.lifetimeJitter),
+        Number(this.particleTuning.lifetimeMinimum),
+        Number(this.particleTuning.lifetimeMaximum),
+      );
       if (
         !sanitizePointAgainstGrid(
           this.map,
@@ -1191,10 +1244,20 @@ export class Simulation {
       if (pool.y[index] <= 0) {
         if (this.debugFlags.particleBounce && pool.bounced[index] === 0) {
           pool.y[index] = 0;
-          pool.vy[index] = Math.abs(pool.vy[index]) * 0.35;
-          pool.vx[index] *= 0.75;
-          pool.vz[index] *= 0.75;
+          pool.vy[index] =
+            Math.abs(pool.vy[index]) * Number(this.particleTuning.groundVerticalRetention);
+          pool.vx[index] *= Number(this.particleTuning.groundHorizontalRetention);
+          pool.vz[index] *= Number(this.particleTuning.groundHorizontalRetention);
           pool.bounced[index] = 1;
+          pool.groundBounces += 1;
+        } else if (
+          this.debugFlags.particleBounce
+          && this.particleTuning.groundSettlesAfterBounce
+        ) {
+          pool.y[index] = 0;
+          pool.vy[index] = 0;
+          pool.vx[index] *= Number(this.particleTuning.groundHorizontalRetention);
+          pool.vz[index] *= Number(this.particleTuning.groundHorizontalRetention);
         } else {
           pool.removeSwap(index);
           continue;
@@ -1252,6 +1315,16 @@ export class Simulation {
     }
   }
 
+  /** @param {number} index */
+  #currentParticleSize(index) {
+    return currentParticleSize(
+      this.particleTuning,
+      this.particles.size[index],
+      this.particles.age[index],
+      this.particles.lifetime[index],
+    );
+  }
+
   snapshot() {
     const rocks = new Array(this.rocks.activeCount);
     for (let index = 0; index < rocks.length; index += 1) {
@@ -1304,6 +1377,7 @@ export class Simulation {
         vy: this.particles.vy[index],
         vz: this.particles.vz[index],
         size: this.particles.size[index],
+        currentSize: this.#currentParticleSize(index),
         age: this.particles.age[index],
         lifetime: this.particles.lifetime[index],
         wallBounceCount: this.particles.wallBounceCount[index],
@@ -1347,6 +1421,7 @@ export class Simulation {
       seed: this.seed,
       rngState: this.rng.state,
       tick: this.tickCount,
+      particleProfile: this.particleProfile,
       scenarioVersion: SCENARIO_VERSION,
       map: {
         version: MAP_VERSION,
@@ -1381,6 +1456,7 @@ export class Simulation {
           capacity: this.particles.capacity,
           dropped: this.particles.dropped,
           wallBounces: this.particles.wallBounces,
+          groundBounces: this.particles.groundBounces,
           collisionDiscards: this.particles.collisionDiscards,
         },
       },
@@ -1419,7 +1495,7 @@ export class Simulation {
     }
     for (let index = 0; index < this.particles.activeCount; index += 1) {
       const distance = Math.hypot(x - this.particles.x[index], z - this.particles.z[index]);
-      if (distance <= this.particles.size[index] + 0.08 && distance < bestDistance) {
+      if (distance <= this.#currentParticleSize(index) + 0.08 && distance < bestDistance) {
         best = this.#describeParticle(index);
         bestDistance = distance;
       }
@@ -1538,6 +1614,7 @@ export class Simulation {
 
   /** @param {number} index */
   #describeParticle(index) {
+    const currentSize = this.#currentParticleSize(index);
     return {
       kind: "particle",
       id: this.particles.id[index],
@@ -1552,7 +1629,8 @@ export class Simulation {
         y: this.particles.vy[index],
         z: this.particles.vz[index],
       },
-      radius: this.particles.size[index],
+      radius: currentSize,
+      maxRadius: this.particles.size[index],
       massKg: null,
       cell: null,
       age: this.particles.age[index],
@@ -1628,6 +1706,8 @@ export class Simulation {
         projectileCapacity: this.projectiles.capacity,
         particleCapacity: this.particles.capacity,
         particleBurstCount: this.particleBurstCount,
+        particleProfile: this.commandLogParticleProfile,
+        particleBounce: this.commandLogParticleBounce,
         particleWallCollision: this.commandLogParticleWallCollision,
       },
       truncated: this.commandLogDropped > 0,
@@ -1642,6 +1722,12 @@ export class Simulation {
   static replay(recording) {
     const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
     const recordingSchema = Number(recording.schemaVersion);
+    const particleProfile = recordingSchema >= 4
+      ? recording.configuration?.particleProfile ?? DEFAULT_PARTICLE_PROFILE
+      : PARTICLE_PROFILE_M02;
+    const particleBounce = recordingSchema >= 4
+      ? recording.configuration?.particleBounce ?? true
+      : false;
     const particleWallCollision = recordingSchema >= 3
       ? recording.configuration?.particleWallCollision ?? true
       : false;
@@ -1652,6 +1738,8 @@ export class Simulation {
       projectileCapacity: recording.configuration?.projectileCapacity,
       particleCapacity: recording.configuration?.particleCapacity,
       particleBurstCount: recording.configuration?.particleBurstCount,
+      particleProfile,
+      particleBounce,
       particleWallCollision,
     });
     for (const entry of recording.commands) simulation.tick(entry.command);

@@ -1,5 +1,7 @@
 // @ts-check
 
+const POINTER_CLICK_SLOP_VIEWPORT_UNITS = 5;
+
 export class InputController {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -79,19 +81,27 @@ export class InputController {
   }
 
   /** @param {PointerEvent} event */
-  #canvasPoint(event) {
+  #viewportPoint(event) {
     const bounds = this.canvas.getBoundingClientRect();
     return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
   }
 
   /** @param {PointerEvent} event */
   #onPointerMove(event) {
-    const point = this.#canvasPoint(event);
+    const point = this.#viewportPoint(event);
     if (this.panning) {
-      this.camera.panPixels(point.x - this.lastPointer.x, point.y - this.lastPointer.y);
+      const previousWorld = this.camera.viewportToWorld(
+        this.lastPointer.x,
+        this.lastPointer.y,
+      );
+      const currentWorld = this.camera.viewportToWorld(point.x, point.y);
+      this.camera.panByWorld(
+        previousWorld.x - currentWorld.x,
+        previousWorld.z - currentWorld.z,
+      );
     }
     this.lastPointer = point;
-    this.mouseWorld = this.camera.screenToWorld(point.x, point.y);
+    this.mouseWorld = this.camera.viewportToWorld(point.x, point.y);
     if (
       this.mode === "edit" &&
       this.paintButton >= 0 &&
@@ -103,10 +113,10 @@ export class InputController {
 
   /** @param {PointerEvent} event */
   #onPointerDown(event) {
-    const point = this.#canvasPoint(event);
+    const point = this.#viewportPoint(event);
     this.lastPointer = point;
     this.pointerDown = { ...point, button: event.button };
-    this.mouseWorld = this.camera.screenToWorld(point.x, point.y);
+    this.mouseWorld = this.camera.viewportToWorld(point.x, point.y);
     this.canvas.setPointerCapture(event.pointerId);
     if (event.button === 1) {
       this.panning = true;
@@ -127,13 +137,18 @@ export class InputController {
 
   /** @param {PointerEvent} event */
   #onPointerUp(event) {
-    const point = this.#canvasPoint(event);
+    const point = this.#viewportPoint(event);
     if (event.button === 1) this.panning = false;
     if (event.button === 2) this.rightHeld = false;
     if (event.button === this.paintButton) this.paintButton = -1;
     const moved = Math.hypot(point.x - this.pointerDown.x, point.y - this.pointerDown.y);
-    if (this.mode === "play" && event.button === 0 && moved < 5 && !this.panning) {
-      const world = this.camera.screenToWorld(point.x, point.y);
+    if (
+      this.mode === "play"
+      && event.button === 0
+      && moved < POINTER_CLICK_SLOP_VIEWPORT_UNITS
+      && !this.panning
+    ) {
+      const world = this.camera.viewportToWorld(point.x, point.y);
       this.actions.pinAt(world.x, world.z);
     }
     if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
@@ -158,7 +173,11 @@ export class InputController {
     event.preventDefault();
     const bounds = this.canvas.getBoundingClientRect();
     const factor = Math.exp(-event.deltaY * 0.0015);
-    this.camera.zoomAt(event.clientX - bounds.left, event.clientY - bounds.top, factor);
+    this.camera.zoomAtViewport(
+      event.clientX - bounds.left,
+      event.clientY - bounds.top,
+      factor,
+    );
   }
 
   /** @param {KeyboardEvent} event */

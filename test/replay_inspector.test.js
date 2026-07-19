@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SCHEMA_VERSION } from "../src/config.js";
+import {
+  PARTICLE_PROFILE_M02,
+  PARTICLE_PROFILE_M0_2_5,
+  SCHEMA_VERSION,
+} from "../src/config.js";
 import { FixedStepRuntime } from "../src/runtime/fixed_step_runtime.js";
 import { GridMap } from "../src/sim/grid_map.js";
 import { ArenaScenario } from "../src/sim/scenario.js";
@@ -13,12 +17,14 @@ function comparable(simulation) {
     seed: snapshot.seed,
     rngState: snapshot.rngState,
     tick: snapshot.tick,
+    particleProfile: snapshot.particleProfile,
     player: snapshot.player,
     rocks: snapshot.rocks,
     projectiles: snapshot.projectiles,
     particles: snapshot.particles,
     recentEvents: snapshot.recentEvents,
     pools: snapshot.pools,
+    debugFlags: snapshot.debugFlags,
   };
 }
 
@@ -73,32 +79,82 @@ test("snapshots and exported recordings cannot mutate simulation history", () =>
   assert.equal(simulation.commandLog.toArray()[0].command.move.x, 5);
 });
 
-test("snapshot, runtime, and recording schema are v3 while scenarios remain v2", () => {
-  const simulation = new Simulation({ particleWallCollision: false });
+test("snapshot, runtime, and recording schema are v4 while scenarios remain v2", () => {
+  const simulation = new Simulation({
+    particleBounce: false,
+    particleWallCollision: false,
+  });
   const runtime = new FixedStepRuntime({ simulation });
   const snapshot = simulation.snapshot();
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 3);
-  assert.equal(snapshot.schemaVersion, 3);
-  assert.equal(runtime.metrics().schemaVersion, 3);
-  assert.equal(recording.schemaVersion, 3);
+  assert.equal(SCHEMA_VERSION, 4);
+  assert.equal(snapshot.schemaVersion, 4);
+  assert.equal(runtime.metrics().schemaVersion, 4);
+  assert.equal(recording.schemaVersion, 4);
+  assert.equal(snapshot.particleProfile, PARTICLE_PROFILE_M0_2_5);
   assert.equal(snapshot.scenarioVersion, 2);
   assert.equal(recording.initialScenario.version, 2);
+  assert.equal(recording.configuration.particleProfile, PARTICLE_PROFILE_M0_2_5);
+  assert.equal(recording.configuration.particleBounce, false);
   assert.equal(recording.configuration.particleWallCollision, false);
+  assert.equal(Simulation.replay(recording).debugFlags.particleBounce, false);
   assert.equal(Simulation.replay(recording).debugFlags.particleWallCollision, false);
 });
 
-test("schema-3 recordings capture the initial particle collision mode", () => {
-  const simulation = new Simulation();
+test("schema-4 recordings capture initial particle profile and collision modes", () => {
+  const simulation = new Simulation({
+    particleProfile: PARTICLE_PROFILE_M02,
+    particleBounce: true,
+  });
   simulation.tick({
-    type: "setDebugFlag",
-    name: "particleWallCollision",
-    value: false,
+    actions: [
+      { type: "setDebugFlag", name: "particleBounce", value: false },
+      { type: "setDebugFlag", name: "particleWallCollision", value: false },
+    ],
   });
   const recording = simulation.exportCommandLog();
+  assert.equal(recording.configuration.particleProfile, PARTICLE_PROFILE_M02);
+  assert.equal(recording.configuration.particleBounce, true);
   assert.equal(recording.configuration.particleWallCollision, true);
   const replayed = Simulation.replay(recording);
+  assert.equal(replayed.particleProfile, PARTICLE_PROFILE_M02);
+  assert.equal(replayed.debugFlags.particleBounce, false);
   assert.equal(replayed.debugFlags.particleWallCollision, false);
+  assert.deepEqual(comparable(replayed), comparable(simulation));
+});
+
+test("schema-4 recordings normalize the temporary m0.25 profile spelling", () => {
+  const simulation = new Simulation({ particleBurstCount: 4 });
+  simulation.tick({ cast: { x: 11.5, z: 19.5 } });
+  const recording = simulation.exportCommandLog();
+  recording.configuration.particleProfile = "m0.25-balanced";
+
+  const replayed = Simulation.replay(recording);
+  assert.equal(replayed.particleProfile, PARTICLE_PROFILE_M0_2_5);
+  assert.deepEqual(comparable(replayed), comparable(simulation));
+});
+
+test("schema-3 recordings select the exact legacy M0.2 particle profile", () => {
+  const map = new GridMap(8, 6, undefined, { x: 1.5, z: 2.5 });
+  map.set(3, 2, 1);
+  const simulation = new Simulation({
+    map,
+    seed: 0x5a17,
+    particleBurstCount: 8,
+    particleProfile: PARTICLE_PROFILE_M02,
+    particleBounce: false,
+  });
+  for (let tick = 0; tick < 20; tick += 1) {
+    simulation.tick(tick === 0 ? { cast: { x: 4.5, z: 2.5 } } : null);
+  }
+  const recording = simulation.exportCommandLog();
+  recording.schemaVersion = 3;
+  delete recording.configuration.particleProfile;
+  delete recording.configuration.particleBounce;
+
+  const replayed = Simulation.replay(recording);
+  assert.equal(replayed.particleProfile, PARTICLE_PROFILE_M02);
+  assert.equal(replayed.debugFlags.particleBounce, false);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
 
@@ -106,7 +162,13 @@ test("schema-2 recordings replay with legacy non-colliding particles", () => {
   const map = new GridMap(6, 5, undefined, { x: 2.5, z: 2.5 });
   map.set(1, 2, 1);
   map.set(3, 2, 1);
-  const simulation = new Simulation({ map, seed: 0x20_02, particleBurstCount: 64 });
+  const simulation = new Simulation({
+    map,
+    seed: 0x20_02,
+    particleBurstCount: 64,
+    particleProfile: PARTICLE_PROFILE_M02,
+    particleBounce: false,
+  });
   const commands = [];
   for (let tick = 0; tick < 60; tick += 1) {
     const command = tick === 0 ? { cast: { x: 4.5, z: 2.5 } } : null;
@@ -119,6 +181,8 @@ test("schema-2 recordings replay with legacy non-colliding particles", () => {
   legacyRecording.schemaVersion = 2;
   delete legacyRecording.configuration.particleWallCollision;
   const replayed = Simulation.replay(legacyRecording);
+  assert.equal(replayed.particleProfile, PARTICLE_PROFILE_M02);
+  assert.equal(replayed.debugFlags.particleBounce, false);
   assert.equal(replayed.debugFlags.particleWallCollision, false);
   assert.equal(replayed.particles.wallBounces, 0);
 
@@ -129,6 +193,8 @@ test("schema-2 recordings replay with legacy non-colliding particles", () => {
     projectileCapacity: legacyRecording.configuration.projectileCapacity,
     particleCapacity: legacyRecording.configuration.particleCapacity,
     particleBurstCount: legacyRecording.configuration.particleBurstCount,
+    particleProfile: PARTICLE_PROFILE_M02,
+    particleBounce: false,
     particleWallCollision: false,
   });
   for (const command of commands) expected.tick(command);

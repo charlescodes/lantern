@@ -1,6 +1,6 @@
 # Project Lantern — MVP 0: Debug Arena
 
-> **Historical contract:** M0 is complete. The implemented solid-body/explosion-force and map-colliding-particle extensions are specified separately in `lantern_mvp_blast_physics.md` and `lantern_mvp_particle_collision.md`.
+> **Historical contract:** M0 is complete. Later solid-body, particle-collision, and particle-lifecycle extensions are specified in `lantern_mvp_blast_physics.md`, `lantern_mvp_particle_collision.md`, and `lantern_mvp_particle_lifecycle.md`.
 
 > **Status:** implementation contract · **Runtime:** browser JavaScript ES modules (`// @ts-check`) · **Goal:** prove the simulation skeleton, collision model, projectile/particle path, and debug/probe workflow before art, 3D rendering, AI, networking, audio, or lighting.
 
@@ -29,10 +29,10 @@ ground plane = X/Z
 vertical     = Y
 1 world unit = 1 meter
 map cell     = 1.0 m × 1.0 m
-debug scale  = 32 px/m at zoom=1
+camera view  = 24 m visible height by default; zoom range 4–64 m
 ```
 
-The observed `32 px` wall module becomes a convenient **display scale**, not simulation resolution. A later ~`1.8 m` character appears near `58 px` tall at this scale. Do not quantize motion to cells: the grid is authoring/broad-phase data; entities move continuously.
+The original Nox-inspired wall-module raster reference was only a bootstrap display hint and is superseded by the M0.2.5 metric-camera correction. Raster scale is derived from the current viewport and visible world height; it is not world or simulation state. Do not quantize motion to cells: the grid is authoring/broad-phase data, and entities move continuously.
 
 ```text
 player radius = 0.30 m

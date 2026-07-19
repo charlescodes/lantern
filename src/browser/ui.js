@@ -113,6 +113,7 @@ export class ArenaUi {
       `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}`,
       `dropped ${snapshot.pools.particles.dropped}`,
       `wall bounces ${snapshot.pools.particles.wallBounces}`,
+      `ground bounces ${snapshot.pools.particles.groundBounces}`,
       `collision discards ${snapshot.pools.particles.collisionDiscards}`,
     ].join("  ·  ");
     this.rockBar.style.width = `${(snapshot.pools.rocks.active / snapshot.pools.rocks.capacity) * 100}%`;

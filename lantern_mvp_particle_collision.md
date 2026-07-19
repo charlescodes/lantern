@@ -6,6 +6,8 @@
 
 The M0 simulation skeleton and M0.1 blast-force model remain authoritative for their original scopes. This document owns particle/map collision, its observability, and recording compatibility.
 
+> **Historical lifecycle note:** M0.2.5 supersedes the lifetime, vertical-emission, radius, Ground-bounce default, and recording-schema details in this document. Wall collision remains owned by M0.2.
+
 ## 1. Player-visible behavior
 
 - Fireball sparks collide with solid cells and map boundaries in X/Z.
@@ -126,5 +128,6 @@ The performance target remains simulation p99 below 8 ms with bounded pools and 
 - damage, impulse, pressure, ownership, teams, or gameplay contacts from particles
 - particle radius collision or rendered-shape-perfect contact
 - finite wall height or particle traversal over walls
-- lifetime extension or a bounce-count kill rule
+- ~~lifetime extension~~ - addressed by the M0.2.5 `lantern_mvp_particle_lifecycle.md` supplement
+- an unbounded or configurable bounce-count rule
 - GPU particle physics or a general physics-engine integration

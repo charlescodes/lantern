@@ -38,6 +38,7 @@ test("10 simulated minutes of move/cast stress stay bounded with sim p99 below 8
   assert.equal(simulation.commandLog.length, simulation.commandLog.capacity);
   assert.equal(simulation.projectiles.dropped, 0);
   assert.equal(simulation.particles.dropped, 0);
+  assert.ok(simulation.particles.groundBounces > 0);
   assert.ok(heapAfter - heapBefore < 64 * 2 ** 20, "bounded histories exceeded 64 MiB");
   console.log(JSON.stringify({
     hardware: `${os.cpus()[0]?.model ?? "unknown CPU"} (${os.cpus().length} logical), ${Math.round(os.totalmem() / 2 ** 30)} GiB`,
@@ -46,6 +47,7 @@ test("10 simulated minutes of move/cast stress stay bounded with sim p99 below 8
     simP99Ms: Number(p99.toFixed(3)),
     heapDeltaMiB: Number(((heapAfter - heapBefore) / 2 ** 20).toFixed(2)),
     particleWallBounces: simulation.particles.wallBounces,
+    particleGroundBounces: simulation.particles.groundBounces,
     particleCollisionDiscards: simulation.particles.collisionDiscards,
   }));
 });

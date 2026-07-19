@@ -1,6 +1,6 @@
-# Lantern M0.2 / Blast Lab
+# Lantern M0.2.5 / Blast Lab
 
-A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, map-colliding sparks, and bounded runtime state before a production renderer is introduced.
+A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state before a production renderer is introduced.
 
 ## Run
 
@@ -26,7 +26,15 @@ npm run test:soak
 - Press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state.
 - Press `F` to focus the player. Use the wheel to zoom and MMB drag to pan.
 - Hover to inspect transiently. Click to pin or unpin an entity by stable ID.
-- Use **Spark walls** to bypass or enable particle/map sweeps. **Ground bounce** remains a separate vertical behavior.
+- Use **Spark walls** to bypass or enable particle/map sweeps. **Ground bounce** defaults on and independently controls the single ground rebound.
+
+## Spatial units and resolution
+
+Simulation truth uses meters, seconds, and kilograms. Player, rock, projectile, blast, and particle measurements are continuous metric values. The static collision map is a separate `1m × 1m` occupancy grid; entities are circles moving continuously across it rather than pixel- or cell-locked bodies.
+
+The debug camera stores a visible world height, defaulting to `24m` with a `4-64m` zoom range. Its world-to-viewport scale is derived from the current canvas bounds, so window size and device-pixel ratio do not alter simulation scale. Canvas backing pixels, fixed-screen debug strokes, text size, and pointer click tolerance remain isolated presentation concerns.
+
+There is no component-mask or ECS dispatch layer yet. Systems explicitly process the player and bounded typed-array pools. A future lighting field should declare its own metric cell size and consume explicit light/occluder data; it should not inherit either the collision grid resolution or the canvas raster resolution.
 
 ## Scenario editor
 
@@ -40,15 +48,17 @@ The player is 75 kg. Rock mass is derived from a 2,600 kg/m3 stone density and s
 
 An explosion applies an instantaneous, radial impulse to bodies within 2.5m. Surface-distance falloff, projected body area, and mass determine velocity change. Solid map cells completely block the impulse ray.
 
-The visual spark shower remains presentation-only. Spark centers sweep against solid map cells and map boundaries, may ricochet for their existing lifetime, and ignore the player, rocks, other particles, and gameplay force. Walls are infinitely tall for this X/Z test; particle Y does not bypass them. Wall response retains 80% of normal speed and 95% of tangential speed. Ground bounce is unchanged and independent.
+The visual spark shower remains presentation-only. Spark centers sweep against solid map cells and map boundaries and ignore the player, rocks, other particles, and gameplay force. Walls are infinitely tall for this X/Z test; particle Y does not bypass them. Wall response retains 80% of normal speed and 95% of tangential speed.
 
-See [lantern_mvp_blast_physics.md](./lantern_mvp_blast_physics.md) for the force model and [lantern_mvp_particle_collision.md](./lantern_mvp_particle_collision.md) for the M0.2 particle contract.
+Maximum spark size remains randomly sampled from `0.025-0.085m`. Size now drives a seeded `0.18-1.10s` lifetime, so larger embers persist longer while every visible radius shrinks smoothly toward zero. A lower-biased vertical distribution sends roughly 60% of a full burst to the ground. The first ground contact retains 45% vertical and 82% horizontal speed; the next ground contact settles the ember at `Y=0`, where it slows and remains visible until its assigned lifetime expires.
+
+See [lantern_mvp_blast_physics.md](./lantern_mvp_blast_physics.md) for the force model, [lantern_mvp_particle_collision.md](./lantern_mvp_particle_collision.md) for M0.2 wall behavior, and [lantern_mvp_particle_lifecycle.md](./lantern_mvp_particle_lifecycle.md) for M0.2.5 lifecycle behavior.
 
 ## Snapshots and recordings
 
-Snapshots, runtime metrics, and command recordings use schema v3. Scenario JSON remains v2. A v3 recording stores the initial **Spark walls** mode and replays later flag commands at their original tick boundaries. Schema-v2 recordings replay with spark wall collision disabled to preserve their non-colliding particle behavior.
+Snapshots, runtime metrics, and command recordings use schema v4. Scenario JSON remains v2. A v4 recording stores the particle profile plus initial **Ground bounce** and **Spark walls** modes, then replays later flag commands at their original tick boundaries. Schema-v3 recordings use the exact M0.2 particle profile; schema-v2 recordings additionally disable spark wall collision.
 
-Particle snapshots and inspector output include each spark's wall-bounce count. Pool telemetry exposes cumulative wall bounces and collision-safety discards without copying particle impacts into the main contact history.
+Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspector output uses the current radius and reports its maximum separately. Pool telemetry exposes cumulative wall bounces, ground bounces, and collision-safety discards without copying particle impacts into the main contact history.
 
 ## Runtime boundary
 
