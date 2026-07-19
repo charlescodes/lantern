@@ -5,6 +5,247 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+const SWEEP_EPSILON = 1e-12;
+const POINT_CORRECTION_EPSILON = 1e-5;
+
+/**
+ * Sweeps a point through the solid grid and writes the earliest contact into
+ * `out`. Map boundaries participate because GridMap#get treats out-of-bounds
+ * cells as solid.
+ * @param {{get(cx:number,cz:number):number}} map
+ * @param {number} startX
+ * @param {number} startZ
+ * @param {number} endX
+ * @param {number} endZ
+ * @param {{x:number,z:number,time:number,nx:number,nz:number,cx:number,cz:number}} out
+ */
+export function sweepPointAgainstGrid(map, startX, startZ, endX, endZ, out) {
+  if (
+    !Number.isFinite(startX) ||
+    !Number.isFinite(startZ) ||
+    !Number.isFinite(endX) ||
+    !Number.isFinite(endZ)
+  ) {
+    return false;
+  }
+
+  const deltaX = endX - startX;
+  const deltaZ = endZ - startZ;
+  let cx = Math.floor(startX);
+  let cz = Math.floor(startZ);
+
+  if (map.get(cx, cz) === 1) {
+    out.x = startX;
+    out.z = startZ;
+    out.time = 0;
+    out.cx = cx;
+    out.cz = cz;
+    const length = Math.hypot(deltaX, deltaZ);
+    if (length > SWEEP_EPSILON) {
+      out.nx = -deltaX / length;
+      out.nz = -deltaZ / length;
+    } else {
+      const left = startX - cx;
+      const right = cx + 1 - startX;
+      const top = startZ - cz;
+      const bottom = cz + 1 - startZ;
+      const nearest = Math.min(left, right, top, bottom);
+      out.nx = nearest === left ? -1 : nearest === right ? 1 : 0;
+      out.nz = nearest === top ? -1 : nearest === bottom ? 1 : 0;
+    }
+    return true;
+  }
+
+  const stepX = Math.sign(deltaX);
+  const stepZ = Math.sign(deltaZ);
+  if (stepX === 0 && stepZ === 0) return false;
+
+  const deltaTimeX = stepX === 0 ? Infinity : Math.abs(1 / deltaX);
+  const deltaTimeZ = stepZ === 0 ? Infinity : Math.abs(1 / deltaZ);
+  let nextTimeX = stepX > 0
+    ? (cx + 1 - startX) * deltaTimeX
+    : stepX < 0
+      ? (startX - cx) * deltaTimeX
+      : Infinity;
+  let nextTimeZ = stepZ > 0
+    ? (cz + 1 - startZ) * deltaTimeZ
+    : stepZ < 0
+      ? (startZ - cz) * deltaTimeZ
+      : Infinity;
+
+  while (Math.min(nextTimeX, nextTimeZ) <= 1 + SWEEP_EPSILON) {
+    if (nextTimeX + SWEEP_EPSILON < nextTimeZ) {
+      const hitCx = cx + stepX;
+      if (map.get(hitCx, cz) === 1) {
+        const time = clamp(nextTimeX, 0, 1);
+        out.x = startX + deltaX * time;
+        out.z = startZ + deltaZ * time;
+        out.time = time;
+        out.nx = -stepX;
+        out.nz = 0;
+        out.cx = hitCx;
+        out.cz = cz;
+        return true;
+      }
+      cx = hitCx;
+      nextTimeX += deltaTimeX;
+      continue;
+    }
+
+    if (nextTimeZ + SWEEP_EPSILON < nextTimeX) {
+      const hitCz = cz + stepZ;
+      if (map.get(cx, hitCz) === 1) {
+        const time = clamp(nextTimeZ, 0, 1);
+        out.x = startX + deltaX * time;
+        out.z = startZ + deltaZ * time;
+        out.time = time;
+        out.nx = 0;
+        out.nz = -stepZ;
+        out.cx = cx;
+        out.cz = hitCz;
+        return true;
+      }
+      cz = hitCz;
+      nextTimeZ += deltaTimeZ;
+      continue;
+    }
+
+    const hitCx = cx + stepX;
+    const hitCz = cz + stepZ;
+    const solidX = map.get(hitCx, cz) === 1;
+    const solidZ = map.get(cx, hitCz) === 1;
+    const solidDiagonal = map.get(hitCx, hitCz) === 1;
+    if (solidX || solidZ || solidDiagonal) {
+      const time = clamp(Math.min(nextTimeX, nextTimeZ), 0, 1);
+      out.x = startX + deltaX * time;
+      out.z = startZ + deltaZ * time;
+      out.time = time;
+      if (solidX && !solidZ) {
+        out.nx = -stepX;
+        out.nz = 0;
+        out.cx = hitCx;
+        out.cz = cz;
+      } else if (solidZ && !solidX) {
+        out.nx = 0;
+        out.nz = -stepZ;
+        out.cx = cx;
+        out.cz = hitCz;
+      } else {
+        const length = Math.hypot(deltaX, deltaZ);
+        out.nx = length > SWEEP_EPSILON ? -deltaX / length : -stepX * Math.SQRT1_2;
+        out.nz = length > SWEEP_EPSILON ? -deltaZ / length : -stepZ * Math.SQRT1_2;
+        if (solidX) {
+          out.cx = hitCx;
+          out.cz = cz;
+        } else if (solidZ) {
+          out.cx = cx;
+          out.cz = hitCz;
+        } else {
+          out.cx = hitCx;
+          out.cz = hitCz;
+        }
+      }
+      return true;
+    }
+
+    cx = hitCx;
+    cz = hitCz;
+    nextTimeX += deltaTimeX;
+    nextTimeZ += deltaTimeZ;
+  }
+
+  return false;
+}
+
+/**
+ * Moves a point out of solid cells along a preferred direction. The bounded
+ * pass count makes malformed or deeply out-of-bounds spawn points fail
+ * predictably instead of searching the whole map.
+ * @param {{get(cx:number,cz:number):number}} map
+ * @param {number} x
+ * @param {number} z
+ * @param {number} preferredNx
+ * @param {number} preferredNz
+ * @param {{x:number,z:number,cx:number,cz:number,passes:number}} out
+ * @param {number} [maximumPasses]
+ */
+export function sanitizePointAgainstGrid(
+  map,
+  x,
+  z,
+  preferredNx,
+  preferredNz,
+  out,
+  maximumPasses = 8,
+) {
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(z) ||
+    !Number.isFinite(preferredNx) ||
+    !Number.isFinite(preferredNz)
+  ) {
+    return false;
+  }
+
+  const preferredLength = Math.hypot(preferredNx, preferredNz);
+  const nx = preferredLength > SWEEP_EPSILON ? preferredNx / preferredLength : 0;
+  const nz = preferredLength > SWEEP_EPSILON ? preferredNz / preferredLength : 0;
+  const passes = Math.max(0, Math.min(8, Math.trunc(maximumPasses)));
+  let usedPasses = 0;
+
+  while (usedPasses < passes) {
+    const cx = Math.floor(x);
+    const cz = Math.floor(z);
+    if (map.get(cx, cz) !== 1) {
+      out.x = x;
+      out.z = z;
+      out.cx = cx;
+      out.cz = cz;
+      out.passes = usedPasses;
+      return true;
+    }
+
+    if (preferredLength > SWEEP_EPSILON) {
+      let exitTimeX = Infinity;
+      let exitTimeZ = Infinity;
+      if (nx > SWEEP_EPSILON) {
+        exitTimeX = (cx + 1 + POINT_CORRECTION_EPSILON - x) / nx;
+      } else if (nx < -SWEEP_EPSILON) {
+        exitTimeX = (cx - POINT_CORRECTION_EPSILON - x) / nx;
+      }
+      if (nz > SWEEP_EPSILON) {
+        exitTimeZ = (cz + 1 + POINT_CORRECTION_EPSILON - z) / nz;
+      } else if (nz < -SWEEP_EPSILON) {
+        exitTimeZ = (cz - POINT_CORRECTION_EPSILON - z) / nz;
+      }
+      const exitTime = Math.min(exitTimeX, exitTimeZ);
+      if (!Number.isFinite(exitTime) || exitTime < 0) break;
+      x += nx * exitTime;
+      z += nz * exitTime;
+    } else {
+      const left = x - cx;
+      const right = cx + 1 - x;
+      const top = z - cz;
+      const bottom = cz + 1 - z;
+      const nearest = Math.min(left, right, top, bottom);
+      if (nearest === left) x = cx - POINT_CORRECTION_EPSILON;
+      else if (nearest === right) x = cx + 1 + POINT_CORRECTION_EPSILON;
+      else if (nearest === top) z = cz - POINT_CORRECTION_EPSILON;
+      else z = cz + 1 + POINT_CORRECTION_EPSILON;
+    }
+    usedPasses += 1;
+  }
+
+  const cx = Math.floor(x);
+  const cz = Math.floor(z);
+  out.x = x;
+  out.z = z;
+  out.cx = cx;
+  out.cz = cz;
+  out.passes = usedPasses;
+  return map.get(cx, cz) !== 1;
+}
+
 /**
  * Writes circle-vs-cell contact data into a reusable object.
  * @param {number} x

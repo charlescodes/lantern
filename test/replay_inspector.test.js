@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { SCHEMA_VERSION } from "../src/config.js";
+import { FixedStepRuntime } from "../src/runtime/fixed_step_runtime.js";
+import { GridMap } from "../src/sim/grid_map.js";
+import { ArenaScenario } from "../src/sim/scenario.js";
 import { Simulation } from "../src/sim/simulation.js";
 
 function comparable(simulation) {
@@ -67,4 +71,66 @@ test("snapshots and exported recordings cannot mutate simulation history", () =>
   assert.equal(simulation.impactEvents.toArray()[0].x, originalEventX);
   assert.equal(simulation.commandLogMap.cells[0], 1);
   assert.equal(simulation.commandLog.toArray()[0].command.move.x, 5);
+});
+
+test("snapshot, runtime, and recording schema are v3 while scenarios remain v2", () => {
+  const simulation = new Simulation({ particleWallCollision: false });
+  const runtime = new FixedStepRuntime({ simulation });
+  const snapshot = simulation.snapshot();
+  const recording = simulation.exportCommandLog();
+  assert.equal(SCHEMA_VERSION, 3);
+  assert.equal(snapshot.schemaVersion, 3);
+  assert.equal(runtime.metrics().schemaVersion, 3);
+  assert.equal(recording.schemaVersion, 3);
+  assert.equal(snapshot.scenarioVersion, 2);
+  assert.equal(recording.initialScenario.version, 2);
+  assert.equal(recording.configuration.particleWallCollision, false);
+  assert.equal(Simulation.replay(recording).debugFlags.particleWallCollision, false);
+});
+
+test("schema-3 recordings capture the initial particle collision mode", () => {
+  const simulation = new Simulation();
+  simulation.tick({
+    type: "setDebugFlag",
+    name: "particleWallCollision",
+    value: false,
+  });
+  const recording = simulation.exportCommandLog();
+  assert.equal(recording.configuration.particleWallCollision, true);
+  const replayed = Simulation.replay(recording);
+  assert.equal(replayed.debugFlags.particleWallCollision, false);
+  assert.deepEqual(comparable(replayed), comparable(simulation));
+});
+
+test("schema-2 recordings replay with legacy non-colliding particles", () => {
+  const map = new GridMap(6, 5, undefined, { x: 2.5, z: 2.5 });
+  map.set(1, 2, 1);
+  map.set(3, 2, 1);
+  const simulation = new Simulation({ map, seed: 0x20_02, particleBurstCount: 64 });
+  const commands = [];
+  for (let tick = 0; tick < 60; tick += 1) {
+    const command = tick === 0 ? { cast: { x: 4.5, z: 2.5 } } : null;
+    simulation.tick(command);
+    commands.push(command);
+  }
+  assert.ok(simulation.particles.wallBounces > 0);
+
+  const legacyRecording = simulation.exportCommandLog();
+  legacyRecording.schemaVersion = 2;
+  delete legacyRecording.configuration.particleWallCollision;
+  const replayed = Simulation.replay(legacyRecording);
+  assert.equal(replayed.debugFlags.particleWallCollision, false);
+  assert.equal(replayed.particles.wallBounces, 0);
+
+  const expected = new Simulation({
+    scenario: ArenaScenario.fromJSON(legacyRecording.initialScenario),
+    seed: legacyRecording.seed,
+    rockCapacity: legacyRecording.configuration.rockCapacity,
+    projectileCapacity: legacyRecording.configuration.projectileCapacity,
+    particleCapacity: legacyRecording.configuration.particleCapacity,
+    particleBurstCount: legacyRecording.configuration.particleBurstCount,
+    particleWallCollision: false,
+  });
+  for (const command of commands) expected.tick(command);
+  assert.deepEqual(comparable(replayed), comparable(expected));
 });

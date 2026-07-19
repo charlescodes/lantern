@@ -45,19 +45,43 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
 
 test("particle swap-and-pop copies every component and flags", () => {
   const pool = new ParticlePool(2);
+  assert.equal(pool.wallBounces, 0);
+  assert.equal(pool.collisionDiscards, 0);
   pool.spawn({ x: 1, y: 2, z: 3, vx: 4, vy: 5, vz: 6, lifetime: 7, size: 0.1 });
   const lastId = pool.spawn({ x: 10, y: 20, z: 30, vx: 40, vy: 50, vz: 60, lifetime: 70, size: 0.25 });
   pool.age[1] = 12;
   pool.bounced[1] = 1;
+  pool.wallBounceCount[1] = 9;
+  pool.wallBounces = 14;
+  pool.collisionDiscards = 3;
   pool.removeSwap(0);
   assert.equal(pool.activeCount, 1);
   assert.deepEqual(
     {
       id: pool.id[0], x: pool.x[0], y: pool.y[0], z: pool.z[0], vx: pool.vx[0], vy: pool.vy[0],
       vz: pool.vz[0], age: pool.age[0], lifetime: pool.lifetime[0], size: pool.size[0], bounced: pool.bounced[0],
+      wallBounceCount: pool.wallBounceCount[0],
     },
-    { id: lastId, x: 10, y: 20, z: 30, vx: 40, vy: 50, vz: 60, age: 12, lifetime: 70, size: 0.25, bounced: 1 },
+    {
+      id: lastId,
+      x: 10,
+      y: 20,
+      z: 30,
+      vx: 40,
+      vy: 50,
+      vz: 60,
+      age: 12,
+      lifetime: 70,
+      size: 0.25,
+      bounced: 1,
+      wallBounceCount: 9,
+    },
   );
+  assert.equal(pool.wallBounces, 14);
+  assert.equal(pool.collisionDiscards, 3);
+  pool.reset();
+  assert.equal(pool.wallBounces, 0);
+  assert.equal(pool.collisionDiscards, 0);
 });
 
 test("rock swap-and-pop copies authored identity, mass, and velocity", () => {

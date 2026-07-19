@@ -173,8 +173,8 @@ The command log stores the initial scenario and rock pool configuration. Replay 
 - projectile momentum transfer separate from explosion impulse
 - angular velocity, torque, rolling, and irregular rock shapes
 - dynamic-body blast occlusion
-- particle collision with map walls
+- ~~particle collision with map walls~~ - addressed by the M0.2 `lantern_mvp_particle_collision.md` supplement
 - entity-component-system migration
 - fixed-point or cross-runtime lockstep guarantees
 
-M0.1 keeps the force path independent from particles so later particle collision work cannot change gameplay physics.
+M0.1 keeps the force path independent from particles. M0.2 adds presentation-only map collision without changing gameplay physics.

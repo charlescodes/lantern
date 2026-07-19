@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { firstSolidContact, resolveCircleAgainstGrid } from "../src/sim/collision.js";
+import {
+  firstSolidContact,
+  resolveCircleAgainstGrid,
+  sanitizePointAgainstGrid,
+  sweepPointAgainstGrid,
+} from "../src/sim/collision.js";
 import { GridMap } from "../src/sim/grid_map.js";
 import { Simulation } from "../src/sim/simulation.js";
 
@@ -56,4 +61,61 @@ test("corner contact remains stable while tangential motion slides", () => {
   const scratch = { nx: 0, nz: 0, penetration: 0, px: 0, pz: 0, cx: 0, cz: 0 };
   assert.equal(firstSolidContact(map, simulation.player.x, simulation.player.z, simulation.player.radius, scratch), false);
   assert.ok(Number.isFinite(simulation.player.vx) && Number.isFinite(simulation.player.vz));
+});
+
+test("swept points report deterministic axial and diagonal grid contacts", () => {
+  const map = new GridMap(6, 6, undefined, { x: 1.5, z: 1.5 });
+  const hit = { x: 0, z: 0, time: 0, nx: 0, nz: 0, cx: 0, cz: 0 };
+  map.set(3, 1, 1);
+  assert.equal(sweepPointAgainstGrid(map, 1.5, 1.5, 4.5, 1.5, hit), true);
+  assert.deepEqual(
+    { x: hit.x, z: hit.z, time: hit.time, nx: hit.nx, nz: hit.nz, cx: hit.cx, cz: hit.cz },
+    { x: 3, z: 1.5, time: 0.5, nx: -1, nz: 0, cx: 3, cz: 1 },
+  );
+
+  map.set(3, 1, 0);
+  map.set(2, 2, 1);
+  assert.equal(sweepPointAgainstGrid(map, 1.5, 1.5, 3.5, 3.5, hit), true);
+  assert.equal(hit.x, 2);
+  assert.equal(hit.z, 2);
+  assert.equal(hit.time, 0.25);
+  assert.equal(hit.cx, 2);
+  assert.equal(hit.cz, 2);
+  assert.ok(Math.abs(hit.nx + Math.SQRT1_2) < 1e-12);
+  assert.ok(Math.abs(hit.nz + Math.SQRT1_2) < 1e-12);
+});
+
+test("swept points resolve closed corners and map boundaries without skimming", () => {
+  const map = new GridMap(5, 5, undefined, { x: 1.5, z: 1.5 });
+  const hit = { x: 0, z: 0, time: 0, nx: 0, nz: 0, cx: 0, cz: 0 };
+  map.set(2, 1, 1);
+  map.set(1, 2, 1);
+  assert.equal(sweepPointAgainstGrid(map, 1.5, 1.5, 3.5, 3.5, hit), true);
+  assert.deepEqual({ cx: hit.cx, cz: hit.cz }, { cx: 2, cz: 1 });
+  assert.ok(Math.abs(hit.nx + Math.SQRT1_2) < 1e-12);
+  assert.ok(Math.abs(hit.nz + Math.SQRT1_2) < 1e-12);
+
+  map.set(2, 1, 0);
+  map.set(1, 2, 0);
+  assert.equal(sweepPointAgainstGrid(map, 1.5, 1.5, -1, 1.5, hit), true);
+  assert.ok(Math.abs(hit.x) < 1e-12);
+  assert.ok(Math.abs(hit.time - 0.6) < 1e-12);
+  assert.deepEqual(
+    { z: hit.z, nx: hit.nx, nz: hit.nz, cx: hit.cx, cz: hit.cz },
+    { z: 1.5, nx: 1, nz: 0, cx: -1, cz: 1 },
+  );
+});
+
+test("particle spawn points correct through at most eight solid cells", () => {
+  const map = new GridMap(12, 3, undefined, { x: 0.5, z: 1.5 });
+  const corrected = { x: 0, z: 0, cx: 0, cz: 0, passes: 0 };
+  map.set(2, 1, 1);
+  assert.equal(sanitizePointAgainstGrid(map, 2.5, 1.5, -1, 0, corrected), true);
+  assert.equal(corrected.passes, 1);
+  assert.equal(map.get(Math.floor(corrected.x), Math.floor(corrected.z)), 0);
+
+  for (let cx = 1; cx <= 9; cx += 1) map.set(cx, 1, 1);
+  assert.equal(sanitizePointAgainstGrid(map, 9.5, 1.5, -1, 0, corrected), false);
+  assert.equal(corrected.passes, 8);
+  assert.equal(map.get(corrected.cx, corrected.cz), 1);
 });

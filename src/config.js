@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 2;
 
@@ -39,6 +39,12 @@ export const PARTICLE = Object.freeze({
   burstCount: 224,
   gravity: -9.81,
   initialY: 0.1,
+  maximumHorizontalSpeed: 7,
+  wallNormalRetention: 0.8,
+  wallTangentialRetention: 0.95,
+  maximumWallContactsPerTick: 4,
+  wallSeparationEpsilon: 1e-5,
+  spawnCorrectionPasses: 8,
 });
 
 export const ROCK_DENSITY_KG_M3 = 2_600;
@@ -93,4 +99,5 @@ export const DEFAULT_DEBUG_FLAGS = Object.freeze({
   explosionForces: true,
   particleStems: true,
   particleBounce: false,
+  particleWallCollision: true,
 });

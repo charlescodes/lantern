@@ -179,6 +179,8 @@ export class ParticlePool {
     this.capacity = capacity;
     this.activeCount = 0;
     this.dropped = 0;
+    this.wallBounces = 0;
+    this.collisionDiscards = 0;
     this.nextId = 1;
     this.id = new Uint32Array(capacity);
     this.x = new Float32Array(capacity);
@@ -191,11 +193,14 @@ export class ParticlePool {
     this.lifetime = new Float32Array(capacity);
     this.size = new Float32Array(capacity);
     this.bounced = new Uint8Array(capacity);
+    this.wallBounceCount = new Uint16Array(capacity);
   }
 
   reset() {
     this.activeCount = 0;
     this.dropped = 0;
+    this.wallBounces = 0;
+    this.collisionDiscards = 0;
     this.nextId = 1;
   }
 
@@ -219,6 +224,7 @@ export class ParticlePool {
     this.lifetime[index] = value.lifetime;
     this.size[index] = value.size;
     this.bounced[index] = 0;
+    this.wallBounceCount[index] = 0;
     this.activeCount += 1;
     return id;
   }
@@ -239,6 +245,7 @@ export class ParticlePool {
       this.lifetime[index] = this.lifetime[last];
       this.size[index] = this.size[last];
       this.bounced[index] = this.bounced[last];
+      this.wallBounceCount[index] = this.wallBounceCount[last];
     }
     this.activeCount = last;
     return true;

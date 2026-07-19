@@ -109,7 +109,12 @@ export class ArenaUi {
     ].join("\n");
     this.rockPool.textContent = `${snapshot.pools.rocks.active} / ${snapshot.pools.rocks.capacity}  ·  dropped ${snapshot.pools.rocks.dropped}  ·  caps ${snapshot.pools.rocks.speedClamped}`;
     this.projectilePool.textContent = `${snapshot.pools.projectiles.active} / ${snapshot.pools.projectiles.capacity}  ·  dropped ${snapshot.pools.projectiles.dropped}`;
-    this.particlePool.textContent = `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}  ·  dropped ${snapshot.pools.particles.dropped}`;
+    this.particlePool.textContent = [
+      `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}`,
+      `dropped ${snapshot.pools.particles.dropped}`,
+      `wall bounces ${snapshot.pools.particles.wallBounces}`,
+      `collision discards ${snapshot.pools.particles.collisionDiscards}`,
+    ].join("  ·  ");
     this.rockBar.style.width = `${(snapshot.pools.rocks.active / snapshot.pools.rocks.capacity) * 100}%`;
     this.projectileBar.style.width = `${(snapshot.pools.projectiles.active / snapshot.pools.projectiles.capacity) * 100}%`;
     this.particleBar.style.width = `${(snapshot.pools.particles.active / snapshot.pools.particles.capacity) * 100}%`;
