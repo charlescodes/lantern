@@ -17,6 +17,7 @@ test("10 simulated minutes of move/cast stress stay bounded with sim p99 below 8
       cast: tick % 15 === 0 ? { x: 11.5, z: 19.5 } : null,
     });
     samples[tick] = performance.now() - started;
+    assert.ok(simulation.rocks.activeCount <= simulation.rocks.capacity);
     assert.ok(simulation.projectiles.activeCount <= simulation.projectiles.capacity);
     assert.ok(simulation.particles.activeCount <= simulation.particles.capacity);
   }

@@ -1,5 +1,7 @@
 # Project Lantern — MVP 0: Debug Arena
 
+> **Historical contract:** M0 is complete. The implemented solid-body and explosion-force extension is specified separately in `lantern_mvp_blast_physics.md`.
+
 > **Status:** implementation contract · **Runtime:** browser JavaScript ES modules (`// @ts-check`) · **Goal:** prove the simulation skeleton, collision model, projectile/particle path, and debug/probe workflow before art, 3D rendering, AI, networking, audio, or lighting.
 
 ## 0. Product sentence

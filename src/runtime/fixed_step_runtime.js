@@ -1,6 +1,6 @@
 // @ts-check
 
-import { HISTORY, SIMULATION } from "../config.js";
+import { HISTORY, SCHEMA_VERSION, SIMULATION } from "../config.js";
 import { NumericRingBuffer, percentile } from "../core/ring_buffer.js";
 import { canonicalizeCommand } from "../sim/simulation.js";
 
@@ -175,7 +175,7 @@ export class FixedStepRuntime {
     const frames = this.frameSamples.toSortedArray();
     const medianFrame = percentile(frames, 0.5);
     return {
-      schemaVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
       paused: this.paused,
       accumulator: this.accumulator,
       alpha: this.paused ? 0 : this.accumulator / SIMULATION.dt,

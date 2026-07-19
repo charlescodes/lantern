@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#101511">
-    <title>Lantern M0 · Debug Arena</title>
+    <title>Lantern M0.1 · Blast Lab</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body data-mode="play">
@@ -12,8 +12,8 @@
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="eyebrow">Project Lantern / MVP 0</p>
-          <h1>Debug Arena</h1>
+          <p class="eyebrow">Project Lantern / MVP 0.1</p>
+          <h1>Blast Lab</h1>
         </div>
       </div>
       <div class="run-summary" aria-label="Simulation status">
@@ -33,10 +33,19 @@
     <main class="workspace">
       <section class="arena-shell" aria-label="Lantern simulation viewport">
         <canvas id="arena" tabindex="0"></canvas>
+        <div class="editor-palette" aria-label="Scenario authoring tools">
+          <span>AUTHOR</span>
+          <button type="button" data-editor-tool="wall" aria-pressed="true">Wall</button>
+          <button type="button" data-editor-tool="small" aria-pressed="false">Rock .1m</button>
+          <button type="button" data-editor-tool="medium" aria-pressed="false">Rock .3m</button>
+          <button type="button" data-editor-tool="large" aria-pressed="false">Rock .9m</button>
+          <button type="button" data-editor-tool="erase" aria-pressed="false">Erase</button>
+          <button id="restore-scenario-button" type="button">Restore positions</button>
+        </div>
         <div class="viewport-rail">
           <span id="pointer-value">x -- z -- · cell --</span>
           <span class="mode-hint play-hint">RMB move · LMB cast · click pins</span>
-          <span class="mode-hint edit-hint">LMB paints wall · RMB erases</span>
+          <span class="mode-hint edit-hint">LMB applies selected tool · RMB erases · simulation paused</span>
         </div>
         <div class="corner-readout" aria-hidden="true">
           <span>X</span><i></i><span>Z</span>
@@ -54,6 +63,10 @@
 
         <section class="panel-section">
           <div class="section-heading"><h2>Bounded pools</h2><span>dense SoA</span></div>
+          <div class="pool-readout">
+            <div><span>Solid rocks</span><output id="rock-pool">0 / 64</output></div>
+            <div class="meter rock-meter"><i id="rock-bar"></i></div>
+          </div>
           <div class="pool-readout">
             <div><span>Projectiles</span><output id="projectile-pool">0 / 128</output></div>
             <div class="meter"><i id="projectile-bar"></i></div>
@@ -75,21 +88,22 @@
             <label><input type="checkbox" data-debug-flag="gridCoordinates" checked> Coordinates</label>
             <label><input type="checkbox" data-debug-flag="velocityVectors" checked> Vectors</label>
             <label><input type="checkbox" data-debug-flag="contacts" checked> Contacts</label>
+            <label><input type="checkbox" data-debug-flag="explosionForces" checked> Blast forces</label>
             <label><input type="checkbox" data-debug-flag="particleStems" checked> Height stems</label>
             <label><input type="checkbox" data-debug-flag="particleBounce"> Ground bounce</label>
           </div>
         </section>
 
         <section class="panel-section">
-          <div class="section-heading"><h2>Recent impacts</h2><span>ring buffer</span></div>
-          <pre id="events-output">No impacts recorded.</pre>
+          <div class="section-heading"><h2>Recent explosions</h2><span>ring buffer</span></div>
+          <pre id="events-output">No explosions recorded.</pre>
         </section>
 
         <section class="panel-section data-section">
           <div class="section-heading"><h2>Artifacts</h2><span>JSON-safe</span></div>
           <div class="button-grid">
-            <button id="save-map-button" type="button">Save map</button>
-            <button id="load-map-button" type="button">Load map</button>
+            <button id="save-map-button" type="button">Save scenario</button>
+            <button id="load-map-button" type="button">Load scenario</button>
             <button id="snapshot-button" type="button">Snapshot</button>
             <button id="command-log-button" type="button">Command log</button>
           </div>

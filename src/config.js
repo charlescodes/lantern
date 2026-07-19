@@ -1,7 +1,8 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const MAP_VERSION = 1;
+export const SCENARIO_VERSION = 2;
 
 export const SIMULATION = Object.freeze({
   tickHz: 60,
@@ -17,16 +18,18 @@ export const WORLD = Object.freeze({
 
 export const PLAYER = Object.freeze({
   radius: 0.3,
+  massKg: 75,
   desiredSpeed: 4.5,
   acceleration: 22,
   braking: 28,
+  externalDamping: 2,
 });
 
 export const PROJECTILE = Object.freeze({
   capacity: 128,
   radius: 0.12,
   speed: 9,
-  lifetime: 2,
+  lifetime: 4,
   cooldown: 0.2,
   spawnGap: 0.02,
 });
@@ -36,6 +39,45 @@ export const PARTICLE = Object.freeze({
   burstCount: 224,
   gravity: -9.81,
   initialY: 0.1,
+});
+
+export const ROCK_DENSITY_KG_M3 = 2_600;
+
+/** @param {number} radius */
+export function sphereMassKg(radius) {
+  return (4 / 3) * Math.PI * radius ** 3 * ROCK_DENSITY_KG_M3;
+}
+
+export const ROCK_ARCHETYPES = Object.freeze({
+  small: Object.freeze({ code: 1, radius: 0.1, massKg: sphereMassKg(0.1) }),
+  medium: Object.freeze({ code: 2, radius: 0.3, massKg: sphereMassKg(0.3) }),
+  large: Object.freeze({ code: 3, radius: 0.9, massKg: sphereMassKg(0.9) }),
+});
+
+export const ROCK = Object.freeze({
+  capacity: 64,
+  damping: 1.5,
+  settleSpeed: 0.02,
+  maxSpeed: 20,
+  wallRestitution: 0.18,
+  wallFriction: 0.2,
+});
+
+export const DYNAMIC_PHYSICS = Object.freeze({
+  solverIterations: 4,
+  penetrationSlop: 0.001,
+  positionCorrection: 0.8,
+  bodyRestitution: 0.1,
+  bodyFriction: 0.35,
+  maximumSubsteps: 8,
+  travelRadiusFraction: 0.5,
+});
+
+export const EXPLOSION = Object.freeze({
+  radius: 2.5,
+  pressureImpulse: 800,
+  originEpsilon: 0.0001,
+  debugTicks: 12,
 });
 
 export const HISTORY = Object.freeze({
@@ -48,6 +90,7 @@ export const DEFAULT_DEBUG_FLAGS = Object.freeze({
   gridCoordinates: true,
   velocityVectors: true,
   contacts: true,
+  explosionForces: true,
   particleStems: true,
   particleBounce: false,
 });

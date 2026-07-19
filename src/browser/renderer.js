@@ -1,5 +1,7 @@
 // @ts-check
 
+import { EXPLOSION, ROCK_ARCHETYPES } from "../config.js";
+
 const COLORS = Object.freeze({
   void: "#090c0b",
   floorA: "#111714",
@@ -13,10 +15,17 @@ const COLORS = Object.freeze({
   playerEdge: "#fff2bd",
   desired: "#68d6b5",
   velocity: "#f29d49",
+  externalVelocity: "#8fdcf2",
+  rockSmall: "#a7aa91",
+  rockMedium: "#828673",
+  rockLarge: "#676c5d",
+  rockEdge: "#d0d0b1",
   projectile: "#ff834d",
   projectileCore: "#ffe4a3",
   particle: "#ffbd59",
   contact: "#ff5b63",
+  explosion: "#efbd5f",
+  blocked: "#ff6f67",
   hover: "#69d4b3",
   selected: "#fff7d6",
   text: "#91a797",
@@ -57,7 +66,7 @@ export class DebugRenderer {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean}} view
    */
   render(snapshot, alpha, view) {
     this.resize();
@@ -78,12 +87,16 @@ export class DebugRenderer {
     context.lineJoin = "round";
 
     this.#drawMap(snapshot, view);
+    if (snapshot.debugFlags.explosionForces) this.#drawExplosionForces(snapshot);
     this.#drawParticles(snapshot);
+    this.#drawRocks(snapshot, alpha);
     this.#drawProjectiles(snapshot);
     this.#drawPlayer(snapshot, alpha);
     if (snapshot.debugFlags.contacts) this.#drawContacts(snapshot.contacts);
     this.#drawInspection(view.hover, view.selected);
-    if (view.mouseInside) this.#drawMouse(view.mouseWorld, view.mode);
+    if (view.mouseInside) {
+      this.#drawMouse(view.mouseWorld, view.mode, view.editorTool, view.placementValid);
+    }
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {{hover:Record<string,unknown>|null,selected:Record<string,unknown>|null}} view */
@@ -193,6 +206,95 @@ export class DebugRenderer {
     }
   }
 
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #drawRocks(snapshot, alpha) {
+    const context = this.context;
+    const line = 1 / this.camera.pixelsPerMeter;
+    for (const rock of snapshot.rocks) {
+      const x = rock.previousX + (rock.x - rock.previousX) * alpha;
+      const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
+      context.save();
+      context.translate(x + rock.radius * 0.1, z + rock.radius * 0.16);
+      context.scale(1, 0.52);
+      context.beginPath();
+      context.arc(0, 0, rock.radius * 0.95, 0, Math.PI * 2);
+      context.fillStyle = "rgba(0, 0, 0, 0.35)";
+      context.fill();
+      context.restore();
+
+      context.beginPath();
+      context.arc(x, z, rock.radius, 0, Math.PI * 2);
+      context.fillStyle = rock.archetype === "small"
+        ? COLORS.rockSmall
+        : rock.archetype === "medium"
+          ? COLORS.rockMedium
+          : COLORS.rockLarge;
+      context.fill();
+      context.strokeStyle = COLORS.rockEdge;
+      context.lineWidth = line * 1.5;
+      context.stroke();
+
+      if (rock.radius >= 0.25) {
+        context.beginPath();
+        context.moveTo(x - rock.radius * 0.48, z + rock.radius * 0.05);
+        context.lineTo(x - rock.radius * 0.08, z - rock.radius * 0.22);
+        context.lineTo(x + rock.radius * 0.34, z - rock.radius * 0.06);
+        context.strokeStyle = "rgba(35, 39, 32, 0.65)";
+        context.lineWidth = line * 1.2;
+        context.stroke();
+      }
+      if (snapshot.debugFlags.velocityVectors) {
+        this.#drawArrow(x, z, rock.vx * 0.3, rock.vz * 0.3, COLORS.velocity);
+      }
+    }
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
+  #drawExplosionForces(snapshot) {
+    const context = this.context;
+    const line = 1 / this.camera.pixelsPerMeter;
+    for (const event of snapshot.recentEvents) {
+      if (event.type !== "explosion") continue;
+      const age = snapshot.tick - event.tick;
+      if (age < 0 || age > EXPLOSION.debugTicks) continue;
+      const life = 1 - age / EXPLOSION.debugTicks;
+      context.save();
+      context.globalAlpha = 0.2 + life * 0.45;
+      context.beginPath();
+      context.arc(event.originX, event.originZ, event.radius, 0, Math.PI * 2);
+      context.strokeStyle = COLORS.explosion;
+      context.lineWidth = line * 1.5;
+      context.setLineDash([line * 5, line * 4]);
+      context.stroke();
+      context.setLineDash([]);
+      context.beginPath();
+      context.arc(event.originX, event.originZ, 0.08 + (1 - life) * 0.18, 0, Math.PI * 2);
+      context.fillStyle = COLORS.explosion;
+      context.fill();
+      for (const response of event.responses) {
+        if (!response?.position) continue;
+        context.beginPath();
+        context.moveTo(event.originX, event.originZ);
+        context.lineTo(response.position.x, response.position.z);
+        context.strokeStyle = response.blocked ? COLORS.blocked : COLORS.explosion;
+        context.lineWidth = response.blocked ? line * 2 : line;
+        if (response.blocked) context.setLineDash([line * 3, line * 3]);
+        context.stroke();
+        context.setLineDash([]);
+        if (!response.blocked && response.deltaVelocity) {
+          this.#drawArrow(
+            response.position.x,
+            response.position.z,
+            response.deltaVelocity.x * 0.35,
+            response.deltaVelocity.z * 0.35,
+            COLORS.externalVelocity,
+          );
+        }
+      }
+      context.restore();
+    }
+  }
+
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
   #drawProjectiles(snapshot) {
     const context = this.context;
@@ -240,6 +342,13 @@ export class DebugRenderer {
     if (snapshot.debugFlags.velocityVectors) {
       this.#drawArrow(x, z, player.vx * 0.25, player.vz * 0.25, COLORS.velocity);
       this.#drawArrow(x, z, player.desiredVx * 0.25, player.desiredVz * 0.25, COLORS.desired);
+      this.#drawArrow(
+        x,
+        z,
+        player.externalVx * 0.3,
+        player.externalVz * 0.3,
+        COLORS.externalVelocity,
+      );
     }
   }
 
@@ -299,16 +408,44 @@ export class DebugRenderer {
     }
   }
 
-  /** @param {{x:number,z:number}} mouse @param {string} mode */
-  #drawMouse(mouse, mode) {
+  /**
+   * @param {{x:number,z:number}} mouse
+   * @param {string} mode
+   * @param {string} editorTool
+   * @param {boolean} placementValid
+   */
+  #drawMouse(mouse, mode, editorTool, placementValid) {
     const context = this.context;
     const size = 7 / this.camera.pixelsPerMeter;
+    if (mode === "edit") {
+      const definition = Object.hasOwn(ROCK_ARCHETYPES, editorTool)
+        ? ROCK_ARCHETYPES[editorTool]
+        : null;
+      if (definition) {
+        const x = Math.round(mouse.x * 10) / 10;
+        const z = Math.round(mouse.z * 10) / 10;
+        context.beginPath();
+        context.arc(x, z, definition.radius, 0, Math.PI * 2);
+        context.fillStyle = placementValid ? "rgba(107, 200, 168, 0.2)" : "rgba(255, 111, 103, 0.2)";
+        context.fill();
+        context.strokeStyle = placementValid ? COLORS.hover : COLORS.blocked;
+        context.lineWidth = 1.5 / this.camera.pixelsPerMeter;
+        context.stroke();
+        return;
+      }
+      const cx = Math.floor(mouse.x);
+      const cz = Math.floor(mouse.z);
+      context.strokeStyle = editorTool === "erase" ? COLORS.blocked : COLORS.projectile;
+      context.lineWidth = 1.5 / this.camera.pixelsPerMeter;
+      context.strokeRect(cx + size * 0.2, cz + size * 0.2, 1 - size * 0.4, 1 - size * 0.4);
+      return;
+    }
     context.beginPath();
     context.moveTo(mouse.x - size, mouse.z);
     context.lineTo(mouse.x + size, mouse.z);
     context.moveTo(mouse.x, mouse.z - size);
     context.lineTo(mouse.x, mouse.z + size);
-    context.strokeStyle = mode === "edit" ? COLORS.projectile : COLORS.hover;
+    context.strokeStyle = COLORS.hover;
     context.lineWidth = 1 / this.camera.pixelsPerMeter;
     context.stroke();
   }

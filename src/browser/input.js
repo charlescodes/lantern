@@ -11,7 +11,8 @@ export class InputController {
    * reset:(newSeed:boolean)=>void,
    * toggleMode:()=>void,
    * focusPlayer:()=>void,
-   * pinAt:(x:number,z:number)=>void
+   * pinAt:(x:number,z:number)=>void,
+   * editAt:(tool:string,button:number,x:number,z:number)=>void
    * }} actions
    */
   constructor(canvas, camera, actions) {
@@ -19,6 +20,7 @@ export class InputController {
     this.camera = camera;
     this.actions = actions;
     this.mode = "play";
+    this.editorTool = "wall";
     this.mouseWorld = { x: 0, z: 0 };
     this.mouseInside = false;
     this.rightHeld = false;
@@ -44,6 +46,13 @@ export class InputController {
   setMode(mode) {
     this.mode = mode;
     this.rightHeld = false;
+    this.paintButton = -1;
+    this.lastPaintedCell = "";
+  }
+
+  /** @param {string} tool */
+  setEditorTool(tool) {
+    this.editorTool = tool;
     this.paintButton = -1;
     this.lastPaintedCell = "";
   }
@@ -83,7 +92,13 @@ export class InputController {
     }
     this.lastPointer = point;
     this.mouseWorld = this.camera.screenToWorld(point.x, point.y);
-    if (this.mode === "edit" && this.paintButton >= 0) this.#paintCurrentCell();
+    if (
+      this.mode === "edit" &&
+      this.paintButton >= 0 &&
+      (this.editorTool === "wall" || this.editorTool === "erase")
+    ) {
+      this.#editCurrentPoint();
+    }
   }
 
   /** @param {PointerEvent} event */
@@ -102,7 +117,7 @@ export class InputController {
       if (event.button === 0 || event.button === 2) {
         this.paintButton = event.button;
         this.lastPaintedCell = "";
-        this.#paintCurrentCell();
+        this.#editCurrentPoint();
       }
       return;
     }
@@ -117,20 +132,25 @@ export class InputController {
     if (event.button === 2) this.rightHeld = false;
     if (event.button === this.paintButton) this.paintButton = -1;
     const moved = Math.hypot(point.x - this.pointerDown.x, point.y - this.pointerDown.y);
-    if (event.button === 0 && moved < 5 && !this.panning) {
+    if (this.mode === "play" && event.button === 0 && moved < 5 && !this.panning) {
       const world = this.camera.screenToWorld(point.x, point.y);
       this.actions.pinAt(world.x, world.z);
     }
     if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
   }
 
-  #paintCurrentCell() {
+  #editCurrentPoint() {
     const cx = Math.floor(this.mouseWorld.x);
     const cz = Math.floor(this.mouseWorld.z);
-    const key = `${cx}:${cz}:${this.paintButton}`;
+    const key = `${this.editorTool}:${cx}:${cz}:${this.paintButton}`;
     if (key === this.lastPaintedCell) return;
     this.lastPaintedCell = key;
-    this.actions.inject({ type: "setTile", cx, cz, tile: this.paintButton === 0 ? 1 : 0 });
+    this.actions.editAt(
+      this.editorTool,
+      this.paintButton,
+      this.mouseWorld.x,
+      this.mouseWorld.z,
+    );
   }
 
   /** @param {WheelEvent} event */

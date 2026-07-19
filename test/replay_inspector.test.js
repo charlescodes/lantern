@@ -10,6 +10,7 @@ function comparable(simulation) {
     rngState: snapshot.rngState,
     tick: snapshot.tick,
     player: snapshot.player,
+    rocks: snapshot.rocks,
     projectiles: snapshot.projectiles,
     particles: snapshot.particles,
     recentEvents: snapshot.recentEvents,

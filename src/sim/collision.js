@@ -106,3 +106,87 @@ export function resolveCircleAgainstGrid(map, body, radius, onContact) {
   }
   return resolved;
 }
+
+/**
+ * @param {number} ax
+ * @param {number} az
+ * @param {number} aRadius
+ * @param {number} bx
+ * @param {number} bz
+ * @param {number} bRadius
+ * @param {{nx:number,nz:number,penetration:number,x:number,z:number}} out
+ */
+export function circleCircleContact(ax, az, aRadius, bx, bz, bRadius, out) {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const radius = aRadius + bRadius;
+  const distanceSquared = dx * dx + dz * dz;
+  if (distanceSquared >= radius * radius) return false;
+  if (distanceSquared <= 1e-12) {
+    out.nx = 1;
+    out.nz = 0;
+    out.penetration = radius;
+  } else {
+    const distance = Math.sqrt(distanceSquared);
+    out.nx = dx / distance;
+    out.nz = dz / distance;
+    out.penetration = radius - distance;
+  }
+  out.x = ax + out.nx * aRadius;
+  out.z = az + out.nz * aRadius;
+  return true;
+}
+
+/**
+ * Returns true when a solid cell crosses the segment. The start point is
+ * expected to be offset into floor space when it lies on a wall surface.
+ * @param {{get(cx:number,cz:number):number}} map
+ * @param {number} startX
+ * @param {number} startZ
+ * @param {number} endX
+ * @param {number} endZ
+ */
+export function gridRayBlocked(map, startX, startZ, endX, endZ) {
+  let cx = Math.floor(startX);
+  let cz = Math.floor(startZ);
+  const endCx = Math.floor(endX);
+  const endCz = Math.floor(endZ);
+  if (map.get(cx, cz) === 1) return true;
+
+  const dx = endX - startX;
+  const dz = endZ - startZ;
+  const stepX = Math.sign(dx);
+  const stepZ = Math.sign(dz);
+  const deltaX = stepX === 0 ? Infinity : Math.abs(1 / dx);
+  const deltaZ = stepZ === 0 ? Infinity : Math.abs(1 / dz);
+  let maxX = stepX > 0
+    ? (cx + 1 - startX) * deltaX
+    : stepX < 0
+      ? (startX - cx) * deltaX
+      : Infinity;
+  let maxZ = stepZ > 0
+    ? (cz + 1 - startZ) * deltaZ
+    : stepZ < 0
+      ? (startZ - cz) * deltaZ
+      : Infinity;
+
+  while (cx !== endCx || cz !== endCz) {
+    if (maxX < maxZ) {
+      cx += stepX;
+      maxX += deltaX;
+    } else if (maxZ < maxX) {
+      cz += stepZ;
+      maxZ += deltaZ;
+    } else {
+      const sideX = cx + stepX;
+      const sideZ = cz + stepZ;
+      if (map.get(sideX, cz) === 1 || map.get(cx, sideZ) === 1) return true;
+      cx = sideX;
+      cz = sideZ;
+      maxX += deltaX;
+      maxZ += deltaZ;
+    }
+    if (map.get(cx, cz) === 1) return true;
+  }
+  return false;
+}

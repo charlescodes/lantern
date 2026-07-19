@@ -33,8 +33,10 @@ export class ArenaUi {
     this.telemetry = required("telemetry-output");
     this.inspector = required("inspector-output");
     this.events = required("events-output");
+    this.rockPool = required("rock-pool");
     this.projectilePool = required("projectile-pool");
     this.particlePool = required("particle-pool");
+    this.rockBar = /** @type {HTMLElement} */ (required("rock-bar"));
     this.projectileBar = /** @type {HTMLElement} */ (required("projectile-bar"));
     this.particleBar = /** @type {HTMLElement} */ (required("particle-bar"));
     this.error = required("error-output");
@@ -48,6 +50,16 @@ export class ArenaUi {
     this.modeButton.textContent = mode === "play" ? "Enter edit" : "Return to play";
     this.modeButton.dataset.mode = mode;
     document.body.dataset.mode = mode;
+  }
+
+  /** @param {string} tool */
+  setEditorTool(tool) {
+    for (const button of document.querySelectorAll("[data-editor-tool]")) {
+      const element = /** @type {HTMLButtonElement} */ (button);
+      const selected = element.dataset.editorTool === tool;
+      element.classList.toggle("is-active", selected);
+      element.setAttribute("aria-pressed", String(selected));
+    }
   }
 
   /** @param {string} message */
@@ -93,9 +105,12 @@ export class ArenaUi {
       `render ms ${number(metrics.renderMs.p50)} / ${number(metrics.renderMs.p95)} / ${number(metrics.renderMs.p99)}`,
       `queue     ${metrics.queuedCommands}  dropped ${metrics.droppedCommands}`,
       `log       ${snapshot.commandLog.retained}/${snapshot.commandLog.capacity}  dropped ${snapshot.commandLog.dropped}`,
+      `contacts  ${snapshot.contacts.length}  dropped ${snapshot.contactMetrics.dropped}`,
     ].join("\n");
+    this.rockPool.textContent = `${snapshot.pools.rocks.active} / ${snapshot.pools.rocks.capacity}  ·  dropped ${snapshot.pools.rocks.dropped}  ·  caps ${snapshot.pools.rocks.speedClamped}`;
     this.projectilePool.textContent = `${snapshot.pools.projectiles.active} / ${snapshot.pools.projectiles.capacity}  ·  dropped ${snapshot.pools.projectiles.dropped}`;
     this.particlePool.textContent = `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}  ·  dropped ${snapshot.pools.particles.dropped}`;
+    this.rockBar.style.width = `${(snapshot.pools.rocks.active / snapshot.pools.rocks.capacity) * 100}%`;
     this.projectileBar.style.width = `${(snapshot.pools.projectiles.active / snapshot.pools.projectiles.capacity) * 100}%`;
     this.particleBar.style.width = `${(snapshot.pools.particles.active / snapshot.pools.particles.capacity) * 100}%`;
     const inspected = view.inspected ?? view.hover;
@@ -104,8 +119,12 @@ export class ArenaUi {
       : "Move over the arena to inspect. Click to pin.";
     const events = snapshot.recentEvents.slice(-5).reverse();
     this.events.textContent = events.length
-      ? events.map((event) => `#${event.tick} impact p${event.projectileId} @ ${number(event.x)}, ${number(event.z)}`).join("\n")
-      : "No impacts recorded.";
+      ? events.map((event) => {
+        const blocked = event.responses.filter((response) => response.blocked).length;
+        const hit = event.hit.kind === "rock" ? `rock ${event.hit.id}` : `cell ${event.hit.cx},${event.hit.cz}`;
+        return `#${event.tick} blast p${event.projectileId} -> ${hit}\n  ${event.responses.length} in radius · ${blocked} wall-blocked`;
+      }).join("\n")
+      : "No explosions recorded.";
     if (snapshot.lastError) {
       this.error.textContent = snapshot.lastError;
       this.error.hidden = false;

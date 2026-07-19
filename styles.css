@@ -216,6 +216,47 @@ body[data-mode="edit"] #arena {
   cursor: cell;
 }
 
+.editor-palette {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: none;
+  align-items: center;
+  gap: 5px;
+  max-width: calc(100% - 100px);
+  padding: 6px;
+  border: 1px solid rgba(141, 111, 54, 0.82);
+  border-radius: 3px;
+  background: rgba(12, 16, 13, 0.92);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(9px);
+}
+
+body[data-mode="edit"] .editor-palette {
+  display: flex;
+}
+
+.editor-palette > span {
+  padding: 0 6px;
+  color: var(--amber);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.editor-palette button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.editor-palette button.is-active {
+  border-color: var(--mint);
+  background: linear-gradient(#24382e, #17251e);
+  color: #b7f0dc;
+  box-shadow: inset 0 -2px 0 rgba(107, 200, 168, 0.45);
+}
+
 .viewport-rail {
   position: absolute;
   right: 10px;
@@ -348,6 +389,11 @@ pre {
   box-shadow: 0 0 8px rgba(107, 200, 168, 0.35);
 }
 
+.rock-meter i {
+  background: #b5b58f;
+  box-shadow: 0 0 8px rgba(181, 181, 143, 0.35);
+}
+
 .inspector-section pre {
   max-height: 260px;
   overflow: auto;
@@ -467,6 +513,11 @@ kbd {
     border-bottom: 1px solid var(--rule);
   }
 
+  .editor-palette {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
   .instrument-panel {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -506,5 +557,11 @@ kbd {
     align-items: flex-start;
     flex-direction: column;
     gap: 3px;
+  }
+
+  .editor-palette {
+    right: 8px;
+    left: 8px;
+    max-width: none;
   }
 }
