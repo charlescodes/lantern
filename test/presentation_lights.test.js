@@ -3,230 +3,487 @@ import assert from "node:assert/strict";
 
 import {
   PRESENTATION_LIGHT_CAPACITY,
+  PRESENTATION_LIGHT_GROUP_SIZE,
+  SUPPORTED_PRESENTATION_LIGHT_CAPACITIES,
   PresentationLightBudget,
+  applyFireballTint,
+  deriveFireballTint,
+  rec709Luminance,
   sparkFireColor,
   writeSparkFireColor,
 } from "../src/presentation/light_budget.js";
 import { applyLightPool } from "../src/presentation/light_pool.js";
 
-/** @param {number} id @param {number} size @param {number} [age] */
-function particle(id, size, age = 0.1) {
+/** @param {number} id @param {number} x @param {number} z @param {number} [size] @param {number} [age] */
+function particle(id, x, z, size = 0.06, age = 0.1) {
   return {
     id,
-    x: id / 10,
+    x,
     y: 0.2,
-    z: id / 20,
+    z,
     size,
-    currentSize: size * 0.9,
+    currentSize: size * (1 - age),
     age,
     lifetime: 1,
   };
 }
 
-function snapshot() {
+/** @param {number} id @param {number} x @param {number} z */
+function projectile(id, x, z) {
   return {
-    tick: 100,
-    recentEvents: [
-      { type: "explosion", id: 2, tick: 99, originX: 2, originZ: 3 },
-      { type: "explosion", id: 1, tick: 100, originX: 1, originZ: 2 },
-    ],
-    projectiles: [
-      { id: 7, x: 7, z: 1, age: 0.2, lifetime: 4 },
-      { id: 3, x: 3, z: 1, age: 0.1, lifetime: 4 },
-    ],
-    particles: [
-      particle(10, 0.08),
-      particle(11, 0.07),
-      particle(12, 0.06),
-      particle(13, 0.05),
-      particle(14, 0.04),
-      particle(15, 0.03),
-    ],
+    id,
+    x,
+    z,
+    previousX: x,
+    previousZ: z,
+    age: 0.1,
+    lifetime: 4,
   };
 }
 
-test("deterministic light budgeting caps the pool and honors source priority", () => {
-  const firstBudget = new PresentationLightBudget();
-  const secondBudget = new PresentationLightBudget();
-  const first = firstBudget.allocate(/** @type {any} */ (snapshot()));
-  const second = secondBudget.allocate(/** @type {any} */ (snapshot()));
+/** @param {number} id @param {number} projectileId @param {number} tick @param {number} x @param {number} z */
+function impact(id, projectileId, tick, x, z) {
+  return {
+    type: "explosion",
+    id,
+    projectileId,
+    tick,
+    originX: x,
+    originZ: z,
+  };
+}
 
-  assert.equal(PRESENTATION_LIGHT_CAPACITY, 8);
-  assert.equal(first.length, 8);
-  assert.deepEqual(first, second);
-  assert.deepEqual(first.map((light) => light.kind), [
-    "explosion",
-    "explosion",
-    "projectile",
-    "projectile",
-    "particle",
-    "particle",
-    "particle",
-    "particle",
-  ]);
-  assert.deepEqual(first.slice(0, 4).map((light) => light.sourceId), [1, 2, 3, 7]);
-  assert.ok(first.every((light) => light.decay === 2));
-  assert.deepEqual(first.slice(0, 2).map((light) => light.distance), [5, 5]);
-  assert.deepEqual(first.slice(2, 4).map((light) => light.distance), [3, 3]);
-  assert.ok(first.slice(4).every((light) => light.distance === 1.5));
-});
+function snapshot(overrides = {}) {
+  return {
+    seed: 0x5eed1234,
+    tick: 100,
+    recentEvents: [],
+    projectiles: [],
+    particles: [],
+    ...overrides,
+  };
+}
 
-test("removed carriers leave dark capacity instead of backfilling from older sparks", () => {
+/** @param {number} firstId @param {number} x @param {number} z @param {number} [count] */
+function burst(firstId, x, z, count = 8) {
+  return Array.from({ length: count }, (_, index) => (
+    particle(
+      firstId + index,
+      x + index * 0.002,
+      z + index * 0.002,
+      0.085 - index * 0.006,
+      index * 0.01,
+    )
+  ));
+}
+
+test("default topology is two atomic eight-slot effect groups", () => {
   const budget = new PresentationLightBudget();
-  const initialSnapshot = snapshot();
-  const first = budget.allocate(/** @type {any} */ (initialSnapshot));
-  const leased = first.filter((light) => light.kind === "particle").map((light) => light.sourceId);
+  assert.equal(PRESENTATION_LIGHT_CAPACITY, 16);
+  assert.equal(PRESENTATION_LIGHT_GROUP_SIZE, 8);
+  assert.equal(budget.capacity, 16);
+  assert.equal(budget.groupCapacity, 2);
+});
 
-  initialSnapshot.particles.push(particle(999, 0.085, 0));
-  initialSnapshot.tick += 1;
-  const retained = budget.allocate(/** @type {any} */ (initialSnapshot));
+test("projectile slot zero becomes its explosion pulse without changing identity", () => {
+  const budget = new PresentationLightBudget();
+  const value = snapshot({
+    tick: 10,
+    projectiles: [projectile(7, 3, 4)],
+  });
+  const flight = budget.allocate(/** @type {any} */ (value));
+  assert.equal(flight.length, 1);
+  assert.equal(flight[0].kind, "projectile");
+  assert.equal(flight[0].groupSlot, 0);
+
+  value.tick = 11;
+  value.projectiles = [];
+  value.recentEvents = [impact(91, 7, 11, 5, 6)];
+  value.particles = burst(100, 5, 6);
+  const explosion = budget.allocate(/** @type {any} */ (value));
+  assert.equal(explosion[0].kind, "explosion");
+  assert.equal(explosion[0].key, flight[0].key);
+  assert.equal(explosion[0].residentSlot, flight[0].residentSlot);
+  assert.equal(explosion.filter((light) => light.projectileId === 7).length, 8);
+});
+
+test("an impact leases the seven largest associated newly observed sparks", () => {
+  const budget = new PresentationLightBudget({ capacity: 8 });
+  const particles = [
+    particle(9, 1, 1, 0.04, 0.01),
+    particle(8, 1, 1, 0.08, 0.9),
+    particle(7, 1, 1, 0.07, 0.1),
+    particle(6, 1, 1, 0.06, 0.2),
+    particle(5, 1, 1, 0.05, 0.3),
+    particle(4, 1, 1, 0.03, 0.1),
+    particle(3, 1, 1, 0.025, 0.1),
+    particle(2, 1, 1, 0.085, 0.99),
+    particle(1, 1, 1, 0.04, 0.7),
+  ];
+  const assignments = budget.allocate(/** @type {any} */ (snapshot({
+    recentEvents: [impact(1, 10, 100, 1, 1)],
+    particles,
+  })));
   assert.deepEqual(
-    retained.filter((light) => light.kind === "particle").map((light) => light.sourceId),
-    leased,
+    assignments.filter((light) => light.kind === "particle").map((light) => light.sourceId),
+    [2, 8, 7, 6, 5, 9, 1],
   );
-
-  initialSnapshot.particles = initialSnapshot.particles.filter((value) => value.id !== leased[1]);
-  initialSnapshot.tick += 1;
-  const darkened = budget.allocate(/** @type {any} */ (initialSnapshot));
-  const darkenedIds = darkened
-    .filter((light) => light.kind === "particle")
-    .map((light) => light.sourceId);
-  assert.deepEqual(darkenedIds, leased.filter((id) => id !== leased[1]));
-  assert.equal(darkenedIds.includes(999), false);
-
-  initialSnapshot.particles.push(particle(1_000, 0.04, 0));
-  initialSnapshot.tick += 1;
-  const laterBurst = budget.allocate(/** @type {any} */ (initialSnapshot));
   assert.deepEqual(
-    laterBurst.filter((light) => light.kind === "particle").map((light) => light.sourceId),
-    [...darkenedIds, 1_000],
+    assignments.map((light) => light.groupSlot),
+    [0, 1, 2, 3, 4, 5, 6, 7],
   );
 });
 
-test("low-life leased sparks stay bound while intensity fades continuously to zero", () => {
-  const budget = new PresentationLightBudget({ capacity: 1 });
-  const value = snapshot();
+test("new sparks associate with the nearest new impact and event ID breaks distance ties", () => {
+  const budget = new PresentationLightBudget();
+  const assignments = budget.allocate(/** @type {any} */ (snapshot({
+    recentEvents: [
+      impact(2, 20, 100, 0, 0),
+      impact(1, 10, 100, 2, 0),
+    ],
+    particles: [
+      particle(1, 0.1, 0),
+      particle(2, 1.9, 0),
+      particle(3, 1, 0),
+    ],
+  })));
+  const groupByParticle = new Map(
+    assignments
+      .filter((light) => light.kind === "particle")
+      .map((light) => [light.sourceId, light.projectileId]),
+  );
+  assert.equal(groupByParticle.get(1), 20);
+  assert.equal(groupByParticle.get(2), 10);
+  assert.equal(groupByParticle.get(3), 10);
+});
+
+test("capacity sixteen keeps two complete overlapping fireball groups", () => {
+  const budget = new PresentationLightBudget({ capacity: 16 });
+  const assignments = budget.allocate(/** @type {any} */ (snapshot({
+    recentEvents: [
+      impact(1, 11, 100, 2, 2),
+      impact(2, 22, 100, 8, 8),
+    ],
+    particles: [
+      ...burst(100, 2, 2),
+      ...burst(200, 8, 8),
+    ],
+  })));
+  assert.equal(assignments.length, 16);
+  for (const projectileId of [11, 22]) {
+    const group = assignments.filter((light) => light.projectileId === projectileId);
+    assert.equal(group.length, 8);
+    assert.deepEqual(group.map((light) => light.groupSlot), [0, 1, 2, 3, 4, 5, 6, 7]);
+  }
+  assert.deepEqual(
+    new Set(assignments.map((light) => light.residentSlot)),
+    new Set(Array.from({ length: 16 }, (_, index) => index)),
+  );
+});
+
+test("a third impact retires the oldest whole group and its tail never relights", () => {
+  const budget = new PresentationLightBudget({
+    capacity: 16,
+    explosionLifetimeTicks: 2,
+  });
+  const value = snapshot({
+    tick: 10,
+    recentEvents: [impact(1, 1, 10, 1, 1)],
+    particles: burst(100, 1, 1),
+  });
+  budget.allocate(/** @type {any} */ (value));
+
+  value.tick = 11;
+  value.recentEvents.push(impact(2, 2, 11, 5, 5));
+  value.particles.push(...burst(200, 5, 5));
+  budget.allocate(/** @type {any} */ (value));
+
+  value.tick = 12;
+  value.recentEvents.push(impact(3, 3, 12, 9, 9));
+  value.particles.push(...burst(300, 9, 9));
+  const third = budget.allocate(/** @type {any} */ (value));
+  assert.deepEqual(
+    [...new Set(third.map((light) => light.projectileId))].sort(),
+    [2, 3],
+  );
+  assert.equal(third.some((light) => light.sourceId >= 100 && light.sourceId < 200), false);
+
+  value.tick = 14;
+  value.particles = value.particles.filter((entry) => entry.id < 200 || entry.id >= 300);
+  const afterOpening = budget.allocate(/** @type {any} */ (value));
+  assert.deepEqual(
+    [...new Set(afterOpening.map((light) => light.projectileId))],
+    [3],
+  );
+  assert.equal(afterOpening.some((light) => light.projectileId === 1), false);
+});
+
+test("same-tick admission prefers impact, then flight, then tail, followed by ID", () => {
+  const impactFirst = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    tick: 20,
+    recentEvents: [
+      impact(9, 9, 20, 1, 1),
+      impact(8, 8, 20, 3, 3),
+    ],
+    projectiles: [projectile(1, 7, 7)],
+    particles: [
+      ...burst(100, 1, 1),
+      ...burst(200, 3, 3),
+    ],
+  });
+  const assignments = impactFirst.allocate(/** @type {any} */ (value));
+  assert.deepEqual(
+    [...new Set(assignments.map((light) => light.projectileId))],
+    [8],
+  );
+
+  const flightBeforeTail = new PresentationLightBudget({
+    capacity: 8,
+    explosionLifetimeTicks: 1,
+  });
+  const tail = snapshot({
+    tick: 30,
+    recentEvents: [impact(1, 1, 30, 1, 1)],
+    particles: burst(300, 1, 1),
+  });
+  flightBeforeTail.allocate(/** @type {any} */ (tail));
+  tail.tick = 31;
+  tail.projectiles = [projectile(2, 5, 5)];
+  const flight = flightBeforeTail.allocate(/** @type {any} */ (tail));
+  assert.deepEqual(
+    [...new Set(flight.map((light) => light.projectileId))],
+    [2],
+  );
+});
+
+test("carrier disappearance leaves its exact tail slot dark without backfill", () => {
+  const budget = new PresentationLightBudget({
+    capacity: 8,
+    explosionLifetimeTicks: 1,
+  });
+  const value = snapshot({
+    recentEvents: [impact(1, 1, 100, 2, 2)],
+    particles: burst(1, 2, 2),
+  });
+  const initial = budget.allocate(/** @type {any} */ (value));
+  const carrier = initial.find((light) => light.groupSlot === 3);
+  assert.ok(carrier);
+  const unlitOldParticle = value.particles[7].id;
+
+  value.tick = 101;
+  value.particles = value.particles.filter((entry) => entry.id !== carrier.sourceId);
+  const tail = budget.allocate(/** @type {any} */ (value));
+  assert.equal(tail.some((light) => light.groupSlot === 3), false);
+  assert.equal(tail.some((light) => light.sourceId === unlitOldParticle), false);
+  assert.deepEqual(
+    tail.map((light) => light.groupSlot),
+    [1, 2, 4, 5, 6, 7],
+  );
+});
+
+test("an unlit flight may request a fresh group when that projectile impacts", () => {
+  const budget = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    tick: 1,
+    projectiles: [projectile(1, 1, 1), projectile(2, 2, 2)],
+  });
+  const flight = budget.allocate(/** @type {any} */ (value));
+  assert.equal(flight[0].projectileId, 1);
+
+  value.tick = 2;
+  value.projectiles = [projectile(1, 1, 1)];
+  value.recentEvents = [impact(1, 2, 2, 4, 4)];
+  value.particles = burst(10, 4, 4);
+  const impactAssignments = budget.allocate(/** @type {any} */ (value));
+  assert.ok(impactAssignments.every((light) => light.projectileId === 2));
+  assert.equal(impactAssignments[0].kind, "explosion");
+});
+
+test("disable, timeline rollback, and seed changes clear all group observations", () => {
+  const budget = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    recentEvents: [impact(1, 1, 100, 1, 1)],
+    particles: burst(1, 1, 1),
+  });
+  budget.allocate(/** @type {any} */ (value));
+  assert.equal(budget.diagnostics().admittedGroupCount, 1);
+  assert.deepEqual(budget.allocate(/** @type {any} */ (value), false), []);
+  assert.equal(budget.groups.size, 0);
+  assert.equal(budget.observedParticleIds.size, 0);
+
+  budget.allocate(/** @type {any} */ (value));
+  value.tick = 99;
+  value.recentEvents = [];
+  value.particles = [];
+  budget.allocate(/** @type {any} */ (value));
+  assert.equal(budget.groups.size, 0);
+
+  value.tick = 100;
+  value.seed += 1;
+  value.particles = [particle(1, 0, 0)];
+  const afterSeed = budget.allocate(/** @type {any} */ (value));
+  assert.equal(afterSeed.length, 1);
+  assert.equal(afterSeed[0].projectileId, "orphan");
+});
+
+test("scenario restoration clears reused transient IDs even while tick increases", () => {
+  const budget = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    tick: 10,
+    recentEvents: [impact(1, 1, 10, 1, 1)],
+    particles: burst(1, 1, 1),
+  });
+  budget.allocate(/** @type {any} */ (value));
+
+  value.tick = 11;
   value.recentEvents = [];
   value.projectiles = [];
-  value.particles = [particle(41, 0.085, 0)];
+  value.particles = [];
+  assert.deepEqual(budget.allocate(/** @type {any} */ (value)), []);
+  assert.equal(budget.observedParticleIds.size, 0);
 
-  const initial = budget.allocate(/** @type {any} */ (value))[0];
-  value.tick += 1;
-  value.particles[0].age = 0.99;
-  const fading = budget.allocate(/** @type {any} */ (value))[0];
-  const life = 0.01;
-  const expectedFade = life * life * (3 - 2 * life);
-
-  assert.equal(fading.key, initial.key);
-  assert.ok(fading.intensity > 0);
-  assert.ok(fading.intensity < initial.intensity * 0.001);
-  assert.ok(Math.abs(fading.intensity - initial.intensity * expectedFade) < 1e-12);
-
-  value.tick += 1;
-  value.particles[0].age = 1;
-  const zero = budget.allocate(/** @type {any} */ (value))[0];
-  assert.equal(zero.key, initial.key);
-  assert.equal(zero.intensity, 0);
+  value.tick = 12;
+  value.projectiles = [projectile(1, 2, 2)];
+  const reusedFlight = budget.allocate(/** @type {any} */ (value));
+  assert.equal(reusedFlight[0].kind, "projectile");
+  value.tick = 13;
+  value.projectiles = [];
+  value.recentEvents = [impact(1, 1, 13, 3, 3)];
+  value.particles = burst(1, 3, 3);
+  const reusedImpact = budget.allocate(/** @type {any} */ (value));
+  assert.equal(reusedImpact.length, 8);
 });
 
-test("explosion and projectile preemption permanently retire old spark leases", () => {
-  for (const source of ["explosion", "projectile"]) {
-    const budget = new PresentationLightBudget({
-      capacity: 2,
-      explosionLifetimeTicks: 2,
-    });
-    const value = snapshot();
-    value.recentEvents = [];
-    value.projectiles = [];
-    value.particles = [particle(51, 0.08), particle(52, 0.07)];
+test("observation and retirement bookkeeping stays bounded to current snapshot history", () => {
+  const budget = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    tick: 1,
+    recentEvents: [impact(1, 1, 1, 1, 1)],
+    particles: burst(1, 1, 1),
+  });
+  budget.allocate(/** @type {any} */ (value));
+  assert.equal(budget.observedParticleIds.size, value.particles.length);
+  assert.equal(budget.observedEventIds.size, value.recentEvents.length);
 
-    assert.deepEqual(
-      budget.allocate(/** @type {any} */ (value)).map((light) => light.sourceId),
-      [51, 52],
-    );
+  value.tick = 2;
+  value.recentEvents = [impact(2, 2, 2, 4, 4)];
+  value.particles = burst(100, 4, 4, 3);
+  budget.allocate(/** @type {any} */ (value));
+  assert.equal(budget.observedParticleIds.size, 3);
+  assert.deepEqual([...budget.observedEventIds], [2]);
+  assert.ok(budget.retiredTailProjectileIds.size <= value.recentEvents.length);
+});
 
-    value.tick += 1;
-    if (source === "explosion") {
-      value.recentEvents = [{
-        type: "explosion",
-        id: 91,
-        tick: value.tick,
-        originX: 1,
-        originZ: 2,
-      }];
-    } else {
-      value.projectiles = [{ id: 92, x: 1, z: 2, age: 0, lifetime: 4 }];
+test("direct particle fixtures use a deterministic orphan tail group", () => {
+  const first = new PresentationLightBudget({ capacity: 8 });
+  const second = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({ particles: burst(1, 3, 3, 10) });
+  const left = first.allocate(/** @type {any} */ (value));
+  const right = second.allocate(/** @type {any} */ (value));
+  assert.deepEqual(left, right);
+  assert.equal(left.length, 7);
+  assert.ok(left.every((light) => light.projectileId === "orphan"));
+  assert.deepEqual(left.map((light) => light.groupSlot), [1, 2, 3, 4, 5, 6, 7]);
+});
+
+test("every supported capacity admits only complete eight-slot groups", () => {
+  assert.deepEqual(SUPPORTED_PRESENTATION_LIGHT_CAPACITIES, [8, 16, 32, 64]);
+  for (const capacity of SUPPORTED_PRESENTATION_LIGHT_CAPACITIES) {
+    const budget = new PresentationLightBudget({ capacity });
+    const groupCount = capacity / 8 + 1;
+    const events = [];
+    const particles = [];
+    for (let index = 0; index < groupCount; index += 1) {
+      const id = index + 1;
+      events.push(impact(id, id, 100, id * 3, id * 3));
+      particles.push(...burst(id * 100, id * 3, id * 3));
     }
-    assert.deepEqual(
-      budget.allocate(/** @type {any} */ (value)).map((light) => light.kind),
-      [source, "particle"],
-    );
-    assert.equal(budget.sparkLeases.has(52), false);
+    const assignments = budget.allocate(/** @type {any} */ (snapshot({
+      recentEvents: events,
+      particles,
+    })));
+    assert.equal(assignments.length, capacity);
+    assert.equal(new Set(assignments.map((light) => light.projectileId)).size, capacity / 8);
+    assert.ok(assignments.every((light) => light.residentSlot < capacity));
+  }
+  assert.throws(
+    () => new PresentationLightBudget({ capacity: 24 }),
+    /must be one of/,
+  );
+});
 
-    value.tick += 2;
-    value.projectiles = [];
-    const afterPreemption = budget.allocate(/** @type {any} */ (value));
-    assert.deepEqual(
-      afterPreemption.map((light) => light.key),
-      ["particle:51"],
+test("explosion pulse fades smoothly and releases only group slot zero", () => {
+  const budget = new PresentationLightBudget({
+    capacity: 8,
+    explosionLifetimeTicks: 10,
+  });
+  const value = snapshot({
+    recentEvents: [impact(1, 1, 100, 1, 2)],
+    particles: burst(1, 1, 2),
+  });
+  const initial = budget.allocate(/** @type {any} */ (value));
+  value.tick = 109;
+  const fading = budget.allocate(/** @type {any} */ (value));
+  assert.ok(fading[0].intensity < initial[0].intensity * 0.03);
+  value.tick = 110;
+  const tail = budget.allocate(/** @type {any} */ (value));
+  assert.equal(tail.some((light) => light.groupSlot === 0), false);
+  assert.equal(tail.length, 7);
+});
+
+test("fireball tint is stable, bounded, shared, and luminance preserving", () => {
+  for (const projectileId of [1, 2, 99, 0xffff]) {
+    const tint = deriveFireballTint(0x12345678, projectileId);
+    assert.deepEqual(tint, deriveFireballTint(0x12345678, projectileId));
+    assert.ok(tint.amount >= 0.01);
+    assert.ok(tint.amount <= 0.03);
+    const source = sparkFireColor(0.63);
+    const tinted = applyFireballTint(source, tint);
+    assert.ok(Math.abs(rec709Luminance(tinted) - rec709Luminance(source)) < 1e-12);
+  }
+
+  const budget = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    recentEvents: [impact(1, 7, 100, 1, 1)],
+    particles: burst(1, 1, 1),
+  });
+  const first = budget.allocate(/** @type {any} */ (value));
+  value.tick += 1;
+  const second = budget.allocate(/** @type {any} */ (value));
+  assert.deepEqual(
+    new Set(first.map((light) => JSON.stringify(light.tint))),
+    new Set(second.map((light) => JSON.stringify(light.tint))),
+  );
+  assert.equal(new Set(first.map((light) => JSON.stringify(light.tint))).size, 1);
+});
+
+test("color variation changes point lights only and can be disabled live", () => {
+  const varied = new PresentationLightBudget({ capacity: 8 });
+  const plain = new PresentationLightBudget({ capacity: 8 });
+  const value = snapshot({
+    recentEvents: [impact(1, 7, 100, 1, 1)],
+    particles: burst(1, 1, 1),
+  });
+  const tinted = varied.allocate(/** @type {any} */ (value), true, true);
+  const untinted = plain.allocate(/** @type {any} */ (value), true, false);
+  assert.notDeepEqual(tinted.map((light) => light.color), untinted.map((light) => light.color));
+  for (let index = 0; index < tinted.length; index += 1) {
+    assert.ok(
+      Math.abs(
+        rec709Luminance(tinted[index].color)
+        - rec709Luminance(untinted[index].color),
+      ) < 1e-12,
     );
   }
-});
 
-test("dynamic-light disable and timeline rollback clear observations and leases", () => {
-  const budget = new PresentationLightBudget();
-  const value = snapshot();
-  budget.allocate(/** @type {any} */ (value));
-  assert.ok(budget.sparkLeases.size > 0);
-  assert.ok(budget.observedSparkIds.size > budget.sparkLeases.size);
-
-  assert.deepEqual(budget.allocate(/** @type {any} */ (value), false), []);
-  assert.equal(budget.sparkLeases.size, 0);
-  assert.equal(budget.observedSparkIds.size, 0);
-  assert.equal(budget.lastTick, null);
-
-  budget.allocate(/** @type {any} */ (value));
-  assert.ok(budget.sparkLeases.size > 0);
-  value.tick -= 1;
-  value.recentEvents = [];
-  value.projectiles = [];
-  value.particles = [];
-  assert.deepEqual(budget.allocate(/** @type {any} */ (value)), []);
-  assert.equal(budget.sparkLeases.size, 0);
-  assert.equal(budget.observedSparkIds.size, 0);
-
-  value.tick += 1;
-  value.particles = [particle(10, 0.08)];
-  assert.deepEqual(
-    budget.allocate(/** @type {any} */ (value)).map((light) => light.key),
-    ["particle:10"],
-  );
-});
-
-test("explosion lights pulse down and release their slot at the lifetime boundary", () => {
-  const budget = new PresentationLightBudget({ capacity: 1, explosionLifetimeTicks: 10 });
-  const value = snapshot();
-  value.recentEvents = [
-    { type: "explosion", id: 1, tick: 100, originX: 1, originZ: 2 },
-  ];
-  value.projectiles = [];
-  value.particles = [];
-
-  const initial = budget.allocate(/** @type {any} */ (value))[0];
-  value.tick = 109;
-  const fading = budget.allocate(/** @type {any} */ (value))[0];
-  assert.ok(fading.intensity < initial.intensity * 0.03);
-  value.tick = 110;
-  assert.deepEqual(budget.allocate(/** @type {any} */ (value)), []);
-});
-
-test("spark fire color cools from yellow core through amber to red-orange", () => {
-  const young = sparkFireColor(1);
-  const middle = sparkFireColor(0.58);
-  const old = sparkFireColor(0);
-  assert.ok(young.g > middle.g && middle.g > old.g);
-  assert.ok(young.b > middle.b && middle.b > old.b);
-  assert.ok(old.r > 0.9);
+  const target = {
+    setRGB(r, g, b) {
+      this.value = { r, g, b };
+    },
+  };
+  writeSparkFireColor(target, 0.58);
+  assert.deepEqual(target.value, sparkFireColor(0.58));
 });
 
 function residentLight(id) {
@@ -251,10 +508,11 @@ function residentLight(id) {
   };
 }
 
-/** @param {number} id */
-function assignment(id) {
+/** @param {number} slot @param {number} [id] */
+function assignment(slot, id = slot) {
   return {
     key: `test:${id}`,
+    residentSlot: slot,
     x: id,
     y: 0.5,
     z: id + 1,
@@ -265,135 +523,29 @@ function assignment(id) {
   };
 }
 
-test("keyed resident slots survive removal, insertion, disable, and 0 -> 8 -> 0", () => {
-  const lights = Array.from(
-    { length: PRESENTATION_LIGHT_CAPACITY },
-    (_, index) => residentLight(index),
-  );
+test("explicit resident slots preserve group identity while holes stay dark", () => {
+  const lights = Array.from({ length: 16 }, (_, index) => residentLight(index));
   const identities = [...lights];
-  assert.equal(applyLightPool(lights, [assignment(1), assignment(2), assignment(3)]), 3);
-  const originalSlots = new Map(
-    lights.map((light, index) => [light.userData.assignment, index]),
-  );
+  assert.equal(applyLightPool(lights, [assignment(0), assignment(7), assignment(8)]), 3);
+  assert.equal(lights[7].userData.assignment, "test:7");
 
-  assert.equal(applyLightPool(lights, [assignment(3), assignment(2), assignment(4)]), 3);
-  assert.equal(lights[originalSlots.get("test:2")].userData.assignment, "test:2");
-  assert.equal(lights[originalSlots.get("test:3")].userData.assignment, "test:3");
-  assert.equal(lights[originalSlots.get("test:1")].userData.assignment, "test:4");
-
-  const beforeDisable = lights.map((light) => light.userData.assignment);
-  assert.equal(applyLightPool(lights, [], false), 0);
-  assert.ok(lights.every((light) => light.intensity === 0));
-  assert.deepEqual(lights.map((light) => light.userData.assignment), beforeDisable);
-  assert.equal(applyLightPool(lights, [assignment(4), assignment(2), assignment(3)]), 3);
-  assert.deepEqual(lights.map((light) => light.userData.assignment), beforeDisable);
-
-  assert.equal(applyLightPool(lights, []), 0);
-  assert.ok(lights.every((light) => light.userData.assignment === null));
-  const full = Array.from(
-    { length: PRESENTATION_LIGHT_CAPACITY },
-    (_, index) => assignment(index + 10),
-  );
-  assert.equal(applyLightPool(lights, full), PRESENTATION_LIGHT_CAPACITY);
-  assert.deepEqual(
-    lights.map((light) => light.userData.assignment),
-    full.map((value) => value.key),
-  );
-  assert.equal(applyLightPool(lights, []), 0);
-  assert.ok(lights.every((light) => light.userData.assignment === null));
-
+  assert.equal(applyLightPool(lights, [assignment(0), assignment(8), assignment(15)]), 3);
+  assert.equal(lights[7].intensity, 0);
+  assert.equal(lights[7].userData.assignment, null);
+  assert.equal(lights[8].userData.assignment, "test:8");
+  assert.equal(lights[15].userData.assignment, "test:15");
   assert.ok(lights.every((light) => light.visible));
   assert.ok(lights.every((light) => light.castShadow === false));
   assert.ok(lights.every((light, index) => light === identities[index]));
 });
 
-test("dynamicLights=false zeros all intensities without changing topology", () => {
-  const lights = Array.from(
-    { length: PRESENTATION_LIGHT_CAPACITY },
-    (_, index) => residentLight(index),
-  );
+test("dynamicLights=false zeros all resident intensities without changing topology", () => {
+  const lights = Array.from({ length: 16 }, (_, index) => residentLight(index));
   const identities = [...lights];
-  assert.equal(
-    applyLightPool(
-      lights,
-      Array.from({ length: PRESENTATION_LIGHT_CAPACITY }, (_, index) => assignment(index)),
-      false,
-    ),
-    0,
-  );
+  applyLightPool(lights, Array.from({ length: 16 }, (_, index) => assignment(index)));
+  assert.equal(applyLightPool(lights, [], false), 0);
   assert.ok(lights.every((light, index) => light === identities[index]));
   assert.ok(lights.every((light) => light.visible));
+  assert.ok(lights.every((light) => light.castShadow === false));
   assert.ok(lights.every((light) => light.intensity === 0));
-});
-
-test("single-explosion tail darkens slots without hopping to an eighth old spark", () => {
-  const budget = new PresentationLightBudget({
-    capacity: PRESENTATION_LIGHT_CAPACITY,
-    explosionLifetimeTicks: 2,
-  });
-  const lights = Array.from(
-    { length: PRESENTATION_LIGHT_CAPACITY },
-    (_, index) => residentLight(index),
-  );
-  const value = {
-    tick: 200,
-    recentEvents: [
-      { type: "explosion", id: 71, tick: 200, originX: 2, originZ: 3 },
-    ],
-    projectiles: [],
-    particles: Array.from(
-      { length: PRESENTATION_LIGHT_CAPACITY },
-      (_, index) => particle(index + 1, 0.085 - index * 0.005, 0.05),
-    ),
-  };
-
-  const initial = budget.allocate(/** @type {any} */ (value));
-  const initialParticleKeys = initial
-    .filter((light) => light.kind === "particle")
-    .map((light) => light.key);
-  assert.equal(initial[0].key, "explosion:71");
-  assert.equal(initialParticleKeys.length, 7);
-  assert.equal(initialParticleKeys.includes("particle:8"), false);
-  assert.equal(applyLightPool(lights, initial), 8);
-  const explosionSlot = lights.findIndex(
-    (light) => light.userData.assignment === "explosion:71",
-  );
-  const initialSlots = new Map(
-    lights.map((light, index) => [light.userData.assignment, index]),
-  );
-
-  value.tick += 2;
-  const pulseExpired = budget.allocate(/** @type {any} */ (value));
-  assert.deepEqual(pulseExpired.map((light) => light.key), initialParticleKeys);
-  assert.equal(applyLightPool(lights, pulseExpired), 7);
-  assert.equal(lights[explosionSlot].intensity, 0);
-  assert.equal(lights[explosionSlot].userData.assignment, null);
-  for (const key of initialParticleKeys) {
-    assert.equal(lights[initialSlots.get(key)].userData.assignment, key);
-  }
-
-  const allowedTailKeys = new Set(initialParticleKeys);
-  let previousCount = initialParticleKeys.length;
-  for (const removedKey of initialParticleKeys) {
-    const removedId = Number(removedKey.split(":")[1]);
-    value.tick += 1;
-    value.particles = value.particles.filter((entry) => entry.id !== removedId);
-    const tail = budget.allocate(/** @type {any} */ (value));
-    const tailKeys = tail.map((light) => light.key);
-    assert.equal(tailKeys.length, previousCount - 1);
-    assert.ok(tailKeys.every((key) => allowedTailKeys.has(key)));
-    assert.equal(tailKeys.includes("particle:8"), false);
-    assert.equal(applyLightPool(lights, tail), tailKeys.length);
-    previousCount = tailKeys.length;
-  }
-});
-
-test("spark color writer reuses the provided color target", () => {
-  const target = {
-    setRGB(r, g, b) {
-      this.value = { r, g, b };
-    },
-  };
-  assert.equal(writeSparkFireColor(target, 0.58), target);
-  assert.deepEqual(target.value, sparkFireColor(0.58));
 });

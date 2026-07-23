@@ -27,6 +27,11 @@ export async function createPresentation(canvas, options, initialSnapshot) {
   const camera = new Camera2D();
   return {
     camera,
-    presentation: new CanvasPresentation(canvas, camera, initialSnapshot),
+    presentation: new CanvasPresentation(
+      canvas,
+      camera,
+      initialSnapshot,
+      options,
+    ),
   };
 }

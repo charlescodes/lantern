@@ -20,6 +20,26 @@ export function applyLightPool(lights, assignments, enabled = true) {
   }
 
   const pending = assignments.slice(0, lights.length);
+  const slotted = pending.filter((assignment) => (
+    Number.isInteger(assignment.residentSlot)
+    && assignment.residentSlot >= 0
+    && assignment.residentSlot < lights.length
+  ));
+  if (slotted.length > 0) {
+    const appliedSlots = new Set();
+    for (const assignment of slotted) {
+      if (appliedSlots.has(assignment.residentSlot)) continue;
+      applyAssignment(lights[assignment.residentSlot], assignment);
+      appliedSlots.add(assignment.residentSlot);
+    }
+    for (let index = 0; index < lights.length; index += 1) {
+      if (appliedSlots.has(index)) continue;
+      lights[index].intensity = 0;
+      lights[index].userData.assignment = null;
+    }
+    return appliedSlots.size;
+  }
+
   const assignmentByKey = new Map(
     pending.map((assignment) => [assignment.key, assignment]),
   );

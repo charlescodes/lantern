@@ -2,13 +2,32 @@
 
 import { EXPLOSION, PARTICLE, SIMULATION } from "../config.js";
 
-export const PRESENTATION_LIGHT_CAPACITY = 8;
+export const PRESENTATION_LIGHT_GROUP_SIZE = 8;
+export const PRESENTATION_SPARK_LIGHTS_PER_GROUP = 7;
+export const SUPPORTED_PRESENTATION_LIGHT_CAPACITIES = Object.freeze([
+  8,
+  16,
+  32,
+  64,
+]);
+export const PRESENTATION_LIGHT_CAPACITY = 16;
 
+const ORPHAN_PROJECTILE_ID = "orphan";
+const PHASE_PRIORITY = Object.freeze({
+  impact: 0,
+  flight: 1,
+  tail: 2,
+});
 const FIRE_COLORS = Object.freeze({
   core: Object.freeze({ r: 1, g: 0.94, b: 0.56 }),
   amber: Object.freeze({ r: 1, g: 0.47, b: 0.08 }),
   decay: Object.freeze({ r: 0.94, g: 0.12, b: 0.025 }),
 });
+const TINT_ANCHORS = Object.freeze([
+  Object.freeze({ name: "red", r: 1, g: 0.3, b: 0.16 }),
+  Object.freeze({ name: "green", r: 0.72, g: 1, b: 0.3 }),
+  Object.freeze({ name: "blue", r: 0.5, g: 0.7, b: 1 }),
+]);
 
 /** @param {number} value @param {number} minimum @param {number} maximum */
 function clamp(value, minimum, maximum) {
@@ -35,7 +54,8 @@ export function sparkFireColor(life) {
 
 /**
  * Writes the spark gradient into an existing color-like object so the particle
- * presentation does not allocate one temporary RGB object per instance.
+ * mesh path does not allocate one temporary RGB object per instance.
+ * Point-light tinting deliberately happens elsewhere.
  * @param {{setRGB:(r:number,g:number,b:number)=>unknown}} target
  * @param {number} life
  */
@@ -54,169 +74,551 @@ export function writeSparkFireColor(target, life) {
   return target;
 }
 
+/** @param {{r:number,g:number,b:number}} color */
+export function rec709Luminance(color) {
+  return color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+}
+
+/** @param {number} seed @param {number|string} projectileId */
+export function deriveFireballTint(seed, projectileId) {
+  const numericId = projectileId === ORPHAN_PROJECTILE_ID
+    ? 0x6f727068
+    : Number(projectileId) >>> 0;
+  let hash = (Number(seed) >>> 0) ^ numericId ^ 0x9e3779b9;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x21f0aaad);
+  hash = Math.imul(hash ^ (hash >>> 15), 0x735a2d97);
+  hash = (hash ^ (hash >>> 15)) >>> 0;
+  const anchor = TINT_ANCHORS[hash % TINT_ANCHORS.length];
+  const amount = 0.01 + (((hash >>> 8) & 0xffff) / 0xffff) * 0.02;
+  return Object.freeze({
+    anchor: anchor.name,
+    amount,
+    color: anchor,
+  });
+}
+
+/**
+ * Mixes a deterministic bias into a fire color, then restores the original
+ * Rec.709 luminance. Values above one are allowed for HDR point-light colors.
+ * @param {{r:number,g:number,b:number}} color
+ * @param {ReturnType<typeof deriveFireballTint>} tint
+ * @param {boolean} [enabled]
+ */
+export function applyFireballTint(color, tint, enabled = true) {
+  if (!enabled) return { ...color };
+  const mixed = mixColor(color, tint.color, tint.amount);
+  const sourceLuminance = rec709Luminance(color);
+  const mixedLuminance = rec709Luminance(mixed);
+  const scale = mixedLuminance > 1e-12 ? sourceLuminance / mixedLuminance : 1;
+  return {
+    r: mixed.r * scale,
+    g: mixed.g * scale,
+    b: mixed.b * scale,
+  };
+}
+
 /** @param {Record<string, any>} particle */
 function particleLife(particle) {
   if (!(particle.lifetime > 0)) return 0;
   return clamp(1 - particle.age / particle.lifetime, 0, 1);
 }
 
+/** @param {Record<string, any>} left @param {Record<string, any>} right */
+function compareCarrierCandidates(left, right) {
+  const maximumSize = Number(right.size) - Number(left.size);
+  if (Math.abs(maximumSize) > 1e-12) return maximumSize;
+  const leftLife = particleLife(left);
+  const rightLife = particleLife(right);
+  const leftScore = Number(left.currentSize) * (0.35 + leftLife * 0.65);
+  const rightScore = Number(right.currentSize) * (0.35 + rightLife * 0.65);
+  return rightScore - leftScore || Number(left.id) - Number(right.id);
+}
+
+/** @param {Record<string, any>} left @param {Record<string, any>} right */
+function compareRecentEffect(left, right) {
+  return Number(right.effectTick) - Number(left.effectTick)
+    || PHASE_PRIORITY[left.phase] - PHASE_PRIORITY[right.phase]
+    || sortableId(left.projectileId) - sortableId(right.projectileId);
+}
+
+/** @param {number|string} value */
+function sortableId(value) {
+  return value === ORPHAN_PROJECTILE_ID
+    ? Number.MAX_SAFE_INTEGER
+    : Number(value);
+}
+
+/** @param {Record<string, any>} particle @param {Array<Record<string, any>>} events */
+function nearestEvent(particle, events) {
+  let selected = null;
+  let selectedDistance = Number.POSITIVE_INFINITY;
+  for (const event of events) {
+    const dx = Number(particle.x) - Number(event.originX);
+    const dz = Number(particle.z) - Number(event.originZ);
+    const distance = dx * dx + dz * dz;
+    if (
+      distance < selectedDistance - 1e-12
+      || (
+        Math.abs(distance - selectedDistance) <= 1e-12
+        && Number(event.id) < Number(selected?.id ?? Number.MAX_SAFE_INTEGER)
+      )
+    ) {
+      selected = event;
+      selectedDistance = distance;
+    }
+  }
+  return selected;
+}
+
 export class PresentationLightBudget {
   /** @param {{capacity?:number,explosionLifetimeTicks?:number}} [options] */
   constructor(options = {}) {
-    this.capacity = Math.max(
-      0,
-      Math.trunc(options.capacity ?? PRESENTATION_LIGHT_CAPACITY),
+    const capacity = Math.trunc(
+      options.capacity ?? PRESENTATION_LIGHT_CAPACITY,
     );
+    if (!SUPPORTED_PRESENTATION_LIGHT_CAPACITIES.includes(capacity)) {
+      throw new RangeError(
+        `Light capacity must be one of ${SUPPORTED_PRESENTATION_LIGHT_CAPACITIES.join(", ")}`,
+      );
+    }
+    this.capacity = capacity;
+    this.groupCapacity = capacity / PRESENTATION_LIGHT_GROUP_SIZE;
     this.explosionLifetimeTicks = Math.max(
       1,
       Math.trunc(options.explosionLifetimeTicks ?? EXPLOSION.debugTicks),
     );
-    this.sparkLeases = new Map();
-    this.observedSparkIds = new Set();
-    this.nextLease = 1;
+    this.groups = new Map();
+    this.observedParticleIds = new Set();
+    this.observedEventIds = new Set();
+    this.retiredTailProjectileIds = new Set();
+    this.currentOrphanKey = null;
+    this.orphanGeneration = 0;
     this.lastTick = null;
+    this.lastSeed = null;
   }
 
   reset() {
-    this.sparkLeases.clear();
-    this.observedSparkIds.clear();
-    this.nextLease = 1;
+    this.groups.clear();
+    this.observedParticleIds.clear();
+    this.observedEventIds.clear();
+    this.retiredTailProjectileIds.clear();
+    this.currentOrphanKey = null;
+    this.orphanGeneration = 0;
     this.lastTick = null;
+    this.lastSeed = null;
   }
 
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {boolean} [enabled]
+   * @param {boolean} [colorVariation]
    */
-  allocate(snapshot, enabled = true) {
-    if (!enabled || this.capacity === 0) {
+  allocate(snapshot, enabled = true, colorVariation = true) {
+    if (!enabled) {
       this.reset();
       return [];
     }
-    if (this.lastTick !== null && snapshot.tick < this.lastTick) this.reset();
-    this.lastTick = snapshot.tick;
-
-    const assignments = [];
-    const explosions = snapshot.recentEvents
-      .filter((event) => {
-        const age = snapshot.tick - event.tick;
-        return event.type === "explosion" && age >= 0 && age < this.explosionLifetimeTicks;
-      })
-      .sort((left, right) => {
-        const ageDifference = (snapshot.tick - left.tick) - (snapshot.tick - right.tick);
-        return ageDifference || Number(left.id) - Number(right.id);
-      });
-    for (const event of explosions) {
-      if (assignments.length >= this.capacity) break;
-      const age = snapshot.tick - event.tick;
-      const life = clamp(1 - age / this.explosionLifetimeTicks, 0, 1);
-      const pulse = life * (0.18 + life * 0.82);
-      assignments.push({
-        key: `explosion:${event.id}`,
-        kind: "explosion",
-        sourceId: Number(event.id),
-        x: Number(event.originX),
-        y: 0.55,
-        z: Number(event.originZ),
-        color: mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, life),
-        intensity: 52 * pulse,
-        distance: 5,
-        decay: 2,
-      });
+    const transientTimelineCleared = this.lastTick !== null
+      && snapshot.recentEvents.length === 0
+      && (
+        this.observedEventIds.size > 0
+        || (
+          snapshot.projectiles.length === 0
+          && snapshot.particles.length === 0
+          && (this.groups.size > 0 || this.observedParticleIds.size > 0)
+        )
+      );
+    if (
+      (this.lastTick !== null && Number(snapshot.tick) < this.lastTick)
+      || (
+        this.lastSeed !== null
+        && Number(snapshot.seed ?? 0) !== this.lastSeed
+      )
+      || transientTimelineCleared
+    ) {
+      this.reset();
     }
+    this.lastTick = Number(snapshot.tick);
+    this.lastSeed = Number(snapshot.seed ?? 0);
 
-    const projectiles = [...snapshot.projectiles]
-      .sort((left, right) => Number(left.id) - Number(right.id));
-    for (const projectile of projectiles) {
-      if (assignments.length >= this.capacity) break;
-      const life = particleLife(projectile);
-      assignments.push({
-        key: `projectile:${projectile.id}`,
-        kind: "projectile",
-        sourceId: Number(projectile.id),
-        x: Number(projectile.x),
-        y: 0.9,
-        z: Number(projectile.z),
-        color: mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, 0.68 + life * 0.22),
-        intensity: 22,
-        distance: 3,
-        decay: 2,
-      });
-    }
+    const particlesById = new Map(
+      snapshot.particles.map((particle) => [Number(particle.id), particle]),
+    );
+    const projectilesById = new Map(
+      snapshot.projectiles.map((projectile) => [Number(projectile.id), projectile]),
+    );
+    const currentEventIds = new Set(
+      snapshot.recentEvents
+        .filter((event) => event.type === "explosion")
+        .map((event) => Number(event.id)),
+    );
+    const newEvents = snapshot.recentEvents
+      .filter((event) => (
+        event.type === "explosion"
+        && !this.observedEventIds.has(Number(event.id))
+      ))
+      .sort((left, right) => (
+        Number(left.tick) - Number(right.tick)
+        || Number(left.id) - Number(right.id)
+      ));
+    this.observedEventIds = currentEventIds;
 
-    const particlesById = new Map();
-    const newlyObserved = [];
+    const newParticles = [];
     for (const particle of snapshot.particles) {
       const id = Number(particle.id);
-      particlesById.set(id, particle);
-      if (this.observedSparkIds.has(id)) continue;
-      this.observedSparkIds.add(id);
-      newlyObserved.push({
-        particle,
-        life: particleLife(particle),
-      });
+      if (this.observedParticleIds.has(id)) continue;
+      this.observedParticleIds.add(id);
+      newParticles.push(particle);
     }
-    for (const id of this.sparkLeases.keys()) {
-      if (!particlesById.has(id)) this.sparkLeases.delete(id);
+    this.observedParticleIds = new Set(particlesById.keys());
+    const relevantProjectileIds = new Set(
+      snapshot.recentEvents
+        .filter((event) => event.type === "explosion")
+        .map((event) => Number(event.projectileId ?? event.id)),
+    );
+    for (const projectileId of this.retiredTailProjectileIds) {
+      if (!relevantProjectileIds.has(projectileId)) {
+        this.retiredTailProjectileIds.delete(projectileId);
+      }
     }
 
-    const available = this.capacity - assignments.length;
-    const retained = [...this.sparkLeases.entries()]
-      .filter(([id]) => particlesById.has(id))
-      .sort((left, right) => left[1] - right[1])
-      .slice(0, available);
-    const selectedIds = new Set(retained.map(([id]) => id));
-    const selected = retained.map(([id]) => {
-      const particle = particlesById.get(id);
-      return {
-        particle,
-        life: particleLife(particle),
-      };
-    });
-    this.sparkLeases = new Map(retained);
+    const admissionRequests = new Set();
+    for (const projectile of [...snapshot.projectiles].sort(
+      (left, right) => Number(left.id) - Number(right.id),
+    )) {
+      const projectileId = Number(projectile.id);
+      const key = this.#projectileKey(projectileId);
+      let group = this.groups.get(key);
+      if (!group) {
+        group = this.#createGroup(
+          key,
+          projectileId,
+          "flight",
+          Number(snapshot.tick),
+          Number(snapshot.seed ?? 0),
+        );
+        this.groups.set(key, group);
+        admissionRequests.add(key);
+      }
+      if (group.phase === "flight") group.projectile = projectile;
+    }
 
-    const candidates = newlyObserved
-      .filter(({ particle }) => particle.currentSize > 0)
-      .sort((left, right) => {
-        const leftScore = left.particle.currentSize * (0.35 + left.life * 0.65);
-        const rightScore = right.particle.currentSize * (0.35 + right.life * 0.65);
-        return rightScore - leftScore || Number(left.particle.id) - Number(right.particle.id);
-      });
-    for (const candidate of candidates) {
-      if (selected.length >= available) break;
-      const id = Number(candidate.particle.id);
-      if (selectedIds.has(id)) continue;
-      this.sparkLeases.set(id, this.nextLease);
-      this.nextLease += 1;
-      selectedIds.add(id);
-      selected.push(candidate);
+    const associatedParticles = new Map();
+    const orphanParticles = [];
+    for (const particle of newParticles) {
+      const event = nearestEvent(particle, newEvents);
+      if (!event) {
+        orphanParticles.push(particle);
+        continue;
+      }
+      const projectileId = Number(event.projectileId ?? event.id);
+      const list = associatedParticles.get(projectileId) ?? [];
+      list.push(particle);
+      associatedParticles.set(projectileId, list);
+    }
+
+    for (const event of newEvents) {
+      const projectileId = Number(event.projectileId ?? event.id);
+      if (this.retiredTailProjectileIds.has(projectileId)) continue;
+      const key = this.#projectileKey(projectileId);
+      let group = this.groups.get(key);
+      if (!group) {
+        group = this.#createGroup(
+          key,
+          projectileId,
+          "impact",
+          Number(event.tick),
+          Number(snapshot.seed ?? 0),
+        );
+        this.groups.set(key, group);
+      }
+      const wasAdmitted = group.admitted;
+      group.phase = "impact";
+      group.effectTick = Number(event.tick);
+      group.effectId = Number(event.id);
+      group.event = event;
+      group.projectile = null;
+      group.carriers = this.#selectCarriers(
+        associatedParticles.get(projectileId) ?? [],
+      );
+      if (!wasAdmitted) {
+        group.retired = false;
+        admissionRequests.add(key);
+      }
+    }
+
+    for (const group of this.groups.values()) {
+      if (group.phase !== "impact" || !group.event) continue;
+      const age = Number(snapshot.tick) - Number(group.event.tick);
+      if (age >= this.explosionLifetimeTicks) group.phase = "tail";
+    }
+
+    this.#retireCompletedGroups(particlesById, projectilesById);
+
+    if (orphanParticles.length > 0 && !this.#activeOrphanGroup()) {
+      this.orphanGeneration += 1;
+      const key = `orphan:${this.orphanGeneration}`;
+      const group = this.#createGroup(
+        key,
+        ORPHAN_PROJECTILE_ID,
+        "tail",
+        Number(snapshot.tick),
+        Number(snapshot.seed ?? 0),
+      );
+      group.effectId = this.orphanGeneration;
+      group.carriers = this.#selectCarriers(orphanParticles);
+      this.groups.set(key, group);
+      this.currentOrphanKey = key;
+      admissionRequests.add(key);
+    }
+
+    this.#reconcileAdmissions(admissionRequests);
+    for (const projectileId of this.retiredTailProjectileIds) {
+      if (!relevantProjectileIds.has(projectileId)) {
+        this.retiredTailProjectileIds.delete(projectileId);
+      }
+    }
+
+    const assignments = [];
+    for (const group of [...this.groups.values()]
+      .filter((candidate) => candidate.admitted)
+      .sort((left, right) => left.block - right.block)) {
+      this.#appendGroupAssignments(
+        assignments,
+        group,
+        snapshot,
+        particlesById,
+        projectilesById,
+        colorVariation,
+      );
+    }
+    return assignments;
+  }
+
+  diagnostics() {
+    const admitted = [...this.groups.values()].filter((group) => group.admitted);
+    return {
+      capacity: this.capacity,
+      groupCapacity: this.groupCapacity,
+      admittedGroupCount: admitted.length,
+      groups: admitted
+        .sort((left, right) => left.block - right.block)
+        .map((group) => ({
+          projectileId: group.projectileId,
+          phase: group.phase,
+          block: group.block,
+          carrierIds: group.carriers.map((carrier) => carrier.id),
+        })),
+    };
+  }
+
+  /** @param {number} projectileId */
+  #projectileKey(projectileId) {
+    return `projectile:${projectileId}`;
+  }
+
+  /**
+   * @param {string} key
+   * @param {number|string} projectileId
+   * @param {"flight"|"impact"|"tail"} phase
+   * @param {number} effectTick
+   * @param {number} seed
+   */
+  #createGroup(key, projectileId, phase, effectTick, seed) {
+    return {
+      key,
+      projectileId,
+      phase,
+      effectTick,
+      effectId: 0,
+      admitted: false,
+      retired: false,
+      block: -1,
+      projectile: null,
+      event: null,
+      carriers: [],
+      tint: deriveFireballTint(seed, projectileId),
+    };
+  }
+
+  /** @param {Array<Record<string, any>>} particles */
+  #selectCarriers(particles) {
+    return [...particles]
+      .filter((particle) => Number(particle.currentSize) > 0)
+      .sort(compareCarrierCandidates)
+      .slice(0, PRESENTATION_SPARK_LIGHTS_PER_GROUP)
+      .map((particle, index) => ({
+        id: Number(particle.id),
+        slot: index + 1,
+      }));
+  }
+
+  #activeOrphanGroup() {
+    if (!this.currentOrphanKey) return null;
+    return this.groups.get(this.currentOrphanKey) ?? null;
+  }
+
+  /** @param {Map<number,Record<string,any>>} particlesById @param {Map<number,Record<string,any>>} projectilesById */
+  #retireCompletedGroups(particlesById, projectilesById) {
+    for (const [key, group] of this.groups) {
+      if (
+        group.phase === "flight"
+        && !projectilesById.has(Number(group.projectileId))
+        && !group.event
+      ) {
+        this.groups.delete(key);
+        continue;
+      }
+      const liveCarrierCount = group.carriers.reduce(
+        (count, carrier) => count + Number(particlesById.has(carrier.id)),
+        0,
+      );
+      if (group.phase === "tail" && liveCarrierCount === 0) {
+        if (group.projectileId !== ORPHAN_PROJECTILE_ID) {
+          this.retiredTailProjectileIds.add(Number(group.projectileId));
+        }
+        if (key === this.currentOrphanKey) this.currentOrphanKey = null;
+        this.groups.delete(key);
+      }
+    }
+  }
+
+  /** @param {Set<string>} admissionRequests */
+  #reconcileAdmissions(admissionRequests) {
+    const candidates = [...this.groups.values()].filter(
+      (group) => group.admitted || admissionRequests.has(group.key),
+    );
+    candidates.sort(compareRecentEffect);
+    const winnerKeys = new Set(
+      candidates.slice(0, this.groupCapacity).map((group) => group.key),
+    );
+
+    for (const group of candidates) {
+      if (winnerKeys.has(group.key)) continue;
+      group.admitted = false;
+      group.block = -1;
+      group.retired = true;
+      if (group.phase !== "flight" && group.projectileId !== ORPHAN_PROJECTILE_ID) {
+        this.retiredTailProjectileIds.add(Number(group.projectileId));
+      }
+    }
+
+    const occupiedBlocks = new Set(
+      candidates
+        .filter((group) => winnerKeys.has(group.key) && group.admitted)
+        .map((group) => group.block),
+    );
+    const freeBlocks = [];
+    for (let block = 0; block < this.groupCapacity; block += 1) {
+      if (!occupiedBlocks.has(block)) freeBlocks.push(block);
+    }
+    for (const group of candidates.filter(
+      (candidate) => winnerKeys.has(candidate.key) && !candidate.admitted,
+    )) {
+      group.admitted = true;
+      group.retired = false;
+      group.block = freeBlocks.shift();
+    }
+  }
+
+  /**
+   * @param {Array<Record<string,any>>} assignments
+   * @param {Record<string,any>} group
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
+   * @param {Map<number,Record<string,any>>} particlesById
+   * @param {Map<number,Record<string,any>>} projectilesById
+   * @param {boolean} colorVariation
+   */
+  #appendGroupAssignments(
+    assignments,
+    group,
+    snapshot,
+    particlesById,
+    projectilesById,
+    colorVariation,
+  ) {
+    const residentBase = group.block * PRESENTATION_LIGHT_GROUP_SIZE;
+    if (group.phase === "flight") {
+      const projectile = projectilesById.get(Number(group.projectileId));
+      if (projectile) {
+        const life = particleLife(projectile);
+        assignments.push(this.#assignment(group, 0, {
+          kind: "projectile",
+          sourceId: Number(projectile.id),
+          x: Number(projectile.x),
+          y: 0.9,
+          z: Number(projectile.z),
+          color: mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, 0.68 + life * 0.22),
+          intensity: 22,
+          distance: 3,
+          decay: 2,
+        }, residentBase, colorVariation));
+      }
+    } else if (group.event) {
+      const age = Number(snapshot.tick) - Number(group.event.tick);
+      if (age >= 0 && age < this.explosionLifetimeTicks) {
+        const life = clamp(1 - age / this.explosionLifetimeTicks, 0, 1);
+        const pulse = life * (0.18 + life * 0.82);
+        assignments.push(this.#assignment(group, 0, {
+          kind: "explosion",
+          sourceId: Number(group.event.id),
+          x: Number(group.event.originX),
+          y: 0.55,
+          z: Number(group.event.originZ),
+          color: mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, life),
+          intensity: 52 * pulse,
+          distance: 5,
+          decay: 2,
+        }, residentBase, colorVariation));
+      }
     }
 
     const sizeRange = Math.max(1e-9, PARTICLE.maximumSize - PARTICLE.minimumSize);
-    for (const candidate of selected) {
-      if (!candidate) continue;
-      const particle = candidate.particle;
+    for (const carrier of group.carriers) {
+      const particle = particlesById.get(carrier.id);
+      if (!particle) continue;
+      const life = particleLife(particle);
       const normalizedMaximumSize = clamp(
-        (particle.size - PARTICLE.minimumSize) / sizeRange,
+        (Number(particle.size) - PARTICLE.minimumSize) / sizeRange,
         0,
         1,
       );
-      const fade = candidate.life * candidate.life * (3 - 2 * candidate.life);
-      assignments.push({
-        key: `particle:${particle.id}`,
+      const fade = life * life * (3 - 2 * life);
+      assignments.push(this.#assignment(group, carrier.slot, {
         kind: "particle",
         sourceId: Number(particle.id),
         x: Number(particle.x),
         y: Math.max(0.08, Number(particle.y) + Number(particle.currentSize)),
         z: Number(particle.z),
-        color: sparkFireColor(candidate.life),
+        color: sparkFireColor(life),
         intensity: (4 + 9 * normalizedMaximumSize) * fade,
         distance: 1.5,
         decay: 2,
-      });
+      }, residentBase, colorVariation));
     }
+  }
 
-    return assignments;
+  /**
+   * @param {Record<string,any>} group
+   * @param {number} groupSlot
+   * @param {Record<string,any>} value
+   * @param {number} residentBase
+   * @param {boolean} colorVariation
+   */
+  #assignment(group, groupSlot, value, residentBase, colorVariation) {
+    return {
+      key: `effect:${group.key}:${groupSlot}`,
+      groupKey: group.key,
+      projectileId: group.projectileId,
+      groupSlot,
+      residentSlot: residentBase + groupSlot,
+      tint: {
+        anchor: group.tint.anchor,
+        amount: group.tint.amount,
+      },
+      ...value,
+      color: applyFireballTint(value.color, group.tint, colorVariation),
+    };
   }
 }
 

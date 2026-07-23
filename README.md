@@ -1,4 +1,4 @@
-# Lantern 0.3.2 / Blast Lab
+# Lantern 0.3.3 / Blast Lab
 
 A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots.
 
@@ -10,6 +10,15 @@ npm start
 
 The server prints clickable links for Canvas2D, automatic 3D, and forced WebGL 2. Development requires Node.js 20+ and a modern desktop browser.
 
+To expose the development build to phones and other devices on a trusted LAN:
+
+```bash
+npm start -- --host 0.0.0.0
+npm start -- --host 0.0.0.0 --port 5000
+```
+
+The server enumerates non-loopback IPv4 addresses and prints phone-ready routes. It has no authentication: do not expose it to an untrusted network. Each connected device runs its own local simulation; this is presentation testing, not multiplayer state hosting. Existing `HOST` and `PORT` environment variables remain supported.
+
 Three.js `0.184.0` is the single pinned runtime dependency. `npm install` restores it from `package-lock.json`.
 
 Presentation routes:
@@ -17,6 +26,8 @@ Presentation routes:
 - <http://127.0.0.1:4173/?renderer=2d> — Canvas2D, also the default.
 - <http://127.0.0.1:4173/?renderer=3d> — Three.js with automatic WebGPU/WebGL 2 selection.
 - <http://127.0.0.1:4173/?renderer=3d&backend=webgl> — forced WebGL 2 fallback test.
+
+The Balanced 3D defaults are 16 resident lights, a 1.5× pixel-density cap, antialiasing on, automatic backend selection, dynamic lights and subtle light-color variation on, and bloom/shadows off. URL options are `lights=8|16|32|64`, `dpr=1|1.5|2`, `aa=0|1`, `dynamicLights=0|1`, `lightColorVariation=0|1`, `bloom=0|1`, and `shadows=0|1`.
 
 ## Validate
 
@@ -28,7 +39,7 @@ npm run test:soak
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.3.2` is the current application patch; the `0.3.0` presentation milestone, schema v4, scenario v2, and frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.3.3` is the current application patch; the `0.3.0` presentation milestone, schema v4, scenario v2, and frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
 
 ## Play controls
 
@@ -70,9 +81,17 @@ See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the forc
 
 ## 3D presentation vertical
 
-The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. It adds cool fill lighting plus a fixed pool of eight shadowless point lights prioritized as explosion pulses, fireballs, then stable leases on large/young sparks. Each spark light remains bound to its original carrier, fades continuously to zero, and leaves its resident slot dark when that carrier disappears; only a genuinely new spark may claim an empty slot.
+The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. Its default pool contains 16 resident, shadowless point lights: two atomic eight-slot effect groups. Within a group, slot zero follows one projectile and becomes that projectile's explosion pulse; slots one through seven remain leased to the seven largest newly observed sparks associated with that impact. A disappearing carrier leaves its slot dark, a retired tail never relights, and admitting a newer effect retires an older group as a unit.
 
-Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md), [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md), and [0.3.2 spark-light affinity regression](./docs/notes/0.3.2-spark-light-affinity.md) for the full boundary and bugs that must remain covered. Canvas2D remains the default regression route.
+Particles associate presentation-side with the nearest explosion first observed in the same snapshot, using event ID for distance ties; direct particle fixtures use a deterministic orphan group. Each fireball receives a stable seeded 1–3% red, green, or blue light bias with Rec.709 luminance restored after mixing. Tint applies only to point lights, so projectile and spark mesh colors remain the established fire gradient.
+
+Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md), [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md), [0.3.2 spark-light affinity regression](./docs/notes/0.3.2-spark-light-affinity.md), and [0.3.3 Render Lab/performance note](./docs/notes/0.3.3-render-lab-performance.md). Canvas2D remains the default regression route.
+
+## Render Lab and capture
+
+Open **Render Lab** before, during, or after renderer warmup. Renderer, backend, resident-light capacity, and antialiasing are startup topology and show **reload required** when changed. Pixel-density cap, dynamic lights, color variation, bloom, and directional shadows apply live. Settings persist only through the visible URL; Lantern does not keep a second `localStorage` configuration.
+
+The panel reports backend, CSS/backing resolution, effective DPR, active/resident lights, frame and CPU timing, and GPU timestamp availability. **Capture 10 seconds** resets timing histories without scripting gameplay, samples the normal running workload, and produces copyable/downloadable JSON with browser/device facts, settings, workload maxima, timing percentiles, presentation phases, lights, spikes, and GPU render samples where timestamp queries are supported. Renderer initialization failures leave Render Lab active with direct routes to a lower light tier, forced WebGL 2, or Canvas2D.
 
 ## Snapshots and recordings
 
@@ -86,4 +105,6 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`.
 
-`window.__lantern.presentation()` reports renderer/backend, warmup duration, active/resident lights, draw counts, cached presentation phase timings, recent 32 ms spikes, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears only these timing histories and spike records; `setPresentationFlag(name, value)` accepts `dynamicLights`, `bloom`, and `shadows` without adding simulation commands.
+`window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation phase timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears only these timing histories and spike records. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts `dynamicLights`, `lightColorVariation`, `bloom`, and `shadows` without adding simulation commands.
+
+`capturePerformance()` and its alias `startPerformanceCapture()` return the asynchronous ten-second report. `latestPerformanceReport()` and `performanceReport()` return the latest completed report or `null`.

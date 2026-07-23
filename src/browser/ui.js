@@ -57,6 +57,10 @@ export class ArenaUi {
     this.canvas.setAttribute("aria-disabled", "true");
     for (const control of document.querySelectorAll("button, input")) {
       const element = /** @type {HTMLButtonElement|HTMLInputElement} */ (control);
+      if (
+        element.id === "render-lab-button"
+        || element.closest("#render-lab-dialog")
+      ) continue;
       this.controlStates.set(element, element.disabled);
       element.disabled = true;
     }

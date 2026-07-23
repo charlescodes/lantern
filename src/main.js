@@ -2,9 +2,14 @@
 
 import { InputController } from "./browser/input.js";
 import { ArenaUi } from "./browser/ui.js";
-import { SCHEMA_VERSION } from "./config.js";
+import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
 import { createPresentation } from "./presentation/factory.js";
 import { parsePresentationOptions } from "./presentation/options.js";
+import {
+  collectDeviceBrowserFacts,
+  PerformanceCapture,
+} from "./presentation/performance_capture.js";
+import { RenderLab } from "./presentation/render_lab.js";
 import { FixedStepRuntime } from "./runtime/fixed_step_runtime.js";
 import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
@@ -16,9 +21,10 @@ const simulation = new Simulation();
 const initialSnapshot = simulation.snapshot();
 const ui = new ArenaUi();
 const presentationOptions = parsePresentationOptions(window.location.search);
+const renderLab = new RenderLab(presentationOptions);
 document.body.dataset.renderer = presentationOptions.renderer;
 ui.beginPresentationWarmup(presentationOptions.renderer);
-let presentationBundle;
+let presentationBundle = null;
 try {
   presentationBundle = await createPresentation(
     canvas,
@@ -28,15 +34,18 @@ try {
 } catch (error) {
   ui.failPresentationWarmup();
   ui.showError(error);
-  throw error;
+  renderLab.showFailure(error);
 }
+if (presentationBundle) {
 const { camera, presentation } = presentationBundle;
+renderLab.attachPresentation(presentation);
 document.body.dataset.backend = presentation.diagnostics().activeBackend;
 let mode = /** @type {"play"|"edit"} */ ("play");
 let editorTool = "wall";
 let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
+let performanceCapture;
 
 const runtime = new FixedStepRuntime({
   simulation,
@@ -63,12 +72,15 @@ const runtime = new FixedStepRuntime({
         )
         : true,
     });
+    const presentationDiagnostics = presentation.diagnostics();
     ui.update(snapshot, metrics, {
       mouseWorld: input.mouseWorld,
       hover,
       inspected: selected,
       mode,
-    }, presentation.diagnostics());
+    }, presentationDiagnostics);
+    renderLab.update(presentationDiagnostics, metrics);
+    performanceCapture?.observe(snapshot, metrics, presentationDiagnostics);
   },
   onError: (error) => ui.showError(error),
 });
@@ -344,12 +356,41 @@ const probe = Object.freeze({
   setPresentationFlag(name, value) {
     return presentation.setPresentationFlag(String(name), value);
   },
+  setPixelDensityCap(value) {
+    return presentation.setPixelDensityCap(Number(value));
+  },
   resetPerformanceMetrics() {
     runtime.resetPerformanceMetrics();
     presentation.resetPerformanceMetrics();
     return true;
   },
+  capturePerformance() {
+    return performanceCapture.capture();
+  },
+  startPerformanceCapture() {
+    return performanceCapture.capture();
+  },
+  latestPerformanceReport() {
+    return performanceCapture.latestReport;
+  },
+  performanceReport() {
+    return performanceCapture.latestReport;
+  },
 });
+
+performanceCapture = new PerformanceCapture({
+  applicationVersion: APPLICATION_VERSION,
+  resetMetrics: () => {
+    runtime.resetPerformanceMetrics();
+    presentation.resetPerformanceMetrics();
+  },
+  runtimeMetrics: () => runtime.metrics(),
+  presentationDiagnostics: () => presentation.diagnostics(),
+  deviceFacts: () => collectDeviceBrowserFacts(window, navigator),
+  beginGpuCapture: () => presentation.beginGpuTimingCapture(),
+  endGpuCapture: () => presentation.endGpuTimingCapture(),
+});
+renderLab.setCaptureHandler(() => performanceCapture.capture());
 
 Object.defineProperty(window, "__lantern", {
   value: probe,
@@ -368,3 +409,4 @@ window.dispatchEvent(new CustomEvent("lantern:ready", {
     presentation: presentation.diagnostics(),
   },
 }));
+}

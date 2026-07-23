@@ -1,7 +1,7 @@
 // @ts-check
 
 import { DebugRenderer } from "../browser/renderer.js";
-import { PresentationFlags } from "./options.js";
+import { parsePresentationOptions, PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
 import { PresentationWarmupStatus } from "./warmup.js";
 
@@ -10,10 +10,12 @@ export class CanvasPresentation {
    * @param {HTMLCanvasElement} canvas
    * @param {import('../browser/camera.js').Camera2D} camera
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
+   * @param {ReturnType<import('./options.js').parsePresentationOptions>} [options]
    */
-  constructor(canvas, camera, initialSnapshot) {
-    this.renderer = new DebugRenderer(canvas, camera);
-    this.flags = new PresentationFlags();
+  constructor(canvas, camera, initialSnapshot, options = parsePresentationOptions()) {
+    this.renderer = new DebugRenderer(canvas, camera, options.dpr);
+    this.flags = new PresentationFlags(options);
+    this.options = options;
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(false);
     this.profiler.prime({
@@ -46,6 +48,19 @@ export class CanvasPresentation {
     return this.flags.set(name, value);
   }
 
+  /** @param {unknown} value */
+  setPixelDensityCap(value) {
+    return this.renderer.setPixelDensityCap(Number(value));
+  }
+
+  beginGpuTimingCapture() {
+    return false;
+  }
+
+  async endGpuTimingCapture() {
+    return null;
+  }
+
   diagnostics() {
     return {
       requestedRenderer: "2d",
@@ -55,10 +70,26 @@ export class CanvasPresentation {
       triangles: 0,
       activeLightCount: 0,
       residentLightCount: 0,
+      cssResolution: {
+        width: this.renderer.width,
+        height: this.renderer.height,
+      },
+      backingResolution: {
+        width: this.renderer.canvas.width,
+        height: this.renderer.canvas.height,
+      },
+      effectiveDpr: this.renderer.backingScale,
+      gpuTimingAvailable: false,
+      gpuRenderMs: null,
       warmup: this.warmup.snapshot(),
       presentationCpuMs: this.profiler.summary(),
       recentSpikes: this.profiler.recentSpikes(),
       flags: this.flags.snapshot(),
+      settings: {
+        lights: this.options.lights,
+        dpr: this.renderer.pixelDensityCap,
+        aa: this.options.aa,
+      },
     };
   }
 

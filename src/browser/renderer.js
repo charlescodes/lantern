@@ -34,7 +34,6 @@ const COLORS = Object.freeze({
 const GRID_LABEL_MINIMUM_VIEWPORT_SIZE = 26;
 const GRID_LABEL_FONT = "10px 'Iosevka', 'Cascadia Code', monospace";
 const HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER = 0.72;
-const MAXIMUM_CANVAS_BACKING_SCALE = 2;
 
 /** @param {number} value @param {number} min @param {number} max */
 function clamp(value, min, max) {
@@ -42,8 +41,12 @@ function clamp(value, min, max) {
 }
 
 export class DebugRenderer {
-  /** @param {HTMLCanvasElement} canvas @param {import('./camera.js').Camera2D} camera */
-  constructor(canvas, camera) {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {import('./camera.js').Camera2D} camera
+   * @param {number} [pixelDensityCap]
+   */
+  constructor(canvas, camera, pixelDensityCap = 1.5) {
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("Canvas2D is not available");
     this.canvas = canvas;
@@ -52,6 +55,15 @@ export class DebugRenderer {
     this.width = 1;
     this.height = 1;
     this.backingScale = 1;
+    this.pixelDensityCap = pixelDensityCap;
+  }
+
+  /** @param {number} value */
+  setPixelDensityCap(value) {
+    if (![1, 1.5, 2].includes(value)) return false;
+    this.pixelDensityCap = value;
+    this.backingScale = 0;
+    return true;
   }
 
   resize() {
@@ -59,7 +71,7 @@ export class DebugRenderer {
     const width = Math.max(1, Math.round(bounds.width));
     const height = Math.max(1, Math.round(bounds.height));
     const backingScale = Math.min(
-      MAXIMUM_CANVAS_BACKING_SCALE,
+      this.pixelDensityCap,
       window.devicePixelRatio || 1,
     );
     if (

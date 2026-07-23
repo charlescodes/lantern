@@ -16,7 +16,6 @@ import { PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
 import { PresentationWarmupStatus } from "./warmup.js";
 
-const MAXIMUM_CANVAS_BACKING_SCALE = 2;
 const WALL_HEIGHT_METERS = 2.5;
 const PLAYER_HEIGHT_METERS = 1.6;
 const FIREBALL_CHEST_HEIGHT_METERS = 0.9;
@@ -47,18 +46,19 @@ export class ThreePresentation {
   /**
    * @param {HTMLCanvasElement} canvas
    * @param {import('./camera_3d.js').Camera3D} camera
-   * @param {{renderer:"2d"|"3d",backend:"auto"|"webgl",forceWebGL:boolean}} options
+   * @param {ReturnType<import('./options.js').parsePresentationOptions>} options
    * @param {number} [warmupStartedAt]
    */
   constructor(canvas, camera, options, warmupStartedAt = performance.now()) {
     this.canvas = canvas;
     this.camera = camera;
     this.options = options;
-    this.flags = new PresentationFlags();
+    this.flags = new PresentationFlags(options);
     this.activeBackend = "initializing";
     this.width = 0;
     this.height = 0;
     this.backingScale = 0;
+    this.pixelDensityCap = options.dpr;
     this.activeLightCount = 0;
     this.residentLightCount = 0;
     this.mapHash = -1;
@@ -69,7 +69,7 @@ export class ThreePresentation {
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
-    this.lightBudget = new PresentationLightBudget();
+    this.lightBudget = new PresentationLightBudget({ capacity: options.lights });
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(
       true,
@@ -80,7 +80,7 @@ export class ThreePresentation {
     this.webRenderer = new THREE.WebGPURenderer({
       canvas,
       alpha: false,
-      antialias: true,
+      antialias: options.aa,
       forceWebGL: options.forceWebGL,
     });
     this.webRenderer.setClearColor(0x080b10, 1);
@@ -221,6 +221,11 @@ export class ThreePresentation {
     this._bloomEnabled = false;
     this.renderPipeline = null;
     this.bloomOutput = null;
+    this.gpuTimingSupported = false;
+    this.gpuCaptureActive = false;
+    this.gpuRenderSamples = [];
+    this._gpuResolvePromise = null;
+    this.#applyShadowFlag();
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot */
@@ -230,6 +235,7 @@ export class ThreePresentation {
       this.activeBackend = this.webRenderer.backend.isWebGPUBackend === true
         ? "webgpu"
         : "webgl2";
+      this.gpuTimingSupported = this.#detectGpuTimingSupport();
       this.camera.focus(initialSnapshot.player.x, initialSnapshot.player.z);
       this.resize();
 
@@ -253,7 +259,7 @@ export class ThreePresentation {
     const width = Math.max(1, Math.round(bounds.width));
     const height = Math.max(1, Math.round(bounds.height));
     const backingScale = Math.min(
-      MAXIMUM_CANVAS_BACKING_SCALE,
+      this.pixelDensityCap,
       window.devicePixelRatio || 1,
     );
     if (
@@ -304,6 +310,7 @@ export class ThreePresentation {
     completeInstancedPoolSubmission(this.particleMesh);
     this._bloomEnabled = bloomEnabled;
     const submitFinished = performance.now();
+    this.#sampleGpuTimer();
     this.profiler.record({
       tick: snapshot.tick,
       projectileCount: snapshot.projectiles.length,
@@ -327,6 +334,34 @@ export class ThreePresentation {
     return true;
   }
 
+  /** @param {unknown} value */
+  setPixelDensityCap(value) {
+    const cap = Number(value);
+    if (![1, 1.5, 2].includes(cap)) return false;
+    this.pixelDensityCap = cap;
+    this.backingScale = 0;
+    return true;
+  }
+
+  beginGpuTimingCapture() {
+    if (!this.gpuTimingSupported || this.gpuCaptureActive) return false;
+    this.gpuRenderSamples = [];
+    this.gpuCaptureActive = true;
+    this.webRenderer.backend.trackTimestamp = true;
+    return true;
+  }
+
+  async endGpuTimingCapture() {
+    if (!this.gpuCaptureActive) return null;
+    this.gpuCaptureActive = false;
+    try {
+      if (this._gpuResolvePromise) await this._gpuResolvePromise;
+    } finally {
+      this.webRenderer.backend.trackTimestamp = false;
+    }
+    return [...this.gpuRenderSamples];
+  }
+
   diagnostics() {
     return {
       requestedRenderer: "3d",
@@ -336,10 +371,27 @@ export class ThreePresentation {
       triangles: Math.round(this.webRenderer.info.render.triangles),
       activeLightCount: this.activeLightCount,
       residentLightCount: this.residentLightCount,
+      cssResolution: {
+        width: this.width,
+        height: this.height,
+      },
+      backingResolution: {
+        width: this.canvas.width,
+        height: this.canvas.height,
+      },
+      effectiveDpr: this.backingScale,
+      gpuTimingAvailable: this.gpuTimingSupported,
+      gpuRenderMs: this.gpuRenderSamples.at(-1) ?? null,
       warmup: this.warmup.snapshot(),
       presentationCpuMs: this.profiler.summary(),
       recentSpikes: this.profiler.recentSpikes(),
       flags: this.flags.snapshot(),
+      settings: {
+        lights: this.lightBudget.capacity,
+        dpr: this.pixelDensityCap,
+        aa: this.options.aa,
+      },
+      lightGroups: this.lightBudget.diagnostics(),
     };
   }
 
@@ -597,6 +649,7 @@ export class ThreePresentation {
     const assignments = this.lightBudget.allocate(
       snapshot,
       this.flags.values.dynamicLights,
+      this.flags.values.lightColorVariation,
     );
     this.activeLightCount = applyLightPool(
       this.dynamicLights,
@@ -663,6 +716,29 @@ export class ThreePresentation {
     this.directionalLight.castShadow = enabled;
     this.webRenderer.shadowMap.needsUpdate = true;
     for (const light of this.dynamicLights) light.castShadow = false;
+  }
+
+  #detectGpuTimingSupport() {
+    const backend = this.webRenderer.backend;
+    if (backend.isWebGPUBackend === true) {
+      return backend.device?.features?.has("timestamp-query") === true;
+    }
+    if (backend.isWebGLBackend === true) return Boolean(backend.disjoint);
+    return false;
+  }
+
+  #sampleGpuTimer() {
+    if (!this.gpuCaptureActive || this._gpuResolvePromise) return;
+    this._gpuResolvePromise = this.webRenderer.resolveTimestampsAsync("render")
+      .then((duration) => {
+        if (Number.isFinite(duration) && duration >= 0) {
+          this.gpuRenderSamples.push(duration);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        this._gpuResolvePromise = null;
+      });
   }
 
   /** @param {number} color @param {number} inner @param {number} outer @param {number} opacity */

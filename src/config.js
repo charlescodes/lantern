@@ -3,6 +3,7 @@
 export const SCHEMA_VERSION = 4;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 2;
+export const APPLICATION_VERSION = "0.3.3";
 
 export const SIMULATION = Object.freeze({
   tickHz: 60,

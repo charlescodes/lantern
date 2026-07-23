@@ -1,12 +1,17 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  listLanIpv4Addresses,
+  parseServeOptions,
+  startupMessages,
+} from "./serve_options.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
-const host = process.env.HOST || "127.0.0.1";
-const port = Number.parseInt(process.env.PORT || "4173", 10);
+const { host, port } = parseServeOptions(process.argv.slice(2), process.env);
 const mimeTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -40,9 +45,11 @@ createServer(async (request, response) => {
     response.end(code === 404 ? "Not found" : "Internal server error");
   }
 }).listen(port, host, () => {
-  const baseUrl = `http://${host}:${port}/`;
-  console.log(`Lantern ${manifest.version} development routes:`);
-  console.log(`  Canvas2D (default)       ${new URL("?renderer=2d", baseUrl)}`);
-  console.log(`  3D (automatic backend)  ${new URL("?renderer=3d", baseUrl)}`);
-  console.log(`  3D (forced WebGL 2)     ${new URL("?renderer=3d&backend=webgl", baseUrl)}`);
+  const messages = startupMessages({
+    version: manifest.version,
+    host,
+    port,
+    lanAddresses: listLanIpv4Addresses(networkInterfaces()),
+  });
+  for (const message of messages) console.log(message);
 });

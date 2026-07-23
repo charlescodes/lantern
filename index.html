@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#101511">
-    <title>Lantern 0.3.2 · Blast Lab</title>
+    <title>Lantern 0.3.3 · Blast Lab</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="importmap">
       {
@@ -22,7 +22,7 @@
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="eyebrow">Project Lantern / 0.3.2</p>
+          <p class="eyebrow">Project Lantern / 0.3.3</p>
           <h1>Blast Lab</h1>
         </div>
       </div>
@@ -37,6 +37,7 @@
         <button id="reset-button" type="button">Reset</button>
         <button id="mode-button" class="accent-button" type="button">Enter edit</button>
         <button id="focus-button" type="button">Focus</button>
+        <button id="render-lab-button" type="button" data-render-lab>Render Lab</button>
       </nav>
     </header>
 
@@ -130,6 +131,101 @@
         <p id="error-output" class="error-output" role="alert" hidden></p>
       </aside>
     </main>
+    <dialog id="render-lab-dialog" class="render-lab" data-render-lab>
+      <div class="render-lab-heading">
+        <div>
+          <p class="eyebrow">Presentation controls</p>
+          <h2>Render Lab</h2>
+        </div>
+        <button id="render-lab-close" type="button" aria-label="Close Render Lab">Close</button>
+      </div>
+
+      <p id="render-lab-status" class="render-lab-status" role="status">
+        URL settings are the only persisted state.
+      </p>
+
+      <div class="render-lab-grid">
+        <section>
+          <div class="section-heading"><h2>Startup topology</h2><span>reload required</span></div>
+          <div class="render-control-grid">
+            <label>Renderer
+              <select data-presentation-option="renderer">
+                <option value="2d">Canvas2D</option>
+                <option value="3d">Three.js 3D</option>
+              </select>
+            </label>
+            <label>Backend
+              <select data-presentation-option="backend">
+                <option value="auto">Automatic</option>
+                <option value="webgl">Force WebGL 2</option>
+              </select>
+            </label>
+            <label>Resident lights
+              <select data-presentation-option="lights">
+                <option value="8">8 · Low</option>
+                <option value="16">16 · Balanced</option>
+                <option value="32">32 · High</option>
+                <option value="64">64 · Lab</option>
+              </select>
+            </label>
+            <label class="render-check">
+              <input type="checkbox" data-presentation-option="aa"> Antialiasing
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-heading"><h2>Live settings</h2><span>applied immediately</span></div>
+          <div class="render-control-grid">
+            <label>Pixel-density cap
+              <select data-presentation-option="dpr">
+                <option value="1">1×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
+              </select>
+            </label>
+            <label class="render-check">
+              <input type="checkbox" data-presentation-option="dynamicLights"> Dynamic lights
+            </label>
+            <label class="render-check">
+              <input type="checkbox" data-presentation-option="lightColorVariation"> Color variation
+            </label>
+            <label class="render-check">
+              <input type="checkbox" data-presentation-option="bloom"> Bloom
+            </label>
+            <label class="render-check">
+              <input type="checkbox" data-presentation-option="shadows"> Directional shadows
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <section class="render-lab-diagnostic-section">
+        <div class="section-heading"><h2>Live instrument</h2><span>current renderer</span></div>
+        <pre id="render-lab-diagnostics">Renderer has not initialized yet.</pre>
+      </section>
+
+      <section id="render-lab-failure" class="render-lab-failure" hidden>
+        <div class="section-heading"><h2>Renderer recovery</h2><span>initialization failed</span></div>
+        <p id="render-lab-failure-message"></p>
+        <div class="render-lab-actions">
+          <button type="button" data-render-recovery="lower-lights">Lower light tier</button>
+          <button type="button" data-render-recovery="webgl">Force WebGL 2</button>
+          <button type="button" data-render-recovery="canvas">Use Canvas2D</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-heading"><h2>Performance capture</h2><span>unscripted · ten seconds</span></div>
+        <div class="render-lab-actions">
+          <button id="render-lab-capture" type="button">Capture 10 seconds</button>
+          <button id="render-lab-copy" type="button">Copy JSON</button>
+          <button id="render-lab-download" type="button">Download JSON</button>
+          <button id="render-lab-reload" type="button" hidden>Reload with settings</button>
+        </div>
+        <pre id="render-lab-report" class="render-lab-report">No performance report captured.</pre>
+      </section>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="./src/main.js"></script>
   </body>
