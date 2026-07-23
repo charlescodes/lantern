@@ -7,8 +7,14 @@
  * @param {Array<Record<string, any>>} lights
  * @param {Array<Record<string, any>>} assignments
  * @param {boolean} [enabled]
+ * @param {(x:number,z:number)=>number} [visibilityAt]
  */
-export function applyLightPool(lights, assignments, enabled = true) {
+export function applyLightPool(
+  lights,
+  assignments,
+  enabled = true,
+  visibilityAt = () => 1,
+) {
   for (const light of lights) {
     light.visible = true;
     light.castShadow = false;
@@ -29,7 +35,11 @@ export function applyLightPool(lights, assignments, enabled = true) {
     const appliedSlots = new Set();
     for (const assignment of slotted) {
       if (appliedSlots.has(assignment.residentSlot)) continue;
-      applyAssignment(lights[assignment.residentSlot], assignment);
+      applyAssignment(
+        lights[assignment.residentSlot],
+        assignment,
+        visibilityAt(assignment.x, assignment.z),
+      );
       appliedSlots.add(assignment.residentSlot);
     }
     for (let index = 0; index < lights.length; index += 1) {
@@ -56,7 +66,11 @@ export function applyLightPool(lights, assignments, enabled = true) {
       light.userData.assignment = null;
       continue;
     }
-    applyAssignment(light, assignment);
+    applyAssignment(
+      light,
+      assignment,
+      visibilityAt(assignment.x, assignment.z),
+    );
     appliedKeys.add(key);
     activeCount += 1;
   }
@@ -67,7 +81,11 @@ export function applyLightPool(lights, assignments, enabled = true) {
       (candidate) => candidate.userData.assignment === null,
     );
     if (!light) break;
-    applyAssignment(light, assignment);
+    applyAssignment(
+      light,
+      assignment,
+      visibilityAt(assignment.x, assignment.z),
+    );
     appliedKeys.add(assignment.key);
     activeCount += 1;
   }
@@ -78,15 +96,19 @@ export function applyLightPool(lights, assignments, enabled = true) {
 /**
  * @param {Record<string, any>} light
  * @param {Record<string, any>} assignment
+ * @param {number} [visibility]
  */
-function applyAssignment(light, assignment) {
+function applyAssignment(light, assignment, visibility = 1) {
   light.position.set(assignment.x, assignment.y, assignment.z);
   light.color.setRGB(
     assignment.color.r,
     assignment.color.g,
     assignment.color.b,
   );
-  light.intensity = assignment.intensity;
+  light.intensity = assignment.intensity * Math.max(
+    0,
+    Math.min(1, Number(visibility) || 0),
+  );
   light.distance = assignment.distance;
   light.decay = assignment.decay;
   light.userData.assignment = assignment.key;

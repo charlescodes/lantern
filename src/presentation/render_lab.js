@@ -1,6 +1,7 @@
 // @ts-check
 
 import {
+  PRESENTATION_FLAG_NAMES,
   parsePresentationOptions,
   presentationOptionMode,
   presentationOptionsToSearch,
@@ -128,12 +129,7 @@ export class RenderLab {
     this.presentation = presentation;
     const current = parsePresentationOptions(window.location.search);
     presentation.setPixelDensityCap(current.dpr);
-    for (const name of [
-      "dynamicLights",
-      "lightColorVariation",
-      "bloom",
-      "shadows",
-    ]) {
+    for (const name of PRESENTATION_FLAG_NAMES) {
       presentation.setPresentationFlag(name, current[name]);
     }
     this.clearFailure();
@@ -170,6 +166,8 @@ export class RenderLab {
     const frame = runtime.frameMs ?? {};
     const renderer = runtime.renderMs ?? {};
     const phases = presentation.presentationCpuMs?.totalMs ?? {};
+    const trueSight = presentation.trueSight ?? {};
+    const trueSightCpu = presentation.trueSightCpuMs ?? {};
     this.diagnostics.textContent = [
       `backend       ${presentation.activeBackend ?? "initializing"}`,
       `resolution    CSS ${css.width ?? "--"}×${css.height ?? "--"}  backing ${backing.width ?? "--"}×${backing.height ?? "--"}`,
@@ -178,6 +176,8 @@ export class RenderLab {
       `frame ms      ${formatted(frame.p50)} / ${formatted(frame.p95)} / ${formatted(frame.p99)}  p50/p95/p99`,
       `renderer CPU  ${formatted(renderer.p50)} / ${formatted(renderer.p95)} / ${formatted(renderer.p99)} ms`,
       `present CPU   ${formatted(phases.p50)} / ${formatted(phases.p95)} / ${formatted(phases.p99)} ms`,
+      `TrueSight CPU ${formatted(trueSightCpu.p50)} / ${formatted(trueSightCpu.p95)} / ${formatted(trueSightCpu.p99)} ms`,
+      `TrueSight     ${trueSight.rayCount ?? 0} rays  ${trueSight.polygonVertexCount ?? 0} vertices  ${trueSight.visibleWallCount ?? 0} walls  ${trueSight.maskWidth ?? "--"}×${trueSight.maskHeight ?? "--"}`,
       `GPU timing    ${presentation.gpuTimingAvailable ? "available during capture" : "unavailable"}${presentation.gpuRenderMs === null || presentation.gpuRenderMs === undefined ? "" : `  latest ${formatted(presentation.gpuRenderMs)} ms`}`,
     ].join("\n");
   }

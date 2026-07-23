@@ -1,7 +1,12 @@
 // @ts-check
 
 import * as THREE from "three/webgpu";
-import { pass } from "three/tsl";
+import {
+  pass,
+  positionWorld,
+  texture,
+  uniform,
+} from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ROCK_ARCHETYPES } from "../config.js";
@@ -15,6 +20,7 @@ import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
 import { PresentationWarmupStatus } from "./warmup.js";
+import { TRUE_SIGHT_MAX_RAYS } from "../visibility/true_sight.js";
 
 const WALL_HEIGHT_METERS = 2.5;
 const PLAYER_HEIGHT_METERS = 1.6;
@@ -48,12 +54,19 @@ export class ThreePresentation {
    * @param {import('./camera_3d.js').Camera3D} camera
    * @param {ReturnType<import('./options.js').parsePresentationOptions>} options
    * @param {number} [warmupStartedAt]
+   * @param {PresentationFlags} [flags]
    */
-  constructor(canvas, camera, options, warmupStartedAt = performance.now()) {
+  constructor(
+    canvas,
+    camera,
+    options,
+    warmupStartedAt = performance.now(),
+    flags = new PresentationFlags(options),
+  ) {
     this.canvas = canvas;
     this.camera = camera;
     this.options = options;
-    this.flags = new PresentationFlags(options);
+    this.flags = flags;
     this.activeBackend = "initializing";
     this.width = 0;
     this.height = 0;
@@ -75,6 +88,34 @@ export class ThreePresentation {
       true,
       () => performance.now(),
       warmupStartedAt,
+    );
+    this.currentSightFrame = null;
+    this.sightTexture = new THREE.DataTexture(
+      new Uint8Array([255]),
+      1,
+      1,
+      THREE.RedFormat,
+      THREE.UnsignedByteType,
+    );
+    this.sightTexture.name = "true-sight-display-mask";
+    this.sightTexture.minFilter = THREE.LinearFilter;
+    this.sightTexture.magFilter = THREE.LinearFilter;
+    this.sightTexture.wrapS = THREE.ClampToEdgeWrapping;
+    this.sightTexture.wrapT = THREE.ClampToEdgeWrapping;
+    this.sightTexture.generateMipmaps = false;
+    this.sightTexture.flipY = false;
+    this.sightTexture.unpackAlignment = 1;
+    this.sightTexture.colorSpace = THREE.NoColorSpace;
+    this.sightTexture.needsUpdate = true;
+    this.sightMapSize = new THREE.Vector2(1, 1);
+    this.sightMapSizeNode = uniform(this.sightMapSize);
+    this.sightOpacityNode = texture(
+      this.sightTexture,
+      positionWorld.xz.div(this.sightMapSizeNode),
+    ).r;
+    this.sightMaskNode = this.sightOpacityNode.greaterThan(1 / 255);
+    this._sampleSightVisibility = (x, z) => (
+      this.currentSightFrame?.displayVisibilityAt(x, z) ?? 1
     );
 
     this.webRenderer = new THREE.WebGPURenderer({
@@ -125,11 +166,11 @@ export class ThreePresentation {
     );
     this.residentLightCount = this.dynamicLights.length;
 
-    this.floorMaterial = new THREE.MeshStandardMaterial({
+    this.floorMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0x182124,
       roughness: 0.94,
       metalness: 0,
-    });
+    }));
     this.floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.floorMaterial);
     this.floor.name = "arena-floor";
     this.floor.rotation.x = -Math.PI / 2;
@@ -137,45 +178,45 @@ export class ThreePresentation {
     this.scene.add(this.floor);
 
     this.wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT_METERS, 1);
-    this.wallMaterial = new THREE.MeshStandardMaterial({
+    this.wallMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0x485453,
       roughness: 0.78,
       metalness: 0.02,
-    });
+    }));
     this.rockGeometry = new THREE.IcosahedronGeometry(1, 1);
-    this.rockMaterial = new THREE.MeshStandardMaterial({
+    this.rockMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffffff,
       roughness: 0.9,
       metalness: 0,
       vertexColors: true,
-    });
+    }));
     this.projectileGeometry = new THREE.IcosahedronGeometry(1, 1);
-    this.projectileMaterial = new THREE.MeshStandardMaterial({
+    this.projectileMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffcb72,
       emissive: 0xff4d0d,
       emissiveIntensity: 3.8,
       roughness: 0.25,
       metalness: 0,
-    });
+    }));
     this.particleGeometry = new THREE.IcosahedronGeometry(1, 0);
-    this.particleMaterial = new THREE.MeshStandardMaterial({
+    this.particleMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffffff,
       emissive: 0xff3b08,
       emissiveIntensity: 2.6,
       roughness: 0.36,
       metalness: 0,
       vertexColors: true,
-    });
+    }));
 
     this.player = new THREE.Mesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({
+      this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
         color: 0xe2bc67,
         emissive: 0x211607,
         emissiveIntensity: 0.35,
         roughness: 0.68,
         metalness: 0.03,
-      }),
+      })),
     );
     this.player.name = "player-block";
     this.player.castShadow = true;
@@ -189,28 +230,94 @@ export class ThreePresentation {
     this.selectedMarker = this.#createGroundRing(0xfff1b0, 0.86, 1, 0.96);
     this.editCellPreview = new THREE.Mesh(
       new THREE.BoxGeometry(1, 0.035, 1),
-      new THREE.MeshBasicMaterial({
+      this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
         color: 0xff834d,
         transparent: true,
         opacity: 0.38,
         depthWrite: false,
-      }),
+      })),
     );
     this.editCellPreview.visible = false;
     this.scene.add(this.editCellPreview);
     this.editRockPreview = new THREE.Mesh(
       this.rockGeometry,
-      new THREE.MeshBasicMaterial({
+      this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
         color: 0x69d4b3,
         wireframe: true,
         transparent: true,
         opacity: 0.72,
         depthTest: false,
-      }),
+      })),
     );
     this.editRockPreview.visible = false;
     this.editRockPreview.renderOrder = 10;
     this.scene.add(this.editRockPreview);
+
+    this.sightRayPositions = new Float32Array(TRUE_SIGHT_MAX_RAYS * 6);
+    this.sightRayGeometry = new THREE.BufferGeometry();
+    this.sightRayGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(this.sightRayPositions, 3).setUsage(
+        THREE.DynamicDrawUsage,
+      ),
+    );
+    this.sightRayGeometry.setDrawRange(0, 0);
+    this.sightRayLines = new THREE.LineSegments(
+      this.sightRayGeometry,
+      new THREE.LineBasicNodeMaterial({
+        color: 0xffb858,
+        transparent: true,
+        opacity: 0.32,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    );
+    this.sightRayLines.visible = false;
+    this.sightRayLines.renderOrder = 50;
+    this.scene.add(this.sightRayLines);
+
+    this.sightPolygonPositions = new Float32Array(
+      (TRUE_SIGHT_MAX_RAYS + 1) * 3,
+    );
+    this.sightPolygonGeometry = new THREE.BufferGeometry();
+    this.sightPolygonGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(this.sightPolygonPositions, 3).setUsage(
+        THREE.DynamicDrawUsage,
+      ),
+    );
+    this.sightPolygonGeometry.setDrawRange(0, 0);
+    this.sightPolygonLine = new THREE.Line(
+      this.sightPolygonGeometry,
+      new THREE.LineBasicNodeMaterial({
+        color: 0x6ce3ff,
+        transparent: true,
+        opacity: 0.95,
+        depthTest: false,
+        depthWrite: false,
+      }),
+    );
+    this.sightPolygonLine.visible = false;
+    this.sightPolygonLine.renderOrder = 51;
+    this.scene.add(this.sightPolygonLine);
+
+    this.sightHitGeometry = new THREE.BoxGeometry(1, 0.025, 1);
+    this.sightHitMaterial = new THREE.MeshBasicNodeMaterial({
+      color: 0xff5c5c,
+      transparent: true,
+      opacity: 0.28,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.sightHitMesh = createDynamicInstancedPool(
+      this.sightHitGeometry,
+      this.sightHitMaterial,
+      TRUE_SIGHT_MAX_RAYS,
+      "true-sight-hit-wall-cells",
+    );
+    this.sightHitMesh.visible = false;
+    this.sightHitMesh.renderOrder = 49;
+    this.scene.add(this.sightHitMesh);
 
     this._matrix = new THREE.Matrix4();
     this._position = new THREE.Vector3();
@@ -281,18 +388,20 @@ export class ThreePresentation {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame}} view
    */
   render(snapshot, alpha, view) {
     const totalStarted = performance.now();
     this.resize();
     this.#syncCamera();
+    this.#syncSightFrame(view.sightFrame ?? null);
     this.#updateMap(snapshot.map);
     this.#updatePlayer(snapshot.player, alpha);
     this.#updateRocks(snapshot, alpha);
     this.#updateProjectiles(snapshot, alpha);
     this.#updateParticles(snapshot);
     this.#updateView(snapshot, view);
+    this.#updateSightDebug(view.sightFrame ?? null);
     const updateFinished = performance.now();
     this.#updateLights(snapshot);
     const lightsFinished = performance.now();
@@ -392,6 +501,16 @@ export class ThreePresentation {
         aa: this.options.aa,
       },
       lightGroups: this.lightBudget.diagnostics(),
+      trueSightCpuMs: this.currentSightFrame?.timing.totalMs ?? null,
+      trueSight: this.currentSightFrame
+        ? {
+          rayCount: this.currentSightFrame.rayCount,
+          polygonVertexCount: this.currentSightFrame.polygonVertexCount,
+          visibleWallCount: this.currentSightFrame.visibleWallCount,
+          maskWidth: this.currentSightFrame.maskWidth,
+          maskHeight: this.currentSightFrame.maskHeight,
+        }
+        : null,
     };
   }
 
@@ -435,6 +554,9 @@ export class ThreePresentation {
       this.editRockPreview,
       this.projectileMesh,
       this.particleMesh,
+      this.sightRayLines,
+      this.sightPolygonLine,
+      this.sightHitMesh,
     ];
     const visibility = normallyHidden.map((mesh) => mesh.visible);
     const frustumCulling = normallyHidden.map((mesh) => mesh.frustumCulled);
@@ -459,6 +581,100 @@ export class ThreePresentation {
         normallyHidden[index].frustumCulled = frustumCulling[index];
       }
     }
+  }
+
+  /** @param {THREE.NodeMaterial} material */
+  #configureSightMaterial(material) {
+    material.opacityNode = this.sightOpacityNode;
+    material.maskNode = this.sightMaskNode;
+    material.maskShadowNode = this.sightMaskNode;
+    material.alphaHash = true;
+    material.alphaToCoverage = this.options.aa;
+    return material;
+  }
+
+  /** @param {import('../visibility/true_sight.js').TrueSightFrame|null} sightFrame */
+  #syncSightFrame(sightFrame) {
+    this.currentSightFrame = sightFrame;
+    if (!sightFrame) return;
+    const image = this.sightTexture.image;
+    if (
+      image.data !== sightFrame.displayMask
+      || image.width !== sightFrame.maskWidth
+      || image.height !== sightFrame.maskHeight
+    ) {
+      this.sightTexture.image = {
+        data: sightFrame.displayMask,
+        width: sightFrame.maskWidth,
+        height: sightFrame.maskHeight,
+      };
+    }
+    this.sightMapSize.set(sightFrame.mapWidth, sightFrame.mapHeight);
+    this.sightTexture.needsUpdate = true;
+  }
+
+  /** @param {import('../visibility/true_sight.js').TrueSightFrame|null} sightFrame */
+  #updateSightDebug(sightFrame) {
+    const enabled = Boolean(sightFrame && this.flags.values.sightDebug);
+    if (!enabled || !sightFrame) {
+      this.sightRayLines.visible = false;
+      this.sightPolygonLine.visible = false;
+      this.sightRayGeometry.setDrawRange(0, 0);
+      this.sightPolygonGeometry.setDrawRange(0, 0);
+      publishInstancedPool(this.sightHitMesh, 0);
+      return;
+    }
+
+    for (let index = 0; index < sightFrame.rays.length; index += 1) {
+      const ray = sightFrame.rays[index];
+      const offset = index * 6;
+      this.sightRayPositions[offset] = sightFrame.origin.x;
+      this.sightRayPositions[offset + 1] = 0.055;
+      this.sightRayPositions[offset + 2] = sightFrame.origin.z;
+      this.sightRayPositions[offset + 3] = ray.x;
+      this.sightRayPositions[offset + 4] = 0.055;
+      this.sightRayPositions[offset + 5] = ray.z;
+    }
+    const rayAttribute = this.sightRayGeometry.getAttribute("position");
+    rayAttribute.clearUpdateRanges();
+    rayAttribute.addUpdateRange(0, sightFrame.rays.length * 6);
+    rayAttribute.needsUpdate = true;
+    this.sightRayGeometry.setDrawRange(0, sightFrame.rays.length * 2);
+    this.sightRayLines.visible = sightFrame.rays.length > 0;
+
+    const polygonCount = sightFrame.polygon.length;
+    for (let index = 0; index < polygonCount; index += 1) {
+      const point = sightFrame.polygon[index];
+      const offset = index * 3;
+      this.sightPolygonPositions[offset] = point.x;
+      this.sightPolygonPositions[offset + 1] = 0.062;
+      this.sightPolygonPositions[offset + 2] = point.z;
+    }
+    if (polygonCount > 0) {
+      const offset = polygonCount * 3;
+      this.sightPolygonPositions[offset] = sightFrame.polygon[0].x;
+      this.sightPolygonPositions[offset + 1] = 0.062;
+      this.sightPolygonPositions[offset + 2] = sightFrame.polygon[0].z;
+    }
+    const polygonAttribute = this.sightPolygonGeometry.getAttribute("position");
+    polygonAttribute.clearUpdateRanges();
+    polygonAttribute.addUpdateRange(0, (polygonCount + 1) * 3);
+    polygonAttribute.needsUpdate = true;
+    this.sightPolygonGeometry.setDrawRange(0, polygonCount + 1);
+    this.sightPolygonLine.visible = polygonCount > 1;
+
+    const hitCount = Math.min(
+      sightFrame.hitWallCells.length,
+      TRUE_SIGHT_MAX_RAYS,
+    );
+    for (let index = 0; index < hitCount; index += 1) {
+      const cell = sightFrame.hitWallCells[index];
+      this._position.set(cell.cx + 0.5, 0.035, cell.cz + 0.5);
+      this._scale.set(1, 1, 1);
+      this._matrix.compose(this._position, this._quaternion, this._scale);
+      this.sightHitMesh.setMatrixAt(index, this._matrix);
+    }
+    publishInstancedPool(this.sightHitMesh, hitCount);
   }
 
   #syncCamera() {
@@ -506,7 +722,11 @@ export class ThreePresentation {
       geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
       this.gridLines = new THREE.LineSegments(
         geometry,
-        new THREE.LineBasicMaterial({ color: 0x334247, transparent: true, opacity: 0.72 }),
+        this.#configureSightMaterial(new THREE.LineBasicNodeMaterial({
+          color: 0x334247,
+          transparent: true,
+          opacity: 0.72,
+        })),
       );
       this.gridLines.name = "metric-grid";
       this.scene.add(this.gridLines);
@@ -655,6 +875,7 @@ export class ThreePresentation {
       this.dynamicLights,
       assignments,
       this.flags.values.dynamicLights,
+      this._sampleSightVisibility,
     );
   }
 
@@ -745,14 +966,14 @@ export class ThreePresentation {
   #createGroundRing(color, inner, outer, opacity) {
     const marker = new THREE.Mesh(
       new THREE.RingGeometry(inner, outer, 32),
-      new THREE.MeshBasicMaterial({
+      this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
         color,
         transparent: true,
         opacity,
         depthTest: false,
         depthWrite: false,
         side: THREE.DoubleSide,
-      }),
+      })),
     );
     marker.rotation.x = -Math.PI / 2;
     marker.renderOrder = 20;

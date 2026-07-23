@@ -5,6 +5,9 @@ export const PRESENTATION_FLAG_NAMES = Object.freeze([
   "lightColorVariation",
   "bloom",
   "shadows",
+  "trueSight",
+  "sightFade",
+  "sightDebug",
 ]);
 
 export const PRESENTATION_RELOAD_OPTION_NAMES = Object.freeze([
@@ -64,6 +67,9 @@ export function parsePresentationOptions(search = "") {
     lightColorVariation: booleanOption(parameters, "lightColorVariation", true),
     bloom: booleanOption(parameters, "bloom", false),
     shadows: booleanOption(parameters, "shadows", false),
+    trueSight: booleanOption(parameters, "trueSight", true),
+    sightFade: booleanOption(parameters, "sightFade", true),
+    sightDebug: booleanOption(parameters, "sightDebug", false),
   });
 }
 
@@ -81,6 +87,9 @@ export function presentationOptionsToSearch(options) {
   parameters.set("lightColorVariation", options.lightColorVariation ? "1" : "0");
   parameters.set("bloom", options.bloom ? "1" : "0");
   parameters.set("shadows", options.shadows ? "1" : "0");
+  parameters.set("trueSight", options.trueSight ? "1" : "0");
+  parameters.set("sightFade", options.sightFade ? "1" : "0");
+  parameters.set("sightDebug", options.sightDebug ? "1" : "0");
   return `?${parameters.toString()}`;
 }
 
@@ -114,7 +123,7 @@ export function updatePresentationSearch(search, name, value) {
 
 export class PresentationFlags {
   /**
-   * @param {{dynamicLights?:boolean,lightColorVariation?:boolean,bloom?:boolean,shadows?:boolean}} [initial]
+   * @param {{dynamicLights?:boolean,lightColorVariation?:boolean,bloom?:boolean,shadows?:boolean,trueSight?:boolean,sightFade?:boolean,sightDebug?:boolean}} [initial]
    */
   constructor(initial = {}) {
     this.values = {
@@ -122,6 +131,9 @@ export class PresentationFlags {
       lightColorVariation: initial.lightColorVariation ?? true,
       bloom: initial.bloom ?? false,
       shadows: initial.shadows ?? false,
+      trueSight: initial.trueSight ?? true,
+      sightFade: initial.sightFade ?? true,
+      sightDebug: initial.sightDebug ?? false,
     };
   }
 

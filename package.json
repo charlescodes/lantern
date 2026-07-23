@@ -1,13 +1,14 @@
 {
   "name": "lantern-debug-arena",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node scripts/serve.mjs",
     "test": "node --test",
     "check": "node scripts/check-syntax.mjs && node --test",
-    "test:soak": "node --test test/soak.test.js"
+    "test:soak": "node --test test/soak.test.js",
+    "test:soak:sight": "node --test test/true_sight_soak.test.js"
   },
   "engines": {
     "node": ">=20"

@@ -56,6 +56,9 @@ export class DebugRenderer {
     this.height = 1;
     this.backingScale = 1;
     this.pixelDensityCap = pixelDensityCap;
+    this.sightCanvas = null;
+    this.sightContext = null;
+    this.sightImageData = null;
   }
 
   /** @param {number} value */
@@ -92,7 +95,7 @@ export class DebugRenderer {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame}} view
    */
   render(snapshot, alpha, view) {
     this.resize();
@@ -123,6 +126,104 @@ export class DebugRenderer {
     if (view.mouseInside) {
       this.#drawMouse(view.mouseWorld, view.mode, view.editorTool, view.placementValid);
     }
+    if (view.sightFrame) {
+      this.#drawSightOverlay(view.sightFrame);
+      if (view.sightFrame.flags.sightDebug) {
+        this.#drawSightDebug(view.sightFrame);
+      }
+    }
+  }
+
+  /** @param {import('../visibility/true_sight.js').TrueSightFrame} sightFrame */
+  #drawSightOverlay(sightFrame) {
+    if (
+      !this.sightCanvas
+      || !this.sightContext
+      || !this.sightImageData
+      || this.sightCanvas.width !== sightFrame.maskWidth
+      || this.sightCanvas.height !== sightFrame.maskHeight
+    ) {
+      this.sightCanvas = typeof OffscreenCanvas === "function"
+        ? new OffscreenCanvas(sightFrame.maskWidth, sightFrame.maskHeight)
+        : document.createElement("canvas");
+      this.sightCanvas.width = sightFrame.maskWidth;
+      this.sightCanvas.height = sightFrame.maskHeight;
+      this.sightContext = this.sightCanvas.getContext("2d");
+      if (!this.sightContext) throw new Error("TrueSight mask canvas is unavailable");
+      this.sightImageData = this.sightContext.createImageData(
+        sightFrame.maskWidth,
+        sightFrame.maskHeight,
+      );
+    }
+    const pixels = this.sightImageData.data;
+    for (let index = 0; index < sightFrame.displayMask.length; index += 1) {
+      const offset = index * 4;
+      pixels[offset] = 0;
+      pixels[offset + 1] = 0;
+      pixels[offset + 2] = 0;
+      pixels[offset + 3] = 255 - sightFrame.displayMask[index];
+    }
+    this.sightContext.putImageData(this.sightImageData, 0, 0);
+    this.context.save();
+    this.context.globalAlpha = 1;
+    this.context.imageSmoothingEnabled = true;
+    this.context.drawImage(
+      /** @type {CanvasImageSource} */ (this.sightCanvas),
+      0,
+      0,
+      sightFrame.maskWidth,
+      sightFrame.maskHeight,
+      0,
+      0,
+      sightFrame.mapWidth,
+      sightFrame.mapHeight,
+    );
+    this.context.restore();
+  }
+
+  /** @param {import('../visibility/true_sight.js').TrueSightFrame} sightFrame */
+  #drawSightDebug(sightFrame) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1);
+    context.save();
+    context.globalAlpha = 1;
+    context.fillStyle = "rgba(255, 92, 92, 0.2)";
+    for (const cell of sightFrame.hitWallCells) {
+      context.fillRect(cell.cx, cell.cz, 1, 1);
+    }
+    context.beginPath();
+    for (const ray of sightFrame.rays) {
+      context.moveTo(sightFrame.origin.x, sightFrame.origin.z);
+      context.lineTo(ray.x, ray.z);
+    }
+    context.strokeStyle = "rgba(255, 184, 88, 0.22)";
+    context.lineWidth = line;
+    context.stroke();
+    if (sightFrame.polygon.length > 0) {
+      context.beginPath();
+      context.moveTo(sightFrame.polygon[0].x, sightFrame.polygon[0].z);
+      for (let index = 1; index < sightFrame.polygon.length; index += 1) {
+        context.lineTo(
+          sightFrame.polygon[index].x,
+          sightFrame.polygon[index].z,
+        );
+      }
+      context.closePath();
+      context.strokeStyle = "rgba(108, 227, 255, 0.95)";
+      context.lineWidth = line * 2;
+      context.stroke();
+    }
+    context.beginPath();
+    context.arc(
+      sightFrame.origin.x,
+      sightFrame.origin.z,
+      line * 3,
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = "#6ce3ff";
+    context.fill();
+    context.restore();
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {{hover:Record<string,unknown>|null,selected:Record<string,unknown>|null}} view */

@@ -11,10 +11,17 @@ export class CanvasPresentation {
    * @param {import('../browser/camera.js').Camera2D} camera
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
    * @param {ReturnType<import('./options.js').parsePresentationOptions>} [options]
+   * @param {PresentationFlags} [flags]
    */
-  constructor(canvas, camera, initialSnapshot, options = parsePresentationOptions()) {
+  constructor(
+    canvas,
+    camera,
+    initialSnapshot,
+    options = parsePresentationOptions(),
+    flags = new PresentationFlags(options),
+  ) {
     this.renderer = new DebugRenderer(canvas, camera, options.dpr);
-    this.flags = new PresentationFlags(options);
+    this.flags = flags;
     this.options = options;
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(false);

@@ -3,7 +3,7 @@
 import { percentile } from "../core/ring_buffer.js";
 
 export const PERFORMANCE_CAPTURE_DURATION_MS = 10_000;
-export const PERFORMANCE_REPORT_VERSION = 1;
+export const PERFORMANCE_REPORT_VERSION = 2;
 
 /** @param {number[]} values */
 export function summarizeGpuSamples(values) {
@@ -75,7 +75,7 @@ export class PerformanceCapture {
    * }} options
    */
   constructor(options) {
-    this.applicationVersion = options.applicationVersion ?? "0.3.3";
+    this.applicationVersion = options.applicationVersion ?? "0.4.0";
     this.durationMs = Math.max(
       1,
       Math.trunc(options.durationMs ?? PERFORMANCE_CAPTURE_DURATION_MS),
@@ -124,6 +124,27 @@ export class PerformanceCapture {
       this.workload.maxResidentLights,
       Number(presentation.residentLightCount ?? 0),
     );
+    const trueSight = presentation.trueSight ?? {};
+    this.workload.maxTrueSightRays = Math.max(
+      this.workload.maxTrueSightRays,
+      Number(trueSight.rayCount ?? 0),
+    );
+    this.workload.maxTrueSightPolygonVertices = Math.max(
+      this.workload.maxTrueSightPolygonVertices,
+      Number(trueSight.polygonVertexCount ?? 0),
+    );
+    this.workload.maxTrueSightVisibleWalls = Math.max(
+      this.workload.maxTrueSightVisibleWalls,
+      Number(trueSight.visibleWallCount ?? 0),
+    );
+    this.workload.maxTrueSightMaskWidth = Math.max(
+      this.workload.maxTrueSightMaskWidth,
+      Number(trueSight.maskWidth ?? 0),
+    );
+    this.workload.maxTrueSightMaskHeight = Math.max(
+      this.workload.maxTrueSightMaskHeight,
+      Number(trueSight.maskHeight ?? 0),
+    );
     this.workload.minimumFps = this.workload.frames === 1
       ? Number(runtime.fps ?? 0)
       : Math.min(this.workload.minimumFps, Number(runtime.fps ?? 0));
@@ -147,6 +168,11 @@ export class PerformanceCapture {
       maxContacts: 0,
       maxActiveLights: 0,
       maxResidentLights: 0,
+      maxTrueSightRays: 0,
+      maxTrueSightPolygonVertices: 0,
+      maxTrueSightVisibleWalls: 0,
+      maxTrueSightMaskWidth: 0,
+      maxTrueSightMaskHeight: 0,
       minimumFps: 0,
     };
   }
@@ -194,6 +220,7 @@ export class PerformanceCapture {
           snapshotMs: runtime.snapshotMs,
           rendererCpuMs: runtime.renderMs,
           presentationPhasesMs: presentation.presentationCpuMs,
+          trueSightCpuMs: presentation.trueSightCpuMs,
         },
         presentation: {
           warmup: presentation.warmup,
@@ -206,6 +233,16 @@ export class PerformanceCapture {
           residentAtEnd: presentation.residentLightCount,
           maximumActive: this.workload.maxActiveLights,
           maximumResident: this.workload.maxResidentLights,
+        },
+        trueSight: {
+          atEnd: presentation.trueSight ?? null,
+          maxima: {
+            rays: this.workload.maxTrueSightRays,
+            polygonVertices: this.workload.maxTrueSightPolygonVertices,
+            visibleWalls: this.workload.maxTrueSightVisibleWalls,
+            maskWidth: this.workload.maxTrueSightMaskWidth,
+            maskHeight: this.workload.maxTrueSightMaskHeight,
+          },
         },
         spikes: presentation.recentSpikes ?? [],
         gpuRenderMs: summarizeGpuSamples(gpuSamples ?? []),

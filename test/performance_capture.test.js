@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   PERFORMANCE_CAPTURE_DURATION_MS,
+  PERFORMANCE_REPORT_VERSION,
   PerformanceCapture,
   summarizeGpuSamples,
 } from "../src/presentation/performance_capture.js";
@@ -32,6 +33,14 @@ function diagnostics(overrides = {}) {
     drawCalls: 10,
     triangles: 200,
     lightGroups: { admittedGroupCount: 1 },
+    trueSightCpuMs: { p50: 0.4, p95: 0.8, p99: 1.1, max: 1.5 },
+    trueSight: {
+      rayCount: 96,
+      polygonVertexCount: 18,
+      visibleWallCount: 12,
+      maskWidth: 192,
+      maskHeight: 192,
+    },
     ...overrides,
   };
 }
@@ -91,8 +100,20 @@ test("ten-second capture resets histories, observes unscripted workload, and rep
   assert.equal(gpuBegins, 1);
   assert.equal(gpuEnds, 1);
   assert.equal(report.actualDurationMs, 10_000);
+  assert.equal(report.reportVersion, PERFORMANCE_REPORT_VERSION);
+  assert.equal(PERFORMANCE_REPORT_VERSION, 2);
   assert.equal(report.workloadMaxima.maxParticles, 224);
   assert.equal(report.workloadMaxima.maxActiveLights, 15);
+  assert.equal(report.workloadMaxima.maxTrueSightRays, 96);
+  assert.equal(report.workloadMaxima.maxTrueSightPolygonVertices, 18);
+  assert.deepEqual(report.trueSight.maxima, {
+    rays: 96,
+    polygonVertices: 18,
+    visibleWalls: 12,
+    maskWidth: 192,
+    maskHeight: 192,
+  });
+  assert.equal(report.timings.trueSightCpuMs.p99, 1.1);
   assert.deepEqual(report.gpuRenderMs, {
     sampleCount: 4,
     samples: [3, 1, 2, 4],

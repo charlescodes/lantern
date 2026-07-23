@@ -4,7 +4,10 @@ import { InputController } from "./browser/input.js";
 import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
 import { createPresentation } from "./presentation/factory.js";
-import { parsePresentationOptions } from "./presentation/options.js";
+import {
+  parsePresentationOptions,
+  PresentationFlags,
+} from "./presentation/options.js";
 import {
   collectDeviceBrowserFacts,
   PerformanceCapture,
@@ -13,6 +16,11 @@ import { RenderLab } from "./presentation/render_lab.js";
 import { FixedStepRuntime } from "./runtime/fixed_step_runtime.js";
 import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
+import { TrueSightSystem } from "./visibility/true_sight.js";
+import {
+  queryVisibleAt,
+  resolveVisibleSelection,
+} from "./visibility/presentation_gate.js";
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("arena"));
 if (!canvas) throw new Error("Missing #arena canvas");
@@ -21,6 +29,8 @@ const simulation = new Simulation();
 const initialSnapshot = simulation.snapshot();
 const ui = new ArenaUi();
 const presentationOptions = parsePresentationOptions(window.location.search);
+const presentationFlags = new PresentationFlags(presentationOptions);
+const trueSight = new TrueSightSystem({ flags: presentationFlags });
 const renderLab = new RenderLab(presentationOptions);
 document.body.dataset.renderer = presentationOptions.renderer;
 ui.beginPresentationWarmup(presentationOptions.renderer);
@@ -30,6 +40,7 @@ try {
     canvas,
     presentationOptions,
     initialSnapshot,
+    presentationFlags,
   );
 } catch (error) {
   ui.failPresentationWarmup();
@@ -46,20 +57,50 @@ let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
 let performanceCapture;
+let sightFrame = trueSight.update(initialSnapshot, 0, {
+  mode,
+  deltaMs: 0,
+});
+
+function presentationDiagnostics() {
+  const diagnostics = presentation.diagnostics();
+  return {
+    ...diagnostics,
+    flags: presentationFlags.snapshot(),
+    trueSightCpuMs: sightFrame.timing.totalMs,
+    trueSight: {
+      rayCount: sightFrame.rayCount,
+      polygonVertexCount: sightFrame.polygonVertexCount,
+      visibleWallCount: sightFrame.visibleWallCount,
+      maskWidth: sightFrame.maskWidth,
+      maskHeight: sightFrame.maskHeight,
+      fallbackUsed: sightFrame.fallbackUsed,
+    },
+  };
+}
 
 const runtime = new FixedStepRuntime({
   simulation,
   commandProvider: () => input.sampleCommand(),
   render: (snapshot, alpha, metrics) => {
+    sightFrame = trueSight.update(snapshot, alpha, { mode });
+    const cursorVisible = mode === "edit"
+      || sightFrame.isPointVisible(input.mouseWorld.x, input.mouseWorld.z);
     const hover = input.mouseInside
-      ? /** @type {Record<string, unknown>} */ (simulation.queryAt(input.mouseWorld.x, input.mouseWorld.z))
+      ? queryVisibleAt(
+        simulation,
+        sightFrame,
+        input.mouseWorld.x,
+        input.mouseWorld.z,
+        mode,
+      )
       : null;
-    const selected = pinned
-      ? /** @type {Record<string, unknown>|null} */ (simulation.resolveSelection(pinned))
-      : null;
+    const selection = resolveVisibleSelection(simulation, sightFrame, pinned);
+    const selected = selection.entity;
+    const pinnedHidden = selection.hidden;
     presentation.render(snapshot, alpha, {
       mouseWorld: input.mouseWorld,
-      mouseInside: input.mouseInside,
+      mouseInside: input.mouseInside && cursorVisible,
       hover,
       selected,
       mode,
@@ -71,16 +112,22 @@ const runtime = new FixedStepRuntime({
           Math.round(input.mouseWorld.z * 10) / 10,
         )
         : true,
+      sightFrame,
     });
-    const presentationDiagnostics = presentation.diagnostics();
+    const currentPresentationDiagnostics = presentationDiagnostics();
     ui.update(snapshot, metrics, {
       mouseWorld: input.mouseWorld,
       hover,
       inspected: selected,
+      pinnedHidden,
       mode,
-    }, presentationDiagnostics);
-    renderLab.update(presentationDiagnostics, metrics);
-    performanceCapture?.observe(snapshot, metrics, presentationDiagnostics);
+    }, currentPresentationDiagnostics);
+    renderLab.update(currentPresentationDiagnostics, metrics);
+    performanceCapture?.observe(
+      snapshot,
+      metrics,
+      currentPresentationDiagnostics,
+    );
   },
   onError: (error) => ui.showError(error),
 });
@@ -117,6 +164,7 @@ function reset(newSeed) {
     crypto.getRandomValues(values);
     seed = values[0] || 1;
   }
+  trueSight.requestSnap("reset");
   runtime.reset(seed);
   pinned = null;
   ui.announce(newSeed ? `Reset with seed 0x${seed.toString(16)}` : "Reset current seed");
@@ -143,6 +191,10 @@ function toggleMode() {
 
 /** @param {number} x @param {number} z */
 function pinAt(x, z) {
+  if (mode !== "edit" && !sightFrame.isPointVisible(x, z)) {
+    ui.announce("Hidden locations cannot be pinned");
+    return;
+  }
   const entity = simulation.queryAt(x, z);
   if (pinned && pinned.kind === entity.kind && String(pinned.id) === String(entity.id)) {
     pinned = null;
@@ -200,6 +252,7 @@ onButton("reset-button", () => reset(false));
 onButton("mode-button", toggleMode);
 onButton("focus-button", () => camera.focus(simulation.player.x, simulation.player.z));
 onButton("restore-scenario-button", () => {
+  trueSight.requestSnap("reset");
   injectMutation({ type: "restoreScenario" });
   pinned = null;
   ui.announce("Restored authored body positions");
@@ -284,6 +337,7 @@ const probe = Object.freeze({
     return runtime.step(count);
   },
   reset(seed = simulation.seed) {
+    trueSight.requestSnap("reset");
     runtime.reset(seed);
     return true;
   },
@@ -296,10 +350,20 @@ const probe = Object.freeze({
   presentation() {
     const runtimeMetrics = runtime.metrics();
     return {
-      ...presentation.diagnostics(),
+      ...presentationDiagnostics(),
       snapshotMs: runtimeMetrics.snapshotMs,
       renderCpuMs: runtimeMetrics.renderMs,
     };
+  },
+  trueSight() {
+    return sightFrame.diagnostics();
+  },
+  isVisible(x, z, radius = 0) {
+    return sightFrame.isCircleVisible(
+      Number(x),
+      Number(z),
+      Math.max(0, Number(radius) || 0),
+    );
   },
   queryAt(x, z) {
     return simulation.queryAt(Number(x), Number(z));
@@ -341,6 +405,7 @@ const probe = Object.freeze({
     return injectMutation({ type: "removeEntity", kind: "rock", id });
   },
   restoreScenario() {
+    trueSight.requestSnap("reset");
     return injectMutation({ type: "restoreScenario" });
   },
   injectCommand(command) {
@@ -362,6 +427,7 @@ const probe = Object.freeze({
   resetPerformanceMetrics() {
     runtime.resetPerformanceMetrics();
     presentation.resetPerformanceMetrics();
+    trueSight.resetPerformanceMetrics();
     return true;
   },
   capturePerformance() {
@@ -383,9 +449,10 @@ performanceCapture = new PerformanceCapture({
   resetMetrics: () => {
     runtime.resetPerformanceMetrics();
     presentation.resetPerformanceMetrics();
+    trueSight.resetPerformanceMetrics();
   },
   runtimeMetrics: () => runtime.metrics(),
-  presentationDiagnostics: () => presentation.diagnostics(),
+  presentationDiagnostics,
   deviceFacts: () => collectDeviceBrowserFacts(window, navigator),
   beginGpuCapture: () => presentation.beginGpuTimingCapture(),
   endGpuCapture: () => presentation.endGpuTimingCapture(),
@@ -406,7 +473,7 @@ ui.finishPresentationWarmup();
 window.dispatchEvent(new CustomEvent("lantern:ready", {
   detail: {
     schemaVersion: SCHEMA_VERSION,
-    presentation: presentation.diagnostics(),
+    presentation: presentationDiagnostics(),
   },
 }));
 }

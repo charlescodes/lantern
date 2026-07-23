@@ -1,6 +1,6 @@
-# Lantern 0.3.3 / Blast Lab
+# Lantern 0.4.0 / Blast Lab
 
-A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots.
+A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, current line of sight, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots and TrueSight frame.
 
 ## Run
 
@@ -27,7 +27,7 @@ Presentation routes:
 - <http://127.0.0.1:4173/?renderer=3d> — Three.js with automatic WebGPU/WebGL 2 selection.
 - <http://127.0.0.1:4173/?renderer=3d&backend=webgl> — forced WebGL 2 fallback test.
 
-The Balanced 3D defaults are 16 resident lights, a 1.5× pixel-density cap, antialiasing on, automatic backend selection, dynamic lights and subtle light-color variation on, and bloom/shadows off. URL options are `lights=8|16|32|64`, `dpr=1|1.5|2`, `aa=0|1`, `dynamicLights=0|1`, `lightColorVariation=0|1`, `bloom=0|1`, and `shadows=0|1`.
+The Balanced defaults are 16 resident lights, a 1.5× pixel-density cap, antialiasing on, automatic backend selection, dynamic lights, subtle light-color variation, TrueSight, and sight fading on; bloom, shadows, and sight debug are off. URL options are `lights=8|16|32|64`, `dpr=1|1.5|2`, `aa=0|1`, `dynamicLights=0|1`, `lightColorVariation=0|1`, `bloom=0|1`, `shadows=0|1`, `trueSight=0|1`, `sightFade=0|1`, and `sightDebug=0|1`.
 
 ## Validate
 
@@ -35,11 +35,12 @@ The Balanced 3D defaults are 16 resident lights, a 1.5× pixel-density cap, anti
 npm test
 npm run check
 npm run test:soak
+npm run test:soak:sight
 ```
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.3.3` is the current application patch; the `0.3.0` presentation milestone, schema v4, scenario v2, and frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.4.0` adds TrueSight without changing the `0.3.0` presentation milestone, schema v4, scenario v2, or frozen `m0.2.5-balanced` particle profile.
 
 ## Play controls
 
@@ -65,6 +66,14 @@ Choose Wall, Rock .1m, Rock .3m, Rock .9m, or Erase from the authoring palette. 
 
 Scenario JSON v2 stores the grid, player spawn, and authored rocks. Legacy map v1 JSON still loads as a scenario with no rocks. Save exports authored positions, while **Restore positions** reconstructs the player and rocks and clears transient projectiles, particles, and motion.
 
+## TrueSight
+
+TrueSight derives a player-centered, 360-degree visibility polygon from the current interpolated X/Z position and the loaded grid map. Solid wall cells block sight; the camera, rocks, particles, and fireballs do not. Visibility has no range cutoff and no remembered exploration. Edit mode reveals the complete map immediately.
+
+The hard logical mask gates hover, pin presentation, and inspector details. Raw `queryAt`, casting, projectiles, explosions, damage, recoil, collision, AI, recordings, and replay remain unrestricted. A hidden pinned entity keeps its stable pin and reappears when visible. The display mask reveals over 100 ms and conceals over 150 ms, with immediate snaps for resets, map changes, timeline rollback, movement jumps over two meters, and edit-mode transitions.
+
+Canvas2D draws the shared byte mask as a world-space void overlay. Three.js uploads the same mask as a resident red `DataTexture` and applies it to world node materials, shadow masks, emissive geometry before bloom, and dynamic-light intensity. The 24m arena uses a `192×192` mask; larger maps uniformly reduce resolution to stay within `256×256`. See the [0.4.0 TrueSight contract](./docs/notes/0.4.0-true-sight.md).
+
 ## Physics model
 
 The player is 75 kg. Rock mass is derived from a 2,600 kg/m3 stone density and spherical volume: about 10.9 kg at 0.1m radius, 294 kg at 0.3m, and 7,940 kg at 0.9m. Rocks collide with walls, the player, and one another.
@@ -89,9 +98,9 @@ Dynamic lights are visual-only. They cannot affect AI, visibility, collision, da
 
 ## Render Lab and capture
 
-Open **Render Lab** before, during, or after renderer warmup. Renderer, backend, resident-light capacity, and antialiasing are startup topology and show **reload required** when changed. Pixel-density cap, dynamic lights, color variation, bloom, and directional shadows apply live. Settings persist only through the visible URL; Lantern does not keep a second `localStorage` configuration.
+Open **Render Lab** before, during, or after renderer warmup. Renderer, backend, resident-light capacity, and antialiasing are startup topology and show **reload required** when changed. Pixel-density cap, dynamic lights, color variation, bloom, directional shadows, TrueSight, sight fading, and sight debug apply live. Settings persist only through the visible URL; Lantern does not keep a second `localStorage` configuration.
 
-The panel reports backend, CSS/backing resolution, effective DPR, active/resident lights, frame and CPU timing, and GPU timestamp availability. **Capture 10 seconds** resets timing histories without scripting gameplay, samples the normal running workload, and produces copyable/downloadable JSON with browser/device facts, settings, workload maxima, timing percentiles, presentation phases, lights, spikes, and GPU render samples where timestamp queries are supported. Renderer initialization failures leave Render Lab active with direct routes to a lower light tier, forced WebGL 2, or Canvas2D.
+The panel reports backend, CSS/backing resolution, effective DPR, active/resident lights, frame and CPU timing, TrueSight geometry/mask/timing, and GPU timestamp availability. **Capture 10 seconds** resets timing histories without scripting gameplay. Performance-report v2 adds maximum rays, polygon vertices, visible walls, mask dimensions, and separate TrueSight CPU percentiles to the existing browser/device, workload, presentation, light, spike, and GPU data.
 
 ## Snapshots and recordings
 
@@ -103,8 +112,8 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 `src/sim` has no DOM, Canvas, or Three.js dependencies. Browser input and probe mutations become commands consumed at fixed-tick boundaries. Canvas2D, Three.js, and DOM panels consume copied JSON-safe snapshots and do not mutate simulation state.
 
-The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`.
+The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
 
-`window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation phase timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears only these timing histories and spike records. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts `dynamicLights`, `lightColorVariation`, `bloom`, and `shadows` without adding simulation commands.
+`window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation and TrueSight timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears runtime, presentation, and TrueSight timing histories. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts the lighting flags plus `trueSight`, `sightFade`, and `sightDebug` without adding simulation commands.
 
 `capturePerformance()` and its alias `startPerformanceCapture()` return the asynchronous ten-second report. `latestPerformanceReport()` and `performanceReport()` return the latest completed report or `null`.
