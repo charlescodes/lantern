@@ -1,6 +1,8 @@
-# Project Lantern — MVP 0: Debug Arena
+# Project Lantern — M0: Debug Arena
 
-> **Historical contract:** M0 is complete. Later solid-body, particle-collision, and particle-lifecycle extensions are specified in `lantern_mvp_blast_physics.md`, `lantern_mvp_particle_collision.md`, and `lantern_mvp_particle_lifecycle.md`.
+> **Version:** foundational M0, before semantic release numbering
+>
+> **Historical contract:** M0 is complete. Later solid-body, particle-collision, and particle-lifecycle extensions are specified in [0.1.0 blast physics](./0.1.0-blast-physics.md), [0.2.0 particle collision](./0.2.0-particle-collision.md), and [0.2.5 particle lifecycle](./0.2.5-particle-lifecycle.md).
 
 > **Status:** implementation contract · **Runtime:** browser JavaScript ES modules (`// @ts-check`) · **Goal:** prove the simulation skeleton, collision model, projectile/particle path, and debug/probe workflow before art, 3D rendering, AI, networking, audio, or lighting.
 

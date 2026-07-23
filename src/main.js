@@ -13,17 +13,24 @@ const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("arena"
 if (!canvas) throw new Error("Missing #arena canvas");
 
 const simulation = new Simulation();
+const initialSnapshot = simulation.snapshot();
 const ui = new ArenaUi();
 const presentationOptions = parsePresentationOptions(window.location.search);
+document.body.dataset.renderer = presentationOptions.renderer;
+ui.beginPresentationWarmup(presentationOptions.renderer);
 let presentationBundle;
 try {
-  presentationBundle = await createPresentation(canvas, presentationOptions);
+  presentationBundle = await createPresentation(
+    canvas,
+    presentationOptions,
+    initialSnapshot,
+  );
 } catch (error) {
+  ui.failPresentationWarmup();
   ui.showError(error);
   throw error;
 }
 const { camera, presentation } = presentationBundle;
-document.body.dataset.renderer = presentationOptions.renderer;
 document.body.dataset.backend = presentation.diagnostics().activeBackend;
 let mode = /** @type {"play"|"edit"} */ ("play");
 let editorTool = "wall";
@@ -337,6 +344,11 @@ const probe = Object.freeze({
   setPresentationFlag(name, value) {
     return presentation.setPresentationFlag(String(name), value);
   },
+  resetPerformanceMetrics() {
+    runtime.resetPerformanceMetrics();
+    presentation.resetPerformanceMetrics();
+    return true;
+  },
 });
 
 Object.defineProperty(window, "__lantern", {
@@ -349,6 +361,7 @@ ui.setMode(mode);
 ui.setEditorTool(editorTool);
 camera.focus(simulation.player.x, simulation.player.z);
 runtime.start();
+ui.finishPresentationWarmup();
 window.dispatchEvent(new CustomEvent("lantern:ready", {
   detail: {
     schemaVersion: SCHEMA_VERSION,

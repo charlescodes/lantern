@@ -1,7 +1,7 @@
 // @ts-check
 
 import { HISTORY, SCHEMA_VERSION, SIMULATION } from "../config.js";
-import { NumericRingBuffer, percentile } from "../core/ring_buffer.js";
+import { CachedTimingSamples } from "../core/performance.js";
 import { canonicalizeCommand } from "../sim/simulation.js";
 
 class CommandQueue {
@@ -50,15 +50,18 @@ export class FixedStepRuntime {
     this.render = options.render ?? (() => {});
     this.onError = options.onError ?? ((error) => console.error(error));
     this.pendingCommands = new CommandQueue(2_048);
-    this.simSamples = new NumericRingBuffer(HISTORY.metrics);
-    this.snapshotSamples = new NumericRingBuffer(HISTORY.metrics);
-    this.renderSamples = new NumericRingBuffer(HISTORY.metrics);
-    this.frameSamples = new NumericRingBuffer(HISTORY.metrics);
+    const timingOptions = { capacity: HISTORY.metrics };
+    this.simSamples = new CachedTimingSamples(timingOptions);
+    this.snapshotSamples = new CachedTimingSamples(timingOptions);
+    this.renderSamples = new CachedTimingSamples(timingOptions);
+    this.frameSamples = new CachedTimingSamples(timingOptions);
     this.accumulator = 0;
     this.lastFrameTime = null;
     this.paused = false;
     this.running = false;
     this.frameCount = 0;
+    this.clampedFrameCount = 0;
+    this.droppedWallTimeMs = 0;
     this.lastSnapshot = this.#takeSnapshot();
     this.animationFrame = 0;
     this._frame = (now) => this.#frame(now);
@@ -113,6 +116,15 @@ export class FixedStepRuntime {
     if (this.paused) this.step(1);
   }
 
+  resetPerformanceMetrics() {
+    this.simSamples.clear();
+    this.snapshotSamples.clear();
+    this.renderSamples.clear();
+    this.frameSamples.clear();
+    this.clampedFrameCount = 0;
+    this.droppedWallTimeMs = 0;
+  }
+
   #consumeCommand() {
     const base = canonicalizeCommand(this.commandProvider());
     for (let drained = 0; drained < 64; drained += 1) {
@@ -140,9 +152,15 @@ export class FixedStepRuntime {
   #frame(now) {
     if (!this.running) return;
     if (this.lastFrameTime === null) this.lastFrameTime = now;
-    const elapsed = Math.max(0, Math.min(SIMULATION.maxFrameSeconds, (now - this.lastFrameTime) / 1_000));
+    const rawElapsedMs = Math.max(0, now - this.lastFrameTime);
     this.lastFrameTime = now;
-    if (elapsed > 0) this.frameSamples.push(elapsed * 1_000);
+    if (rawElapsedMs > 0) this.frameSamples.push(rawElapsedMs);
+    const maximumFrameMs = SIMULATION.maxFrameSeconds * 1_000;
+    if (rawElapsedMs > maximumFrameMs) {
+      this.clampedFrameCount += 1;
+      this.droppedWallTimeMs += rawElapsedMs - maximumFrameMs;
+    }
+    const elapsed = Math.min(maximumFrameMs, rawElapsedMs) / 1_000;
 
     if (!this.paused) {
       this.accumulator += elapsed;
@@ -178,11 +196,8 @@ export class FixedStepRuntime {
   }
 
   metrics() {
-    const sim = this.simSamples.toSortedArray();
-    const snapshot = this.snapshotSamples.toSortedArray();
-    const render = this.renderSamples.toSortedArray();
-    const frames = this.frameSamples.toSortedArray();
-    const medianFrame = percentile(frames, 0.5);
+    const frameMs = this.frameSamples.summary();
+    const medianFrame = frameMs.p50;
     return {
       schemaVersion: SCHEMA_VERSION,
       paused: this.paused,
@@ -190,24 +205,15 @@ export class FixedStepRuntime {
       alpha: this.paused ? 0 : this.accumulator / SIMULATION.dt,
       fps: medianFrame > 0 ? 1_000 / medianFrame : 0,
       frameCount: this.frameCount,
+      frameMs,
+      clampedFrameCount: this.clampedFrameCount,
+      droppedWallTimeMs: this.droppedWallTimeMs,
       tick: this.simulation.tickCount,
       queuedCommands: this.pendingCommands.length,
       droppedCommands: this.pendingCommands.dropped,
-      simMs: {
-        p50: percentile(sim, 0.5),
-        p95: percentile(sim, 0.95),
-        p99: percentile(sim, 0.99),
-      },
-      snapshotMs: {
-        p50: percentile(snapshot, 0.5),
-        p95: percentile(snapshot, 0.95),
-        p99: percentile(snapshot, 0.99),
-      },
-      renderMs: {
-        p50: percentile(render, 0.5),
-        p95: percentile(render, 0.95),
-        p99: percentile(render, 0.99),
-      },
+      simMs: this.simSamples.percentiles(),
+      snapshotMs: this.snapshotSamples.percentiles(),
+      renderMs: this.renderSamples.percentiles(),
     };
   }
 }

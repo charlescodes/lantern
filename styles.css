@@ -76,6 +76,17 @@ button:active {
   transform: translateY(1px);
 }
 
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button:disabled:hover {
+  border-color: var(--rule-bright);
+  color: var(--ink);
+}
+
 button:focus-visible,
 canvas:focus-visible,
 input:focus-visible {

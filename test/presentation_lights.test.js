@@ -5,7 +5,9 @@ import {
   PRESENTATION_LIGHT_CAPACITY,
   PresentationLightBudget,
   sparkFireColor,
+  writeSparkFireColor,
 } from "../src/presentation/light_budget.js";
+import { applyLightPool } from "../src/presentation/light_pool.js";
 
 /** @param {number} id @param {number} size @param {number} [age] */
 function particle(id, size, age = 0.1) {
@@ -121,4 +123,91 @@ test("spark fire color cools from yellow core through amber to red-orange", () =
   assert.ok(young.g > middle.g && middle.g > old.g);
   assert.ok(young.b > middle.b && middle.b > old.b);
   assert.ok(old.r > 0.9);
+});
+
+function residentLight(id) {
+  return {
+    id,
+    visible: false,
+    castShadow: true,
+    intensity: -1,
+    distance: 0,
+    decay: 0,
+    userData: {},
+    position: {
+      set(x, y, z) {
+        this.value = [x, y, z];
+      },
+    },
+    color: {
+      setRGB(r, g, b) {
+        this.value = [r, g, b];
+      },
+    },
+  };
+}
+
+/** @param {number} id */
+function assignment(id) {
+  return {
+    key: `test:${id}`,
+    x: id,
+    y: 0.5,
+    z: id + 1,
+    color: { r: 1, g: 0.5, b: 0.1 },
+    intensity: id + 1,
+    distance: 3,
+    decay: 2,
+  };
+}
+
+test("eight resident lights stay visible and identity-stable across 0 -> 1 -> 8 -> 0", () => {
+  const lights = Array.from(
+    { length: PRESENTATION_LIGHT_CAPACITY },
+    (_, index) => residentLight(index),
+  );
+  const identities = [...lights];
+  for (const count of [0, 1, 8, 0]) {
+    const active = applyLightPool(
+      lights,
+      Array.from({ length: count }, (_, index) => assignment(index)),
+    );
+    assert.equal(active, count);
+    assert.ok(lights.every((light) => light.visible));
+    assert.ok(lights.every((light) => light.castShadow === false));
+    assert.ok(lights.every((light, index) => light === identities[index]));
+    assert.deepEqual(
+      lights.map((light) => light.intensity > 0),
+      lights.map((_, index) => index < count),
+    );
+  }
+});
+
+test("dynamicLights=false zeros all intensities without changing topology", () => {
+  const lights = Array.from(
+    { length: PRESENTATION_LIGHT_CAPACITY },
+    (_, index) => residentLight(index),
+  );
+  const identities = [...lights];
+  assert.equal(
+    applyLightPool(
+      lights,
+      Array.from({ length: PRESENTATION_LIGHT_CAPACITY }, (_, index) => assignment(index)),
+      false,
+    ),
+    0,
+  );
+  assert.ok(lights.every((light, index) => light === identities[index]));
+  assert.ok(lights.every((light) => light.visible));
+  assert.ok(lights.every((light) => light.intensity === 0));
+});
+
+test("spark color writer reuses the provided color target", () => {
+  const target = {
+    setRGB(r, g, b) {
+      this.value = { r, g, b };
+    },
+  };
+  assert.equal(writeSparkFireColor(target, 0.58), target);
+  assert.deepEqual(target.value, sparkFireColor(0.58));
 });

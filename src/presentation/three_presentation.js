@@ -5,8 +5,16 @@ import { pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ROCK_ARCHETYPES } from "../config.js";
-import { PresentationLightBudget, sparkFireColor } from "./light_budget.js";
+import {
+  completeInstancedPoolSubmission,
+  createDynamicInstancedPool,
+  publishInstancedPool,
+} from "./instanced_pool.js";
+import { PresentationLightBudget, writeSparkFireColor } from "./light_budget.js";
+import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
+import { PresentationProfiler } from "./profiler.js";
+import { PresentationWarmupStatus } from "./warmup.js";
 
 const MAXIMUM_CANVAS_BACKING_SCALE = 2;
 const WALL_HEIGHT_METERS = 2.5;
@@ -40,8 +48,9 @@ export class ThreePresentation {
    * @param {HTMLCanvasElement} canvas
    * @param {import('./camera_3d.js').Camera3D} camera
    * @param {{renderer:"2d"|"3d",backend:"auto"|"webgl",forceWebGL:boolean}} options
+   * @param {number} [warmupStartedAt]
    */
-  constructor(canvas, camera, options) {
+  constructor(canvas, camera, options, warmupStartedAt = performance.now()) {
     this.canvas = canvas;
     this.camera = camera;
     this.options = options;
@@ -51,6 +60,7 @@ export class ThreePresentation {
     this.height = 0;
     this.backingScale = 0;
     this.activeLightCount = 0;
+    this.residentLightCount = 0;
     this.mapHash = -1;
     this.mapWidth = 0;
     this.mapHeight = 0;
@@ -60,6 +70,12 @@ export class ThreePresentation {
     this.projectileMesh = null;
     this.particleMesh = null;
     this.lightBudget = new PresentationLightBudget();
+    this.profiler = new PresentationProfiler();
+    this.warmup = new PresentationWarmupStatus(
+      true,
+      () => performance.now(),
+      warmupStartedAt,
+    );
 
     this.webRenderer = new THREE.WebGPURenderer({
       canvas,
@@ -101,12 +117,13 @@ export class ThreePresentation {
       { length: this.lightBudget.capacity },
       () => {
         const light = new THREE.PointLight(0xffa13a, 0, 0, 2);
-        light.visible = false;
+        light.visible = true;
         light.castShadow = false;
         this.scene.add(light);
         return light;
       },
     );
+    this.residentLightCount = this.dynamicLights.length;
 
     this.floorMaterial = new THREE.MeshStandardMaterial({
       color: 0x182124,
@@ -206,18 +223,29 @@ export class ThreePresentation {
     this.bloomOutput = null;
   }
 
-  async initialize() {
-    this.resize();
-    await this.webRenderer.init();
-    this.activeBackend = this.webRenderer.backend.isWebGPUBackend === true
-      ? "webgpu"
-      : "webgl2";
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot */
+  async initialize(initialSnapshot) {
+    try {
+      await this.webRenderer.init();
+      this.activeBackend = this.webRenderer.backend.isWebGPUBackend === true
+        ? "webgpu"
+        : "webgl2";
+      this.camera.focus(initialSnapshot.player.x, initialSnapshot.player.z);
+      this.resize();
 
-    const scenePass = pass(this.scene, this.threeCamera);
-    const sceneColor = scenePass.getTextureNode("output");
-    const bloomPass = bloom(sceneColor, 0.18, 0.22, 1.05);
-    this.renderPipeline = new THREE.RenderPipeline(this.webRenderer, sceneColor);
-    this.bloomOutput = sceneColor.add(bloomPass);
+      const scenePass = pass(this.scene, this.threeCamera);
+      const sceneColor = scenePass.getTextureNode("output");
+      const bloomPass = bloom(sceneColor, 0.18, 0.22, 1.05);
+      this.renderPipeline = new THREE.RenderPipeline(this.webRenderer, sceneColor);
+      this.bloomOutput = sceneColor.add(bloomPass);
+
+      this.#buildWarmupScene(initialSnapshot);
+      await this.#compileDefaultPipelines(initialSnapshot);
+      this.warmup.complete();
+    } catch (error) {
+      this.warmup.fail();
+      throw error;
+    }
   }
 
   resize() {
@@ -250,6 +278,7 @@ export class ThreePresentation {
    * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean}} view
    */
   render(snapshot, alpha, view) {
+    const totalStarted = performance.now();
     this.resize();
     this.#syncCamera();
     this.#updateMap(snapshot.map);
@@ -257,8 +286,10 @@ export class ThreePresentation {
     this.#updateRocks(snapshot, alpha);
     this.#updateProjectiles(snapshot, alpha);
     this.#updateParticles(snapshot);
-    this.#updateLights(snapshot);
     this.#updateView(snapshot, view);
+    const updateFinished = performance.now();
+    this.#updateLights(snapshot);
+    const lightsFinished = performance.now();
 
     const bloomEnabled = this.flags.values.bloom;
     if (bloomEnabled && this.renderPipeline && this.bloomOutput) {
@@ -270,15 +301,26 @@ export class ThreePresentation {
     } else {
       this.webRenderer.render(this.scene, this.threeCamera);
     }
+    completeInstancedPoolSubmission(this.particleMesh);
     this._bloomEnabled = bloomEnabled;
+    const submitFinished = performance.now();
+    this.profiler.record({
+      tick: snapshot.tick,
+      projectileCount: snapshot.projectiles.length,
+      particleCount: snapshot.particles.length,
+      activeLightCount: this.activeLightCount,
+      updateMs: updateFinished - totalStarted,
+      lightsMs: lightsFinished - updateFinished,
+      submitMs: submitFinished - lightsFinished,
+      totalMs: submitFinished - totalStarted,
+    });
   }
 
   /** @param {string} name @param {unknown} value */
   setPresentationFlag(name, value) {
     if (!this.flags.set(name, value)) return false;
     if (name === "dynamicLights" && !this.flags.values.dynamicLights) {
-      for (const light of this.dynamicLights) light.visible = false;
-      this.activeLightCount = 0;
+      this.activeLightCount = applyLightPool(this.dynamicLights, [], false);
     }
     if (name === "shadows") this.#applyShadowFlag();
     return true;
@@ -292,8 +334,78 @@ export class ThreePresentation {
       drawCalls: this.webRenderer.info.render.drawCalls,
       triangles: Math.round(this.webRenderer.info.render.triangles),
       activeLightCount: this.activeLightCount,
+      residentLightCount: this.residentLightCount,
+      warmup: this.warmup.snapshot(),
+      presentationCpuMs: this.profiler.summary(),
+      recentSpikes: this.profiler.recentSpikes(),
       flags: this.flags.snapshot(),
     };
+  }
+
+  resetPerformanceMetrics() {
+    this.profiler.reset();
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
+  #buildWarmupScene(snapshot) {
+    const view = {
+      mouseWorld: { x: snapshot.player.x, z: snapshot.player.z },
+      mouseInside: false,
+      hover: null,
+      selected: null,
+      mode: "play",
+      editorTool: "wall",
+      placementValid: true,
+    };
+    this.#syncCamera();
+    this.#updateMap(snapshot.map);
+    this.#updatePlayer(snapshot.player, 0);
+    this.#updateRocks(snapshot, 0);
+    this.#updateProjectiles(snapshot, 0);
+    this.#updateParticles(snapshot);
+    this.#updateView(snapshot, view);
+    this.#updateLights(snapshot);
+    this.profiler.prime({
+      projectileCount: snapshot.projectiles.length,
+      particleCount: snapshot.particles.length,
+      activeLightCount: this.activeLightCount,
+    });
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
+  async #compileDefaultPipelines(snapshot) {
+    const normallyHidden = [
+      this.cursorMarker,
+      this.hoverMarker,
+      this.selectedMarker,
+      this.editCellPreview,
+      this.editRockPreview,
+      this.projectileMesh,
+      this.particleMesh,
+    ];
+    const visibility = normallyHidden.map((mesh) => mesh.visible);
+    const frustumCulling = normallyHidden.map((mesh) => mesh.frustumCulled);
+    const x = snapshot.player.x;
+    const z = snapshot.player.z;
+    this.cursorMarker.position.set(x, 0.018, z);
+    this.hoverMarker.position.set(x, 0.024, z);
+    this.selectedMarker.position.set(x, 0.024, z);
+    this.editCellPreview.position.set(Math.floor(x) + 0.5, 0.022, Math.floor(z) + 0.5);
+    this.editRockPreview.position.set(x, ROCK_ARCHETYPES.medium.radius, z);
+    this.editRockPreview.scale.setScalar(ROCK_ARCHETYPES.medium.radius);
+    try {
+      for (const mesh of normallyHidden) {
+        mesh.visible = true;
+        mesh.frustumCulled = false;
+      }
+      this.scene.updateMatrixWorld(true);
+      await this.webRenderer.compileAsync(this.scene, this.threeCamera);
+    } finally {
+      for (let index = 0; index < normallyHidden.length; index += 1) {
+        normallyHidden[index].visible = visibility[index];
+        normallyHidden[index].frustumCulled = frustumCulling[index];
+      }
+    }
   }
 
   #syncCamera() {
@@ -360,14 +472,13 @@ export class ThreePresentation {
         wallCount += 1;
       }
     }
-    this.wallMesh.count = wallCount;
-    this.wallMesh.instanceMatrix.needsUpdate = true;
+    publishInstancedPool(this.wallMesh, wallCount);
   }
 
   /** @param {number} capacity */
   #replaceWallMesh(capacity) {
     if (this.wallMesh) this.scene.remove(this.wallMesh);
-    this.wallMesh = this.#createInstancedMesh(
+    this.wallMesh = createDynamicInstancedPool(
       this.wallGeometry,
       this.wallMaterial,
       capacity,
@@ -391,11 +502,12 @@ export class ThreePresentation {
     const capacity = snapshot.pools.rocks.capacity;
     if (!this.rockMesh || this.rockMesh.userData.capacity !== capacity) {
       if (this.rockMesh) this.scene.remove(this.rockMesh);
-      this.rockMesh = this.#createInstancedMesh(
+      this.rockMesh = createDynamicInstancedPool(
         this.rockGeometry,
         this.rockMaterial,
         capacity,
         "rocks",
+        { instanceColors: true },
       );
       this.rockMesh.castShadow = true;
       this.rockMesh.receiveShadow = true;
@@ -418,9 +530,9 @@ export class ThreePresentation {
       );
       this.rockMesh.setColorAt(index, this._color);
     }
-    this.rockMesh.count = snapshot.rocks.length;
-    this.rockMesh.instanceMatrix.needsUpdate = true;
-    if (this.rockMesh.instanceColor) this.rockMesh.instanceColor.needsUpdate = true;
+    publishInstancedPool(this.rockMesh, snapshot.rocks.length, {
+      instanceColors: true,
+    });
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
@@ -428,7 +540,7 @@ export class ThreePresentation {
     const capacity = snapshot.pools.projectiles.capacity;
     if (!this.projectileMesh || this.projectileMesh.userData.capacity !== capacity) {
       if (this.projectileMesh) this.scene.remove(this.projectileMesh);
-      this.projectileMesh = this.#createInstancedMesh(
+      this.projectileMesh = createDynamicInstancedPool(
         this.projectileGeometry,
         this.projectileMaterial,
         capacity,
@@ -445,8 +557,7 @@ export class ThreePresentation {
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.projectileMesh.setMatrixAt(index, this._matrix);
     }
-    this.projectileMesh.count = snapshot.projectiles.length;
-    this.projectileMesh.instanceMatrix.needsUpdate = true;
+    publishInstancedPool(this.projectileMesh, snapshot.projectiles.length);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
@@ -454,11 +565,12 @@ export class ThreePresentation {
     const capacity = snapshot.pools.particles.capacity;
     if (!this.particleMesh || this.particleMesh.userData.capacity !== capacity) {
       if (this.particleMesh) this.scene.remove(this.particleMesh);
-      this.particleMesh = this.#createInstancedMesh(
+      this.particleMesh = createDynamicInstancedPool(
         this.particleGeometry,
         this.particleMaterial,
         capacity,
         "spark-particles",
+        { instanceColors: true },
       );
       this.scene.add(this.particleMesh);
     }
@@ -470,13 +582,13 @@ export class ThreePresentation {
       this._scale.set(size, size * 1.25, size);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.particleMesh.setMatrixAt(index, this._matrix);
-      const color = sparkFireColor(life);
-      this._color.setRGB(color.r, color.g, color.b);
+      writeSparkFireColor(this._color, life);
       this.particleMesh.setColorAt(index, this._color);
     }
-    this.particleMesh.count = snapshot.particles.length;
-    this.particleMesh.instanceMatrix.needsUpdate = true;
-    if (this.particleMesh.instanceColor) this.particleMesh.instanceColor.needsUpdate = true;
+    publishInstancedPool(this.particleMesh, snapshot.particles.length, {
+      deferCountGrowth: true,
+      instanceColors: true,
+    });
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
@@ -485,28 +597,11 @@ export class ThreePresentation {
       snapshot,
       this.flags.values.dynamicLights,
     );
-    for (let index = 0; index < this.dynamicLights.length; index += 1) {
-      const light = this.dynamicLights[index];
-      const assignment = assignments[index];
-      if (!assignment) {
-        light.visible = false;
-        light.intensity = 0;
-        continue;
-      }
-      light.visible = true;
-      light.position.set(assignment.x, assignment.y, assignment.z);
-      light.color.setRGB(
-        assignment.color.r,
-        assignment.color.g,
-        assignment.color.b,
-      );
-      light.intensity = assignment.intensity;
-      light.distance = assignment.distance;
-      light.decay = assignment.decay;
-      light.castShadow = false;
-      light.userData.assignment = assignment.key;
-    }
-    this.activeLightCount = assignments.length;
+    this.activeLightCount = applyLightPool(
+      this.dynamicLights,
+      assignments,
+      this.flags.values.dynamicLights,
+    );
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {any} view */
@@ -589,20 +684,4 @@ export class ThreePresentation {
     return marker;
   }
 
-  /**
-   * @param {THREE.BufferGeometry} geometry
-   * @param {THREE.Material} material
-   * @param {number} capacity
-   * @param {string} name
-   */
-  #createInstancedMesh(geometry, material, capacity, name) {
-    const count = Math.max(1, Math.trunc(capacity));
-    const mesh = new THREE.InstancedMesh(geometry, material, count);
-    mesh.name = name;
-    mesh.count = 0;
-    mesh.frustumCulled = false;
-    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    mesh.userData.capacity = capacity;
-    return mesh;
-  }
 }

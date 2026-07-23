@@ -8,18 +8,25 @@ import { CanvasPresentation } from "./canvas_presentation.js";
  * Selects the presentation before either implementation requests a canvas context.
  * @param {HTMLCanvasElement} canvas
  * @param {ReturnType<import('./options.js').parsePresentationOptions>} options
+ * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
  */
-export async function createPresentation(canvas, options) {
+export async function createPresentation(canvas, options, initialSnapshot) {
   if (options.renderer === "3d") {
+    const warmupStartedAt = performance.now();
     const { ThreePresentation } = await import("./three_presentation.js");
     const camera = new Camera3D();
-    const presentation = new ThreePresentation(canvas, camera, options);
-    await presentation.initialize();
+    const presentation = new ThreePresentation(
+      canvas,
+      camera,
+      options,
+      warmupStartedAt,
+    );
+    await presentation.initialize(initialSnapshot);
     return { camera, presentation };
   }
   const camera = new Camera2D();
   return {
     camera,
-    presentation: new CanvasPresentation(canvas, camera),
+    presentation: new CanvasPresentation(canvas, camera, initialSnapshot),
   };
 }

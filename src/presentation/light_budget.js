@@ -33,6 +33,27 @@ export function sparkFireColor(life) {
     : mixColor(FIRE_COLORS.decay, FIRE_COLORS.amber, remaining / 0.58);
 }
 
+/**
+ * Writes the spark gradient into an existing color-like object so the particle
+ * presentation does not allocate one temporary RGB object per instance.
+ * @param {{setRGB:(r:number,g:number,b:number)=>unknown}} target
+ * @param {number} life
+ */
+export function writeSparkFireColor(target, life) {
+  const remaining = clamp(life, 0, 1);
+  const from = remaining >= 0.58 ? FIRE_COLORS.amber : FIRE_COLORS.decay;
+  const to = remaining >= 0.58 ? FIRE_COLORS.core : FIRE_COLORS.amber;
+  const amount = remaining >= 0.58
+    ? (remaining - 0.58) / 0.42
+    : remaining / 0.58;
+  target.setRGB(
+    from.r + (to.r - from.r) * amount,
+    from.g + (to.g - from.g) * amount,
+    from.b + (to.b - from.b) * amount,
+  );
+  return target;
+}
+
 /** @param {Record<string, any>} particle */
 function particleLife(particle) {
   if (!(particle.lifetime > 0)) return 0;

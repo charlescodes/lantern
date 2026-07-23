@@ -4,6 +4,7 @@ import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const manifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 const host = process.env.HOST || "127.0.0.1";
 const port = Number.parseInt(process.env.PORT || "4173", 10);
 const mimeTypes = new Map([
@@ -39,5 +40,9 @@ createServer(async (request, response) => {
     response.end(code === 404 ? "Not found" : "Internal server error");
   }
 }).listen(port, host, () => {
-  console.log(`Lantern M0.2.5 running at http://${host}:${port}/`);
+  const baseUrl = `http://${host}:${port}/`;
+  console.log(`Lantern ${manifest.version} development routes:`);
+  console.log(`  Canvas2D (default)       ${new URL("?renderer=2d", baseUrl)}`);
+  console.log(`  3D (automatic backend)  ${new URL("?renderer=3d", baseUrl)}`);
+  console.log(`  3D (forced WebGL 2)     ${new URL("?renderer=3d&backend=webgl", baseUrl)}`);
 });

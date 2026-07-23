@@ -26,6 +26,8 @@ export class ArenaUi {
   constructor() {
     this.pauseButton = /** @type {HTMLButtonElement} */ (required("pause-button"));
     this.modeButton = /** @type {HTMLButtonElement} */ (required("mode-button"));
+    this.canvas = /** @type {HTMLCanvasElement} */ (required("arena"));
+    this.viewport = required("arena-viewport");
     this.statusPill = required("run-status");
     this.tickValue = required("tick-value");
     this.seedValue = required("seed-value");
@@ -43,6 +45,36 @@ export class ArenaUi {
     this.toast = required("toast");
     this.lastUiUpdate = 0;
     this.toastTimer = 0;
+    this.controlStates = new Map();
+  }
+
+  /** @param {"2d"|"3d"} renderer */
+  beginPresentationWarmup(renderer) {
+    if (renderer !== "3d") return;
+    this.statusPill.textContent = "WARMING 3D";
+    this.statusPill.classList.add("is-paused");
+    this.viewport.setAttribute("aria-busy", "true");
+    this.canvas.setAttribute("aria-disabled", "true");
+    for (const control of document.querySelectorAll("button, input")) {
+      const element = /** @type {HTMLButtonElement|HTMLInputElement} */ (control);
+      this.controlStates.set(element, element.disabled);
+      element.disabled = true;
+    }
+  }
+
+  finishPresentationWarmup() {
+    this.statusPill.textContent = "RUNNING";
+    this.statusPill.classList.remove("is-paused");
+    this.viewport.setAttribute("aria-busy", "false");
+    this.canvas.removeAttribute("aria-disabled");
+    for (const [control, disabled] of this.controlStates) control.disabled = disabled;
+    this.controlStates.clear();
+  }
+
+  failPresentationWarmup() {
+    this.statusPill.textContent = "3D FAILED";
+    this.statusPill.classList.add("is-paused");
+    this.viewport.setAttribute("aria-busy", "false");
   }
 
   /** @param {"play"|"edit"} mode */
@@ -85,7 +117,7 @@ export class ArenaUi {
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
    * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,mode:string}} view
-   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number}} presentation
+   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>}} presentation
    */
   update(snapshot, metrics, view, presentation) {
     const now = performance.now();
@@ -98,14 +130,26 @@ export class ArenaUi {
     this.seedValue.textContent = `0x${snapshot.seed.toString(16).padStart(8, "0")}`;
     const cx = Math.floor(view.mouseWorld.x);
     const cz = Math.floor(view.mouseWorld.z);
+    const presentationTotal = presentation.presentationCpuMs.totalMs;
+    const latestSpike = presentation.recentSpikes.at(-1) ?? null;
+    const dominantPhase = latestSpike?.dominantPhase ?? "none";
+    const dominantMs = latestSpike && dominantPhase !== "none"
+      ? latestSpike[dominantPhase]
+      : 0;
     this.pointerValue.textContent = `x ${number(view.mouseWorld.x)}  z ${number(view.mouseWorld.z)}  ·  cell ${cx},${cz}`;
     this.telemetry.textContent = [
       `fps       ${number(metrics.fps, 1)}`,
+      `frame raw ${number(metrics.frameMs.last)} / ${number(metrics.frameMs.max)} ms  last/max`,
+      `clamped   ${metrics.clampedFrameCount}  discarded ${number(metrics.droppedWallTimeMs)} ms`,
       `accum     ${number(metrics.accumulator * 1_000, 2)} ms  α ${number(metrics.alpha, 3)}`,
       `sim ms    ${number(metrics.simMs.p50)} / ${number(metrics.simMs.p95)} / ${number(metrics.simMs.p99)}`,
       `snap ms   ${number(metrics.snapshotMs.p50)} / ${number(metrics.snapshotMs.p95)} / ${number(metrics.snapshotMs.p99)}`,
       `render ms ${number(metrics.renderMs.p50)} / ${number(metrics.renderMs.p95)} / ${number(metrics.renderMs.p99)}`,
-      `present   ${presentation.requestedRenderer}/${presentation.activeBackend}  calls ${presentation.drawCalls}  tris ${presentation.triangles}  lights ${presentation.activeLightCount}`,
+      `warmup    ${presentation.warmup.state}  ${number(presentation.warmup.durationMs, 1)} ms`,
+      `present   ${presentation.requestedRenderer}/${presentation.activeBackend}  calls ${presentation.drawCalls}  tris ${presentation.triangles}`,
+      `lights    ${presentation.activeLightCount}/${presentation.residentLightCount} active/resident`,
+      `pres cpu  ${number(presentationTotal.last)} / ${number(presentationTotal.max)} ms  last/max`,
+      `spike     ${dominantPhase} ${number(dominantMs)} ms${latestSpike ? `  tick ${latestSpike.tick}` : ""}`,
       `queue     ${metrics.queuedCommands}  dropped ${metrics.droppedCommands}`,
       `log       ${snapshot.commandLog.retained}/${snapshot.commandLog.capacity}  dropped ${snapshot.commandLog.dropped}`,
       `contacts  ${snapshot.contacts.length}  dropped ${snapshot.contactMetrics.dropped}`,

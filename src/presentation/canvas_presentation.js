@@ -2,17 +2,43 @@
 
 import { DebugRenderer } from "../browser/renderer.js";
 import { PresentationFlags } from "./options.js";
+import { PresentationProfiler } from "./profiler.js";
+import { PresentationWarmupStatus } from "./warmup.js";
 
 export class CanvasPresentation {
-  /** @param {HTMLCanvasElement} canvas @param {import('../browser/camera.js').Camera2D} camera */
-  constructor(canvas, camera) {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {import('../browser/camera.js').Camera2D} camera
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
+   */
+  constructor(canvas, camera, initialSnapshot) {
     this.renderer = new DebugRenderer(canvas, camera);
     this.flags = new PresentationFlags();
+    this.profiler = new PresentationProfiler();
+    this.warmup = new PresentationWarmupStatus(false);
+    this.profiler.prime({
+      projectileCount: initialSnapshot.projectiles.length,
+      particleCount: initialSnapshot.particles.length,
+      activeLightCount: 0,
+    });
   }
 
   /** @param {any} snapshot @param {number} alpha @param {any} view */
   render(snapshot, alpha, view) {
+    const started = performance.now();
     this.renderer.render(snapshot, alpha, view);
+    const finished = performance.now();
+    const submitMs = finished - started;
+    this.profiler.record({
+      tick: snapshot.tick,
+      projectileCount: snapshot.projectiles.length,
+      particleCount: snapshot.particles.length,
+      activeLightCount: 0,
+      updateMs: 0,
+      lightsMs: 0,
+      submitMs,
+      totalMs: submitMs,
+    });
   }
 
   /** @param {string} name @param {unknown} value */
@@ -28,7 +54,15 @@ export class CanvasPresentation {
       drawCalls: 0,
       triangles: 0,
       activeLightCount: 0,
+      residentLightCount: 0,
+      warmup: this.warmup.snapshot(),
+      presentationCpuMs: this.profiler.summary(),
+      recentSpikes: this.profiler.recentSpikes(),
       flags: this.flags.snapshot(),
     };
+  }
+
+  resetPerformanceMetrics() {
+    this.profiler.reset();
   }
 }

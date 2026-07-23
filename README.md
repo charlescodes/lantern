@@ -1,4 +1,4 @@
-# Lantern M0.2.5 / Blast Lab
+# Lantern 0.3.0 / Blast Lab
 
 A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots.
 
@@ -8,7 +8,7 @@ A browser-first fixed-step X/Z simulation for inspecting collision, fireball exp
 npm start
 ```
 
-Open <http://127.0.0.1:4173/>. Development requires Node.js 20+ and a modern desktop browser.
+The server prints clickable links for Canvas2D, automatic 3D, and forced WebGL 2. Development requires Node.js 20+ and a modern desktop browser.
 
 Three.js `0.184.0` is the single pinned runtime dependency. `npm install` restores it from `package-lock.json`.
 
@@ -25,6 +25,10 @@ npm test
 npm run check
 npm run test:soak
 ```
+
+## Documentation
+
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and renderer regression notes. Release `0.3.0` is the current application milestone; schema v4, scenario v2, and the frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
 
 ## Play controls
 
@@ -60,13 +64,13 @@ The visual spark shower remains presentation-only. Spark centers sweep against s
 
 Maximum spark size remains randomly sampled from `0.025-0.085m`. Size now drives a seeded `0.18-1.10s` lifetime, so larger embers persist longer while every visible radius shrinks smoothly toward zero. A lower-biased vertical distribution sends roughly 60% of a full burst to the ground. The first ground contact retains 45% vertical and 82% horizontal speed; the next ground contact settles the ember at `Y=0`, where it slows and remains visible until its assigned lifetime expires.
 
-See [lantern_mvp_blast_physics.md](./lantern_mvp_blast_physics.md) for the force model, [lantern_mvp_particle_collision.md](./lantern_mvp_particle_collision.md) for M0.2 wall behavior, and [lantern_mvp_particle_lifecycle.md](./lantern_mvp_particle_lifecycle.md) for M0.2.5 lifecycle behavior.
+See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the force model, [0.2.0 particle collision](./docs/milestones/0.2.0-particle-collision.md) for wall behavior, and [0.2.5 particle lifecycle](./docs/milestones/0.2.5-particle-lifecycle.md) for size-linked lifetime behavior.
 
 ## 3D presentation vertical
 
 The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. It adds cool fill lighting plus a fixed pool of eight shadowless point lights prioritized as explosion pulses, fireballs, then stable leases on large/young sparks.
 
-Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See [lantern_3d_presentation.md](./lantern_3d_presentation.md) for the full contract, performance thresholds, and the browser/human acceptance gate that must pass before 3D can become the default.
+Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md) and [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md) for the full boundary, warmup lifecycle, and bugs that must remain covered. Canvas2D remains the default regression route.
 
 ## Snapshots and recordings
 
@@ -80,4 +84,4 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`.
 
-`window.__lantern.presentation()` reports renderer/backend, draw calls, triangles, active light count, snapshot timing, render CPU timing, and visual flags. `setPresentationFlag(name, value)` accepts `dynamicLights`, `bloom`, and `shadows` without adding simulation commands.
+`window.__lantern.presentation()` reports renderer/backend, warmup duration, active/resident lights, draw counts, cached presentation phase timings, recent 32 ms spikes, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears only these timing histories and spike records; `setPresentationFlag(name, value)` accepts `dynamicLights`, `bloom`, and `shadows` without adding simulation commands.
