@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.3.1` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.3.2` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Current contracts
 
@@ -8,6 +8,7 @@ Lantern `0.3.1` is the current application release. Documents are separated by p
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
 - [0.3.0 renderer regression notes](./notes/0.3.0-renderer-regressions.md) — cold-pipeline and stale-instance symptoms that future renderer changes must not reintroduce.
 - [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) — current player/body response contract that prevents controller contact from storing external recoil.
+- [0.3.2 spark-light affinity regression](./notes/0.3.2-spark-light-affinity.md) — carrier leases, smooth tail fades, and keyed resident-light slots.
 
 ## Release and milestone history
 
@@ -19,12 +20,13 @@ Lantern `0.3.1` is the current application release. Documents are separated by p
 | 0.2.5 | [Size-linked ember lifecycles](./milestones/0.2.5-particle-lifecycle.md) | Shrink, lifetime, ground settling, replay profiles |
 | 0.3.0 | [3D presentation and dynamic lighting](./milestones/0.3.0-3d-presentation.md) | Three.js adapter, stable lights, warmup, bounded presentation profiling |
 | 0.3.1 | [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) | Prevent controller contact from storing external recoil while preserving genuine impact knockback |
+| 0.3.2 | [Spark-light affinity](./notes/0.3.2-spark-light-affinity.md) | Prevent dying spark lights from hopping to older surviving carriers |
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.3.1`.
+- Application/package release: `0.3.2`.
 - Snapshot and command-recording schema: v4.
 - Scenario JSON schema: v2; legacy map JSON remains v1.
 - Default particle behavior profile: `m0.2.5-balanced`.

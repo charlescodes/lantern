@@ -9,28 +9,65 @@
  * @param {boolean} [enabled]
  */
 export function applyLightPool(lights, assignments, enabled = true) {
-  const activeCount = enabled ? Math.min(lights.length, assignments.length) : 0;
-  for (let index = 0; index < lights.length; index += 1) {
-    const light = lights[index];
-    const assignment = index < activeCount ? assignments[index] : null;
+  for (const light of lights) {
     light.visible = true;
     light.castShadow = false;
     light.userData ??= {};
-    if (!assignment) {
+  }
+  if (!enabled) {
+    for (const light of lights) light.intensity = 0;
+    return 0;
+  }
+
+  const pending = assignments.slice(0, lights.length);
+  const assignmentByKey = new Map(
+    pending.map((assignment) => [assignment.key, assignment]),
+  );
+  const appliedKeys = new Set();
+  let activeCount = 0;
+
+  for (const light of lights) {
+    const key = light.userData.assignment;
+    const assignment = key === null || key === undefined
+      ? null
+      : assignmentByKey.get(key);
+    if (!assignment || appliedKeys.has(key)) {
       light.intensity = 0;
       light.userData.assignment = null;
       continue;
     }
-    light.position.set(assignment.x, assignment.y, assignment.z);
-    light.color.setRGB(
-      assignment.color.r,
-      assignment.color.g,
-      assignment.color.b,
-    );
-    light.intensity = assignment.intensity;
-    light.distance = assignment.distance;
-    light.decay = assignment.decay;
-    light.userData.assignment = assignment.key;
+    applyAssignment(light, assignment);
+    appliedKeys.add(key);
+    activeCount += 1;
   }
+
+  for (const assignment of pending) {
+    if (appliedKeys.has(assignment.key)) continue;
+    const light = lights.find(
+      (candidate) => candidate.userData.assignment === null,
+    );
+    if (!light) break;
+    applyAssignment(light, assignment);
+    appliedKeys.add(assignment.key);
+    activeCount += 1;
+  }
+
   return activeCount;
+}
+
+/**
+ * @param {Record<string, any>} light
+ * @param {Record<string, any>} assignment
+ */
+function applyAssignment(light, assignment) {
+  light.position.set(assignment.x, assignment.y, assignment.z);
+  light.color.setRGB(
+    assignment.color.r,
+    assignment.color.g,
+    assignment.color.b,
+  );
+  light.intensity = assignment.intensity;
+  light.distance = assignment.distance;
+  light.decay = assignment.decay;
+  light.userData.assignment = assignment.key;
 }

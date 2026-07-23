@@ -1,4 +1,4 @@
-# Lantern 0.3.1 / Blast Lab
+# Lantern 0.3.2 / Blast Lab
 
 A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots.
 
@@ -28,7 +28,7 @@ npm run test:soak
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.3.1` is the current application patch; the `0.3.0` presentation milestone, schema v4, scenario v2, and frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.3.2` is the current application patch; the `0.3.0` presentation milestone, schema v4, scenario v2, and frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
 
 ## Play controls
 
@@ -70,9 +70,9 @@ See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the forc
 
 ## 3D presentation vertical
 
-The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. It adds cool fill lighting plus a fixed pool of eight shadowless point lights prioritized as explosion pulses, fireballs, then stable leases on large/young sparks.
+The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. It adds cool fill lighting plus a fixed pool of eight shadowless point lights prioritized as explosion pulses, fireballs, then stable leases on large/young sparks. Each spark light remains bound to its original carrier, fades continuously to zero, and leaves its resident slot dark when that carrier disappears; only a genuinely new spark may claim an empty slot.
 
-Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md) and [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md) for the full boundary, warmup lifecycle, and bugs that must remain covered. Canvas2D remains the default regression route.
+Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md), [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md), and [0.3.2 spark-light affinity regression](./docs/notes/0.3.2-spark-light-affinity.md) for the full boundary and bugs that must remain covered. Canvas2D remains the default regression route.
 
 ## Snapshots and recordings
 

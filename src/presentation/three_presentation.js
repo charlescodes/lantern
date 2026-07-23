@@ -320,6 +320,7 @@ export class ThreePresentation {
   setPresentationFlag(name, value) {
     if (!this.flags.set(name, value)) return false;
     if (name === "dynamicLights" && !this.flags.values.dynamicLights) {
+      this.lightBudget.reset();
       this.activeLightCount = applyLightPool(this.dynamicLights, [], false);
     }
     if (name === "shadows") this.#applyShadowFlag();

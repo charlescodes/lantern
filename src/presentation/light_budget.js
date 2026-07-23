@@ -72,12 +72,16 @@ export class PresentationLightBudget {
       Math.trunc(options.explosionLifetimeTicks ?? EXPLOSION.debugTicks),
     );
     this.sparkLeases = new Map();
+    this.observedSparkIds = new Set();
     this.nextLease = 1;
+    this.lastTick = null;
   }
 
   reset() {
     this.sparkLeases.clear();
+    this.observedSparkIds.clear();
     this.nextLease = 1;
+    this.lastTick = null;
   }
 
   /**
@@ -89,6 +93,8 @@ export class PresentationLightBudget {
       this.reset();
       return [];
     }
+    if (this.lastTick !== null && snapshot.tick < this.lastTick) this.reset();
+    this.lastTick = snapshot.tick;
 
     const assignments = [];
     const explosions = snapshot.recentEvents
@@ -138,28 +144,45 @@ export class PresentationLightBudget {
       });
     }
 
-    const available = this.capacity - assignments.length;
-    const eligible = snapshot.particles
-      .map((particle) => ({
+    const particlesById = new Map();
+    const newlyObserved = [];
+    for (const particle of snapshot.particles) {
+      const id = Number(particle.id);
+      particlesById.set(id, particle);
+      if (this.observedSparkIds.has(id)) continue;
+      this.observedSparkIds.add(id);
+      newlyObserved.push({
         particle,
         life: particleLife(particle),
-      }))
-      .filter(({ particle, life }) => life > 0.12 && particle.currentSize > 0)
+      });
+    }
+    for (const id of this.sparkLeases.keys()) {
+      if (!particlesById.has(id)) this.sparkLeases.delete(id);
+    }
+
+    const available = this.capacity - assignments.length;
+    const retained = [...this.sparkLeases.entries()]
+      .filter(([id]) => particlesById.has(id))
+      .sort((left, right) => left[1] - right[1])
+      .slice(0, available);
+    const selectedIds = new Set(retained.map(([id]) => id));
+    const selected = retained.map(([id]) => {
+      const particle = particlesById.get(id);
+      return {
+        particle,
+        life: particleLife(particle),
+      };
+    });
+    this.sparkLeases = new Map(retained);
+
+    const candidates = newlyObserved
+      .filter(({ particle }) => particle.currentSize > 0)
       .sort((left, right) => {
         const leftScore = left.particle.currentSize * (0.35 + left.life * 0.65);
         const rightScore = right.particle.currentSize * (0.35 + right.life * 0.65);
         return rightScore - leftScore || Number(left.particle.id) - Number(right.particle.id);
       });
-    const eligibleById = new Map(
-      eligible.map((candidate) => [Number(candidate.particle.id), candidate]),
-    );
-    const retained = [...this.sparkLeases.entries()]
-      .filter(([id]) => eligibleById.has(id))
-      .sort((left, right) => left[1] - right[1])
-      .slice(0, available);
-    const selectedIds = new Set(retained.map(([id]) => id));
-    const selected = retained.map(([id]) => eligibleById.get(id));
-    for (const candidate of eligible) {
+    for (const candidate of candidates) {
       if (selected.length >= available) break;
       const id = Number(candidate.particle.id);
       if (selectedIds.has(id)) continue;
@@ -168,19 +191,17 @@ export class PresentationLightBudget {
       selectedIds.add(id);
       selected.push(candidate);
     }
-    this.sparkLeases = new Map(
-      [...this.sparkLeases.entries()].filter(([id]) => selectedIds.has(id)),
-    );
 
     const sizeRange = Math.max(1e-9, PARTICLE.maximumSize - PARTICLE.minimumSize);
     for (const candidate of selected) {
       if (!candidate) continue;
       const particle = candidate.particle;
-      const size = clamp(
+      const normalizedMaximumSize = clamp(
         (particle.size - PARTICLE.minimumSize) / sizeRange,
         0,
         1,
       );
+      const fade = candidate.life * candidate.life * (3 - 2 * candidate.life);
       assignments.push({
         key: `particle:${particle.id}`,
         kind: "particle",
@@ -189,7 +210,7 @@ export class PresentationLightBudget {
         y: Math.max(0.08, Number(particle.y) + Number(particle.currentSize)),
         z: Number(particle.z),
         color: sparkFireColor(candidate.life),
-        intensity: 4 + 9 * size * candidate.life,
+        intensity: (4 + 9 * normalizedMaximumSize) * fade,
         distance: 1.5,
         decay: 2,
       });
