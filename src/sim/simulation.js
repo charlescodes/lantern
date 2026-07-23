@@ -28,6 +28,7 @@ import {
   sanitizePointAgainstGrid,
   sweepPointAgainstGrid,
 } from "./collision.js";
+import { resolvePlayerDynamicBodyVelocity } from "./dynamic_body_velocity.js";
 import { computeExplosionResponse } from "./explosion.js";
 import { GridMap } from "./grid_map.js";
 import { ParticlePool, ProjectilePool, RockPool } from "./pools.js";
@@ -317,6 +318,7 @@ export class Simulation {
       cz: 0,
     };
     this._bodyContact = { nx: 0, nz: 0, penetration: 0, x: 0, z: 0 };
+    this._dynamicBodyVelocity = { vx: 0, vz: 0, inverseMass: 0 };
     this._particleSweepHit = { x: 0, z: 0, time: 0, nx: 0, nz: 0, cx: 0, cz: 0 };
     this._particleSpawnPoint = { x: 0, z: 0, cx: 0, cz: 0, passes: 0 };
     this.lastError = null;
@@ -707,36 +709,20 @@ export class Simulation {
     pool.x[index] += contact.nx * correction * pool.inverseMass[index];
     pool.z[index] += contact.nz * correction * pool.inverseMass[index];
 
-    this.#syncPlayerVelocity();
-    let relativeVx = pool.vx[index] - player.vx;
-    let relativeVz = pool.vz[index] - player.vz;
-    const normalSpeed = relativeVx * contact.nx + relativeVz * contact.nz;
-    if (normalSpeed < 0) {
-      const impulse =
-        (-(1 + DYNAMIC_PHYSICS.bodyRestitution) * normalSpeed) / inverseMassSum;
-      const impulseX = impulse * contact.nx;
-      const impulseZ = impulse * contact.nz;
-      player.externalVx -= impulseX * player.inverseMass;
-      player.externalVz -= impulseZ * player.inverseMass;
-      pool.vx[index] += impulseX * pool.inverseMass[index];
-      pool.vz[index] += impulseZ * pool.inverseMass[index];
-
-      this.#syncPlayerVelocity();
-      relativeVx = pool.vx[index] - player.vx;
-      relativeVz = pool.vz[index] - player.vz;
-      const tangentSpeed = relativeVx * -contact.nz + relativeVz * contact.nx;
-      const tangentImpulse = clampMagnitude(
-        -tangentSpeed / inverseMassSum,
-        impulse * DYNAMIC_PHYSICS.bodyFriction,
-      );
-      const frictionX = -contact.nz * tangentImpulse;
-      const frictionZ = contact.nx * tangentImpulse;
-      player.externalVx -= frictionX * player.inverseMass;
-      player.externalVz -= frictionZ * player.inverseMass;
-      pool.vx[index] += frictionX * pool.inverseMass[index];
-      pool.vz[index] += frictionZ * pool.inverseMass[index];
-      this.#syncPlayerVelocity();
-    }
+    const bodyVelocity = this._dynamicBodyVelocity;
+    bodyVelocity.vx = pool.vx[index];
+    bodyVelocity.vz = pool.vz[index];
+    bodyVelocity.inverseMass = pool.inverseMass[index];
+    resolvePlayerDynamicBodyVelocity(
+      player,
+      bodyVelocity,
+      contact.nx,
+      contact.nz,
+      DYNAMIC_PHYSICS.bodyRestitution,
+      DYNAMIC_PHYSICS.bodyFriction,
+    );
+    pool.vx[index] = bodyVelocity.vx;
+    pool.vz[index] = bodyVelocity.vz;
     if (record) {
       this.#recordBodyContact(
         BODY_PLAYER,

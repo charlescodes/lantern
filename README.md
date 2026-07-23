@@ -1,4 +1,4 @@
-# Lantern 0.3.0 / Blast Lab
+# Lantern 0.3.1 / Blast Lab
 
 A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots.
 
@@ -28,7 +28,7 @@ npm run test:soak
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and renderer regression notes. Release `0.3.0` is the current application milestone; schema v4, scenario v2, and the frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.3.1` is the current application patch; the `0.3.0` presentation milestone, schema v4, scenario v2, and frozen `m0.2.5-balanced` particle profile retain their independent compatibility meanings.
 
 ## Play controls
 
@@ -57,6 +57,8 @@ Scenario JSON v2 stores the grid, player spawn, and authored rocks. Legacy map v
 ## Physics model
 
 The player is 75 kg. Rock mass is derived from a 2,600 kg/m3 stone density and spherical volume: about 10.9 kg at 0.1m radius, 294 kg at 0.3m, and 7,940 kg at 0.9m. Rocks collide with walls, the player, and one another.
+
+Player velocity remains split between control-driven locomotion and damped external momentum. Player/rock contact now resolves genuine body or external momentum through the external channel, while controller-driven closure reacts through locomotion with zero restitution. This prevents held movement against a heavy rock from storing delayed recoil without suppressing real impact knockback. See the [dynamic-contact velocity-channel regression contract](./docs/notes/dynamic-contact-velocity-channels.md).
 
 An explosion applies an instantaneous, radial impulse to bodies within 2.5m. Surface-distance falloff, projected body area, and mass determine velocity change. Solid map cells completely block the impulse ray.
 

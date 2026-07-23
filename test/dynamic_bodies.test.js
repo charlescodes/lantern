@@ -64,21 +64,80 @@ test("rock-rock collision transfers momentum and resolves overlap", () => {
   assert.ok(simulation.snapshot().contacts.some((contact) => contact.type === "body"));
 });
 
-test("player and rock stay separated while locomotion pushes the rock", () => {
-  const map = borderedMap(10, 7, { x: 2, z: 3.5 });
-  const scenario = new ArenaScenario(map, [
-    { kind: "rock", archetype: "medium", x: 4, z: 3.5 },
-  ]);
-  const simulation = new Simulation({ scenario, particleBurstCount: 0 });
-  const authoredX = simulation.rocks.x[0];
-  for (let tick = 0; tick < 120; tick += 1) {
-    simulation.tick({ move: { x: 8, z: 3.5 } });
+test("sustained locomotion pushes lighter rocks farther without storing release recoil", () => {
+  const displacements = [];
+  for (const archetype of ["small", "medium", "large"]) {
+    const map = borderedMap(24, 8, { x: 2, z: 4 });
+    const scenario = new ArenaScenario(map, [
+      { kind: "rock", archetype, x: 4, z: 4 },
+    ]);
+    const simulation = new Simulation({ scenario, particleBurstCount: 0 });
+    const authoredX = simulation.rocks.x[0];
+    let minimumSeparation = Infinity;
+    let maximumExternalSpeed = 0;
+
+    const sampleContact = () => {
+      minimumSeparation = Math.min(
+        minimumSeparation,
+        Math.hypot(
+          simulation.rocks.x[0] - simulation.player.x,
+          simulation.rocks.z[0] - simulation.player.z,
+        ) - simulation.rocks.radius[0] - simulation.player.radius,
+      );
+      maximumExternalSpeed = Math.max(
+        maximumExternalSpeed,
+        Math.hypot(simulation.player.externalVx, simulation.player.externalVz),
+      );
+    };
+
+    for (let tick = 0; tick < 120; tick += 1) {
+      simulation.tick({ move: { x: 20, z: 4 } });
+      sampleContact();
+    }
+    const holdRockDisplacement = simulation.rocks.x[0] - authoredX;
+    const releaseX = simulation.player.x;
+    let minimumReleaseX = releaseX;
+    for (let tick = 0; tick < 60; tick += 1) {
+      simulation.tick(null);
+      minimumReleaseX = Math.min(minimumReleaseX, simulation.player.x);
+      sampleContact();
+    }
+
+    displacements.push(holdRockDisplacement);
+    assert.ok(maximumExternalSpeed <= 1e-9, `${archetype} contact stored external velocity`);
+    assert.ok(
+      releaseX - minimumReleaseX < 0.01,
+      `${archetype} contact recoiled ${releaseX - minimumReleaseX}m after release`,
+    );
+    assert.ok(
+      minimumSeparation >= -0.003,
+      `${archetype} overlap exceeded the 0.003m tolerance`,
+    );
   }
 
-  const distance = Math.hypot(
-    simulation.rocks.x[0] - simulation.player.x,
-    simulation.rocks.z[0] - simulation.player.z,
+  assert.ok(displacements[0] > displacements[1]);
+  assert.ok(displacements[1] > displacements[2]);
+});
+
+test("an independently moving rock still produces damped external knockback", () => {
+  const map = borderedMap(16, 8, { x: 5, z: 4 });
+  const scenario = new ArenaScenario(map, [
+    { kind: "rock", archetype: "medium", x: 7, z: 4 },
+  ]);
+  const simulation = new Simulation({ scenario, particleBurstCount: 0 });
+  simulation.rocks.vx[0] = -6;
+  let peakKnockback = 0;
+
+  for (let tick = 0; tick < 90; tick += 1) {
+    simulation.tick(null);
+    peakKnockback = Math.min(peakKnockback, simulation.player.externalVx);
+  }
+
+  assert.ok(peakKnockback < -0.1, "incoming rock should create visible external knockback");
+  assert.equal(simulation.player.locomotionVx, 0);
+  assert.ok(simulation.player.externalVx < 0);
+  assert.ok(
+    Math.abs(simulation.player.externalVx) < Math.abs(peakKnockback) * 0.5,
+    "incoming-rock knockback should damp after impact",
   );
-  assert.ok(distance >= simulation.rocks.radius[0] + simulation.player.radius - 0.003);
-  assert.ok(simulation.rocks.x[0] > authoredX);
 });

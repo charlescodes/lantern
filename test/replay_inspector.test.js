@@ -28,6 +28,19 @@ function comparable(simulation) {
   };
 }
 
+function borderedMap(width, height, spawn) {
+  const map = new GridMap(width, height, undefined, spawn);
+  for (let x = 0; x < width; x += 1) {
+    map.set(x, 0, 1);
+    map.set(x, height - 1, 1);
+  }
+  for (let z = 0; z < height; z += 1) {
+    map.set(0, z, 1);
+    map.set(width - 1, z, 1);
+  }
+  return map;
+}
+
 test("same seed and command log replay to matching simulation state", () => {
   const simulation = new Simulation({ seed: 0xdecafbad, particleBurstCount: 12 });
   for (let tick = 0; tick < 360; tick += 1) {
@@ -38,6 +51,33 @@ test("same seed and command log replay to matching simulation state", () => {
   }
   const recording = simulation.exportCommandLog();
   const replayed = Simulation.replay(recording);
+  assert.deepEqual(comparable(replayed), comparable(simulation));
+});
+
+test("contact-heavy command recording replays to identical current-build state", () => {
+  const map = borderedMap(18, 8, { x: 2, z: 4 });
+  const scenario = new ArenaScenario(map, [
+    { kind: "rock", archetype: "large", x: 5, z: 4 },
+  ]);
+  const simulation = new Simulation({
+    scenario,
+    seed: 0xc0_11_1de,
+    particleBurstCount: 0,
+  });
+  let contactTicks = 0;
+  for (let tick = 0; tick < 360; tick += 1) {
+    simulation.tick({
+      move: tick < 240 ? { x: 15, z: 4 } : null,
+    });
+    if (simulation.snapshot().contacts.some((contact) => contact.type === "body")) {
+      contactTicks += 1;
+    }
+  }
+
+  const recording = simulation.exportCommandLog();
+  const replayed = Simulation.replay(recording);
+  assert.equal(recording.schemaVersion, 4);
+  assert.ok(contactTicks >= 120, `expected sustained contact, received ${contactTicks} ticks`);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
 
