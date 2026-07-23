@@ -1,10 +1,10 @@
 // @ts-check
 
-import { Camera2D } from "./browser/camera.js";
 import { InputController } from "./browser/input.js";
-import { DebugRenderer } from "./browser/renderer.js";
 import { ArenaUi } from "./browser/ui.js";
 import { SCHEMA_VERSION } from "./config.js";
+import { createPresentation } from "./presentation/factory.js";
+import { parsePresentationOptions } from "./presentation/options.js";
 import { FixedStepRuntime } from "./runtime/fixed_step_runtime.js";
 import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
@@ -13,9 +13,18 @@ const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("arena"
 if (!canvas) throw new Error("Missing #arena canvas");
 
 const simulation = new Simulation();
-const camera = new Camera2D();
-const renderer = new DebugRenderer(canvas, camera);
 const ui = new ArenaUi();
+const presentationOptions = parsePresentationOptions(window.location.search);
+let presentationBundle;
+try {
+  presentationBundle = await createPresentation(canvas, presentationOptions);
+} catch (error) {
+  ui.showError(error);
+  throw error;
+}
+const { camera, presentation } = presentationBundle;
+document.body.dataset.renderer = presentationOptions.renderer;
+document.body.dataset.backend = presentation.diagnostics().activeBackend;
 let mode = /** @type {"play"|"edit"} */ ("play");
 let editorTool = "wall";
 let resumeAfterEdit = false;
@@ -32,7 +41,7 @@ const runtime = new FixedStepRuntime({
     const selected = pinned
       ? /** @type {Record<string, unknown>|null} */ (simulation.resolveSelection(pinned))
       : null;
-    renderer.render(snapshot, alpha, {
+    presentation.render(snapshot, alpha, {
       mouseWorld: input.mouseWorld,
       mouseInside: input.mouseInside,
       hover,
@@ -52,7 +61,7 @@ const runtime = new FixedStepRuntime({
       hover,
       inspected: selected,
       mode,
-    });
+    }, presentation.diagnostics());
   },
   onError: (error) => ui.showError(error),
 });
@@ -265,6 +274,14 @@ const probe = Object.freeze({
   metrics() {
     return runtime.metrics();
   },
+  presentation() {
+    const runtimeMetrics = runtime.metrics();
+    return {
+      ...presentation.diagnostics(),
+      snapshotMs: runtimeMetrics.snapshotMs,
+      renderCpuMs: runtimeMetrics.renderMs,
+    };
+  },
   queryAt(x, z) {
     return simulation.queryAt(Number(x), Number(z));
   },
@@ -317,6 +334,9 @@ const probe = Object.freeze({
     if (!Object.hasOwn(simulation.debugFlags, String(name))) return false;
     return injectMutation({ type: "setDebugFlag", name, value });
   },
+  setPresentationFlag(name, value) {
+    return presentation.setPresentationFlag(String(name), value);
+  },
 });
 
 Object.defineProperty(window, "__lantern", {
@@ -329,4 +349,9 @@ ui.setMode(mode);
 ui.setEditorTool(editorTool);
 camera.focus(simulation.player.x, simulation.player.z);
 runtime.start();
-window.dispatchEvent(new CustomEvent("lantern:ready", { detail: { schemaVersion: SCHEMA_VERSION } }));
+window.dispatchEvent(new CustomEvent("lantern:ready", {
+  detail: {
+    schemaVersion: SCHEMA_VERSION,
+    presentation: presentation.diagnostics(),
+  },
+}));

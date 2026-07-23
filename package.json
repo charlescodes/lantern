@@ -11,5 +11,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "three": "0.184.0"
   }
 }

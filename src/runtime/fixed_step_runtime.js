@@ -51,6 +51,7 @@ export class FixedStepRuntime {
     this.onError = options.onError ?? ((error) => console.error(error));
     this.pendingCommands = new CommandQueue(2_048);
     this.simSamples = new NumericRingBuffer(HISTORY.metrics);
+    this.snapshotSamples = new NumericRingBuffer(HISTORY.metrics);
     this.renderSamples = new NumericRingBuffer(HISTORY.metrics);
     this.frameSamples = new NumericRingBuffer(HISTORY.metrics);
     this.accumulator = 0;
@@ -58,7 +59,7 @@ export class FixedStepRuntime {
     this.paused = false;
     this.running = false;
     this.frameCount = 0;
-    this.lastSnapshot = this.simulation.snapshot();
+    this.lastSnapshot = this.#takeSnapshot();
     this.animationFrame = 0;
     this._frame = (now) => this.#frame(now);
   }
@@ -158,7 +159,7 @@ export class FixedStepRuntime {
 
   /** @param {number} alpha */
   #publish(alpha) {
-    this.lastSnapshot = this.simulation.snapshot();
+    this.lastSnapshot = this.#takeSnapshot();
     const started = performance.now();
     try {
       this.render(this.lastSnapshot, alpha, this.metrics());
@@ -169,8 +170,16 @@ export class FixedStepRuntime {
     this.renderSamples.push(performance.now() - started);
   }
 
+  #takeSnapshot() {
+    const started = performance.now();
+    const snapshot = this.simulation.snapshot();
+    this.snapshotSamples.push(performance.now() - started);
+    return snapshot;
+  }
+
   metrics() {
     const sim = this.simSamples.toSortedArray();
+    const snapshot = this.snapshotSamples.toSortedArray();
     const render = this.renderSamples.toSortedArray();
     const frames = this.frameSamples.toSortedArray();
     const medianFrame = percentile(frames, 0.5);
@@ -188,6 +197,11 @@ export class FixedStepRuntime {
         p50: percentile(sim, 0.5),
         p95: percentile(sim, 0.95),
         p99: percentile(sim, 0.99),
+      },
+      snapshotMs: {
+        p50: percentile(snapshot, 0.5),
+        p95: percentile(snapshot, 0.95),
+        p99: percentile(snapshot, 0.99),
       },
       renderMs: {
         p50: percentile(render, 0.5),

@@ -85,8 +85,9 @@ export class ArenaUi {
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
    * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,mode:string}} view
+   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number}} presentation
    */
-  update(snapshot, metrics, view) {
+  update(snapshot, metrics, view, presentation) {
     const now = performance.now();
     if (now - this.lastUiUpdate < 80) return;
     this.lastUiUpdate = now;
@@ -102,7 +103,9 @@ export class ArenaUi {
       `fps       ${number(metrics.fps, 1)}`,
       `accum     ${number(metrics.accumulator * 1_000, 2)} ms  α ${number(metrics.alpha, 3)}`,
       `sim ms    ${number(metrics.simMs.p50)} / ${number(metrics.simMs.p95)} / ${number(metrics.simMs.p99)}`,
+      `snap ms   ${number(metrics.snapshotMs.p50)} / ${number(metrics.snapshotMs.p95)} / ${number(metrics.snapshotMs.p99)}`,
       `render ms ${number(metrics.renderMs.p50)} / ${number(metrics.renderMs.p95)} / ${number(metrics.renderMs.p99)}`,
+      `present   ${presentation.requestedRenderer}/${presentation.activeBackend}  calls ${presentation.drawCalls}  tris ${presentation.triangles}  lights ${presentation.activeLightCount}`,
       `queue     ${metrics.queuedCommands}  dropped ${metrics.droppedCommands}`,
       `log       ${snapshot.commandLog.retained}/${snapshot.commandLog.capacity}  dropped ${snapshot.commandLog.dropped}`,
       `contacts  ${snapshot.contacts.length}  dropped ${snapshot.contactMetrics.dropped}`,

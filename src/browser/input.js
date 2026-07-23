@@ -5,7 +5,7 @@ const POINTER_CLICK_SLOP_VIEWPORT_UNITS = 5;
 export class InputController {
   /**
    * @param {HTMLCanvasElement} canvas
-   * @param {import('./camera.js').Camera2D} camera
+   * @param {import('./camera.js').Camera2D|import('../presentation/camera_3d.js').Camera3D} camera
    * @param {{
    * inject:(command:unknown)=>void,
    * togglePause:()=>void,

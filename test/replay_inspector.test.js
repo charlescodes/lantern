@@ -90,6 +90,8 @@ test("snapshot, runtime, and recording schema are v4 while scenarios remain v2",
   assert.equal(SCHEMA_VERSION, 4);
   assert.equal(snapshot.schemaVersion, 4);
   assert.equal(runtime.metrics().schemaVersion, 4);
+  assert.deepEqual(Object.keys(runtime.metrics().snapshotMs), ["p50", "p95", "p99"]);
+  assert.ok(runtime.metrics().snapshotMs.p99 >= 0);
   assert.equal(recording.schemaVersion, 4);
   assert.equal(snapshot.particleProfile, PARTICLE_PROFILE_M0_2_5);
   assert.equal(snapshot.scenarioVersion, 2);

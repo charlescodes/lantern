@@ -1,6 +1,6 @@
 # Lantern M0.2.5 / Blast Lab
 
-A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state before a production renderer is introduced.
+A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots.
 
 ## Run
 
@@ -8,7 +8,15 @@ A browser-first fixed-step X/Z simulation for inspecting collision, fireball exp
 npm start
 ```
 
-Open <http://127.0.0.1:4173/>. The project has no runtime or development dependencies beyond Node.js 20+ and a modern desktop browser.
+Open <http://127.0.0.1:4173/>. Development requires Node.js 20+ and a modern desktop browser.
+
+Three.js `0.184.0` is the single pinned runtime dependency. `npm install` restores it from `package-lock.json`.
+
+Presentation routes:
+
+- <http://127.0.0.1:4173/?renderer=2d> — Canvas2D, also the default.
+- <http://127.0.0.1:4173/?renderer=3d> — Three.js with automatic WebGPU/WebGL 2 selection.
+- <http://127.0.0.1:4173/?renderer=3d&backend=webgl> — forced WebGL 2 fallback test.
 
 ## Validate
 
@@ -32,7 +40,7 @@ npm run test:soak
 
 Simulation truth uses meters, seconds, and kilograms. Player, rock, projectile, blast, and particle measurements are continuous metric values. The static collision map is a separate `1m × 1m` occupancy grid; entities are circles moving continuously across it rather than pixel- or cell-locked bodies.
 
-The debug camera stores a visible world height, defaulting to `24m` with a `4-64m` zoom range. Its world-to-viewport scale is derived from the current canvas bounds, so window size and device-pixel ratio do not alter simulation scale. Canvas backing pixels, fixed-screen debug strokes, text size, and pointer click tolerance remain isolated presentation concerns.
+Both presentation cameras store a visible world height, defaulting to `24m` with a `4-64m` zoom range. Their world-to-viewport scale is derived from the current canvas bounds, so window size and device-pixel ratio do not alter simulation scale. The 3D camera uses 45 degree yaw and 55 degree downward pitch; pointer rays intersect `Y=0`, preserving X/Z commands for movement, casting, editing, and selection. Canvas backing pixels, fixed-screen debug strokes, text size, and pointer click tolerance remain isolated presentation concerns.
 
 There is no component-mask or ECS dispatch layer yet. Systems explicitly process the player and bounded typed-array pools. A future lighting field should declare its own metric cell size and consume explicit light/occluder data; it should not inherit either the collision grid resolution or the canvas raster resolution.
 
@@ -54,6 +62,12 @@ Maximum spark size remains randomly sampled from `0.025-0.085m`. Size now drives
 
 See [lantern_mvp_blast_physics.md](./lantern_mvp_blast_physics.md) for the force model, [lantern_mvp_particle_collision.md](./lantern_mvp_particle_collision.md) for M0.2 wall behavior, and [lantern_mvp_particle_lifecycle.md](./lantern_mvp_particle_lifecycle.md) for M0.2.5 lifecycle behavior.
 
+## 3D presentation vertical
+
+The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. It adds cool fill lighting plus a fixed pool of eight shadowless point lights prioritized as explosion pulses, fireballs, then stable leases on large/young sparks.
+
+Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See [lantern_3d_presentation.md](./lantern_3d_presentation.md) for the full contract, performance thresholds, and the browser/human acceptance gate that must pass before 3D can become the default.
+
 ## Snapshots and recordings
 
 Snapshots, runtime metrics, and command recordings use schema v4. Scenario JSON remains v2. A v4 recording stores the particle profile plus initial **Ground bounce** and **Spark walls** modes, then replays later flag commands at their original tick boundaries. Schema-v3 recordings use the exact M0.2 particle profile; schema-v2 recordings additionally disable spark wall collision.
@@ -62,6 +76,8 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 ## Runtime boundary
 
-`src/sim` has no DOM or Canvas dependencies. Browser input and probe mutations become commands consumed at fixed-tick boundaries. Canvas and DOM panels consume copied JSON-safe snapshots and do not mutate simulation state.
+`src/sim` has no DOM, Canvas, or Three.js dependencies. Browser input and probe mutations become commands consumed at fixed-tick boundaries. Canvas2D, Three.js, and DOM panels consume copied JSON-safe snapshots and do not mutate simulation state.
 
 The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`.
+
+`window.__lantern.presentation()` reports renderer/backend, draw calls, triangles, active light count, snapshot timing, render CPU timing, and visual flags. `setPresentationFlag(name, value)` accepts `dynamicLights`, `bloom`, and `shadows` without adding simulation commands.
