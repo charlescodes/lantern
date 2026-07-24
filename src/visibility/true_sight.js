@@ -547,14 +547,22 @@ export class TrueSightFrame {
       || worldX >= this.mapWidth
       || worldZ >= this.mapHeight
     ) return 0;
-    const textureX = (worldX / this.mapWidth) * this.maskWidth - 0.5;
-    const textureZ = (worldZ / this.mapHeight) * this.maskHeight - 0.5;
-    const x0 = clamp(Math.floor(textureX), 0, this.maskWidth - 1);
-    const z0 = clamp(Math.floor(textureZ), 0, this.maskHeight - 1);
+    const textureX = clamp(
+      (worldX / this.mapWidth) * this.maskWidth - 0.5,
+      0,
+      this.maskWidth - 1,
+    );
+    const textureZ = clamp(
+      (worldZ / this.mapHeight) * this.maskHeight - 0.5,
+      0,
+      this.maskHeight - 1,
+    );
+    const x0 = Math.floor(textureX);
+    const z0 = Math.floor(textureZ);
     const x1 = Math.min(this.maskWidth - 1, x0 + 1);
     const z1 = Math.min(this.maskHeight - 1, z0 + 1);
-    const fx = clamp(textureX - Math.floor(textureX), 0, 1);
-    const fz = clamp(textureZ - Math.floor(textureZ), 0, 1);
+    const fx = textureX - x0;
+    const fz = textureZ - z0;
     const upperLeft = this.displayMask[z0 * this.maskWidth + x0];
     const upperRight = this.displayMask[z0 * this.maskWidth + x1];
     const lowerLeft = this.displayMask[z1 * this.maskWidth + x0];

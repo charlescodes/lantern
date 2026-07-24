@@ -88,6 +88,7 @@ export class CanvasPresentation {
       effectiveDpr: this.renderer.backingScale,
       gpuTimingAvailable: false,
       gpuRenderMs: null,
+      trueSightTransport: null,
       warmup: this.warmup.snapshot(),
       presentationCpuMs: this.profiler.summary(),
       recentSpikes: this.profiler.recentSpikes(),

@@ -55,6 +55,39 @@ export function recoveryPresentationSearch(search, recovery) {
   });
 }
 
+/**
+ * @param {Record<string,any>} presentation
+ * @param {Record<string,any>} runtime
+ */
+export function renderLabDiagnosticsText(presentation, runtime) {
+  const css = presentation.cssResolution ?? {};
+  const backing = presentation.backingResolution ?? {};
+  const frame = runtime.frameMs ?? {};
+  const renderer = runtime.renderMs ?? {};
+  const phases = presentation.presentationCpuMs?.totalMs ?? {};
+  const trueSight = presentation.trueSight ?? {};
+  const trueSightCpu = presentation.trueSightCpuMs ?? {};
+  const transport = presentation.trueSightTransport;
+  const capacity = transport?.textureCapacity ?? {};
+  const active = transport?.activeMaskDimensions ?? {};
+  const transportLine = transport
+    ? `TrueSight GPU ${capacity.width ?? "--"}×${capacity.height ?? "--"} fixed  active ${active.width ?? "--"}×${active.height ?? "--"}  ${transport.allocatedBytes ?? "--"} B  v${transport.textureVersion ?? "--"}  ${transport.uploadCount ?? 0} uploads`
+    : "TrueSight GPU n/a (Canvas2D)";
+  return [
+    `backend       ${presentation.activeBackend ?? "initializing"}`,
+    `resolution    CSS ${css.width ?? "--"}×${css.height ?? "--"}  backing ${backing.width ?? "--"}×${backing.height ?? "--"}`,
+    `effective DPR ${formatted(presentation.effectiveDpr, 2)}`,
+    `lights        ${presentation.activeLightCount ?? 0}/${presentation.residentLightCount ?? 0} active/resident`,
+    `frame ms      ${formatted(frame.p50)} / ${formatted(frame.p95)} / ${formatted(frame.p99)}  p50/p95/p99`,
+    `renderer CPU  ${formatted(renderer.p50)} / ${formatted(renderer.p95)} / ${formatted(renderer.p99)} ms`,
+    `present CPU   ${formatted(phases.p50)} / ${formatted(phases.p95)} / ${formatted(phases.p99)} ms`,
+    `TrueSight CPU ${formatted(trueSightCpu.p50)} / ${formatted(trueSightCpu.p95)} / ${formatted(trueSightCpu.p99)} ms`,
+    `TrueSight     ${trueSight.rayCount ?? 0} rays  ${trueSight.polygonVertexCount ?? 0} vertices  ${trueSight.visibleWallCount ?? 0} walls  ${trueSight.maskWidth ?? "--"}×${trueSight.maskHeight ?? "--"}`,
+    transportLine,
+    `GPU timing    ${presentation.gpuTimingAvailable ? "available during capture" : "unavailable"}${presentation.gpuRenderMs === null || presentation.gpuRenderMs === undefined ? "" : `  latest ${formatted(presentation.gpuRenderMs)} ms`}`,
+  ].join("\n");
+}
+
 export class RenderLab {
   /** @param {ReturnType<typeof parsePresentationOptions>} bootOptions */
   constructor(bootOptions) {
@@ -161,25 +194,10 @@ export class RenderLab {
     const now = performance.now();
     if (now - this.lastUpdate < 100) return;
     this.lastUpdate = now;
-    const css = presentation.cssResolution ?? {};
-    const backing = presentation.backingResolution ?? {};
-    const frame = runtime.frameMs ?? {};
-    const renderer = runtime.renderMs ?? {};
-    const phases = presentation.presentationCpuMs?.totalMs ?? {};
-    const trueSight = presentation.trueSight ?? {};
-    const trueSightCpu = presentation.trueSightCpuMs ?? {};
-    this.diagnostics.textContent = [
-      `backend       ${presentation.activeBackend ?? "initializing"}`,
-      `resolution    CSS ${css.width ?? "--"}×${css.height ?? "--"}  backing ${backing.width ?? "--"}×${backing.height ?? "--"}`,
-      `effective DPR ${formatted(presentation.effectiveDpr, 2)}`,
-      `lights        ${presentation.activeLightCount ?? 0}/${presentation.residentLightCount ?? 0} active/resident`,
-      `frame ms      ${formatted(frame.p50)} / ${formatted(frame.p95)} / ${formatted(frame.p99)}  p50/p95/p99`,
-      `renderer CPU  ${formatted(renderer.p50)} / ${formatted(renderer.p95)} / ${formatted(renderer.p99)} ms`,
-      `present CPU   ${formatted(phases.p50)} / ${formatted(phases.p95)} / ${formatted(phases.p99)} ms`,
-      `TrueSight CPU ${formatted(trueSightCpu.p50)} / ${formatted(trueSightCpu.p95)} / ${formatted(trueSightCpu.p99)} ms`,
-      `TrueSight     ${trueSight.rayCount ?? 0} rays  ${trueSight.polygonVertexCount ?? 0} vertices  ${trueSight.visibleWallCount ?? 0} walls  ${trueSight.maskWidth ?? "--"}×${trueSight.maskHeight ?? "--"}`,
-      `GPU timing    ${presentation.gpuTimingAvailable ? "available during capture" : "unavailable"}${presentation.gpuRenderMs === null || presentation.gpuRenderMs === undefined ? "" : `  latest ${formatted(presentation.gpuRenderMs)} ms`}`,
-    ].join("\n");
+    this.diagnostics.textContent = renderLabDiagnosticsText(
+      presentation,
+      runtime,
+    );
   }
 
   getLatestReport() {

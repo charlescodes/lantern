@@ -8,7 +8,9 @@ import {
   parsePresentationOptions,
   PresentationFlags,
 } from "../src/presentation/options.js";
+import { Simulation } from "../src/sim/simulation.js";
 import { ThreePresentation } from "../src/presentation/three_presentation.js";
+import { TrueSightSystem } from "../src/visibility/true_sight.js";
 
 function fakeCanvas() {
   return {
@@ -27,12 +29,19 @@ function fakeCanvas() {
 test("Three world materials share one resident red-byte TrueSight node pipeline", () => {
   const options = parsePresentationOptions("?renderer=3d&aa=1");
   const flags = new PresentationFlags(options);
+  const snapshot = new Simulation().snapshot();
+  const sightFrame = new TrueSightSystem({ flags }).update(
+    snapshot,
+    0,
+    { mode: "play", deltaMs: 0 },
+  );
   const presentation = new ThreePresentation(
     fakeCanvas(),
     new Camera3D(),
     options,
     performance.now(),
     flags,
+    sightFrame,
   );
   const materials = [
     presentation.floorMaterial,
@@ -57,6 +66,12 @@ test("Three world materials share one resident red-byte TrueSight node pipeline"
   assert.equal(presentation.sightTexture.wrapS, THREE.ClampToEdgeWrapping);
   assert.equal(presentation.sightTexture.wrapT, THREE.ClampToEdgeWrapping);
   assert.equal(presentation.sightTexture.generateMipmaps, false);
+  assert.equal(presentation.sightTexture.image.width, 256);
+  assert.equal(presentation.sightTexture.image.height, 256);
+  assert.equal(presentation.sightTexture.image.data.length, 65_536);
+  assert.equal(presentation.sightTransport.currentFrame, sightFrame);
+  assert.equal(presentation.sightTransport.uploadCount, 1);
+  assert.equal(presentation.warmup.snapshot().state, "warming");
 
   for (const material of materials) {
     assert.equal(material.isNodeMaterial, true);
@@ -70,4 +85,117 @@ test("Three world materials share one resident red-byte TrueSight node pipeline"
   assert.equal(presentation.editCellPreview.material.isMeshBasicNodeMaterial, true);
   assert.equal(presentation.sightRayLines.material.isLineBasicNodeMaterial, true);
   assert.equal(presentation.sightHitMesh.count, 0);
+});
+
+test("warmup scene assets retain mask, shadow, bloom, and light topology coverage", () => {
+  const options = parsePresentationOptions(
+    "?renderer=3d&aa=1&lights=8&bloom=1&shadows=1",
+  );
+  const flags = new PresentationFlags(options);
+  const snapshot = new Simulation().snapshot();
+  const sightFrame = new TrueSightSystem({ flags }).update(
+    snapshot,
+    0,
+    { mode: "play", deltaMs: 0 },
+  );
+  const presentation = new ThreePresentation(
+    fakeCanvas(),
+    new Camera3D(),
+    options,
+    performance.now(),
+    flags,
+    sightFrame,
+  );
+  const transportIdentities = {
+    texture: presentation.sightTexture,
+    image: presentation.sightTexture.image,
+    data: presentation.sightTexture.image.data,
+    opacityNode: presentation.sightOpacityNode,
+    maskNode: presentation.sightMaskNode,
+  };
+  const lightIdentities = [...presentation.dynamicLights];
+  const materialIdentities = {
+    floor: presentation.floorMaterial,
+    wall: presentation.wallMaterial,
+    rock: presentation.rockMaterial,
+    projectile: presentation.projectileMaterial,
+    particle: presentation.particleMaterial,
+    player: presentation.player.material,
+    spawn: presentation.spawnMarker.material,
+    cursor: presentation.cursorMarker.material,
+    hover: presentation.hoverMarker.material,
+    selected: presentation.selectedMarker.material,
+    editCell: presentation.editCellPreview.material,
+    editRock: presentation.editRockPreview.material,
+  };
+
+  presentation.resize = () => {};
+  presentation.webRenderer.render = () => {};
+  presentation.render(snapshot, 0, {
+    mouseWorld: { x: snapshot.player.x, z: snapshot.player.z },
+    mouseInside: true,
+    hover: null,
+    selected: null,
+    mode: "play",
+    editorTool: "wall",
+    placementValid: true,
+    sightFrame,
+  });
+
+  const coveredMaterials = [
+    ...Object.values(materialIdentities),
+    presentation.gridLines.material,
+    presentation.wallMesh.material,
+    presentation.rockMesh.material,
+    presentation.projectileMesh.material,
+    presentation.particleMesh.material,
+  ];
+  for (const material of coveredMaterials) {
+    assert.equal(material.opacityNode, presentation.sightOpacityNode);
+    assert.equal(material.maskNode, presentation.sightMaskNode);
+    assert.equal(material.maskShadowNode, presentation.sightMaskNode);
+  }
+  assert.equal(presentation.wallMesh.material, presentation.wallMaterial);
+  assert.equal(presentation.rockMesh.material, presentation.rockMaterial);
+  assert.equal(presentation.projectileMesh.material, presentation.projectileMaterial);
+  assert.equal(presentation.particleMesh.material, presentation.particleMaterial);
+  assert.equal(presentation.projectileMaterial.emissive.getHex(), 0xff4d0d);
+  assert.equal(presentation.particleMaterial.emissive.getHex(), 0xff3b08);
+  assert.equal(presentation.sightRayLines.material.opacityNode, null);
+  assert.equal(presentation.sightPolygonLine.material.opacityNode, null);
+  assert.equal(presentation.sightHitMaterial.opacityNode, null);
+  assert.deepEqual(
+    {
+      texture: presentation.sightTexture,
+      image: presentation.sightTexture.image,
+      data: presentation.sightTexture.image.data,
+      opacityNode: presentation.sightOpacityNode,
+      maskNode: presentation.sightMaskNode,
+    },
+    transportIdentities,
+  );
+  assert.deepEqual(
+    {
+      floor: presentation.floorMaterial,
+      wall: presentation.wallMaterial,
+      rock: presentation.rockMaterial,
+      projectile: presentation.projectileMaterial,
+      particle: presentation.particleMaterial,
+      player: presentation.player.material,
+      spawn: presentation.spawnMarker.material,
+      cursor: presentation.cursorMarker.material,
+      hover: presentation.hoverMarker.material,
+      selected: presentation.selectedMarker.material,
+      editCell: presentation.editCellPreview.material,
+      editRock: presentation.editRockPreview.material,
+    },
+    materialIdentities,
+  );
+  assert.ok(
+    presentation.dynamicLights.every(
+      (light, index) => light === lightIdentities[index] && light.visible,
+    ),
+  );
+  assert.equal(presentation.residentLightCount, 8);
+  assert.equal(presentation.sightTransport.uploadCount, 2);
 });

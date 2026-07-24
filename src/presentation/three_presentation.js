@@ -1,12 +1,7 @@
 // @ts-check
 
 import * as THREE from "three/webgpu";
-import {
-  pass,
-  positionWorld,
-  texture,
-  uniform,
-} from "three/tsl";
+import { pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ROCK_ARCHETYPES } from "../config.js";
@@ -19,6 +14,7 @@ import { PresentationLightBudget, writeSparkFireColor } from "./light_budget.js"
 import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
+import { TrueSightTextureTransport } from "./true_sight_transport.js";
 import { PresentationWarmupStatus } from "./warmup.js";
 import { TRUE_SIGHT_MAX_RAYS } from "../visibility/true_sight.js";
 
@@ -55,6 +51,7 @@ export class ThreePresentation {
    * @param {ReturnType<import('./options.js').parsePresentationOptions>} options
    * @param {number} [warmupStartedAt]
    * @param {PresentationFlags} [flags]
+   * @param {import('../visibility/true_sight.js').TrueSightFrame|null} [initialSightFrame]
    */
   constructor(
     canvas,
@@ -62,6 +59,7 @@ export class ThreePresentation {
     options,
     warmupStartedAt = performance.now(),
     flags = new PresentationFlags(options),
+    initialSightFrame = null,
   ) {
     this.canvas = canvas;
     this.camera = camera;
@@ -89,33 +87,19 @@ export class ThreePresentation {
       () => performance.now(),
       warmupStartedAt,
     );
-    this.currentSightFrame = null;
-    this.sightTexture = new THREE.DataTexture(
-      new Uint8Array([255]),
-      1,
-      1,
-      THREE.RedFormat,
-      THREE.UnsignedByteType,
-    );
-    this.sightTexture.name = "true-sight-display-mask";
-    this.sightTexture.minFilter = THREE.LinearFilter;
-    this.sightTexture.magFilter = THREE.LinearFilter;
-    this.sightTexture.wrapS = THREE.ClampToEdgeWrapping;
-    this.sightTexture.wrapT = THREE.ClampToEdgeWrapping;
-    this.sightTexture.generateMipmaps = false;
-    this.sightTexture.flipY = false;
-    this.sightTexture.unpackAlignment = 1;
-    this.sightTexture.colorSpace = THREE.NoColorSpace;
-    this.sightTexture.needsUpdate = true;
-    this.sightMapSize = new THREE.Vector2(1, 1);
-    this.sightMapSizeNode = uniform(this.sightMapSize);
-    this.sightOpacityNode = texture(
-      this.sightTexture,
-      positionWorld.xz.div(this.sightMapSizeNode),
-    ).r;
-    this.sightMaskNode = this.sightOpacityNode.greaterThan(1 / 255);
+    // Keep this before WebGPURenderer construction: warmup must see the final
+    // texture allocation and the first real mask, never a resizable placeholder.
+    this.currentSightFrame = initialSightFrame;
+    this.sightTransport = new TrueSightTextureTransport(initialSightFrame);
+    this.sightTexture = this.sightTransport.texture;
+    this.sightMapSize = this.sightTransport.mapSize;
+    this.sightMapSizeNode = this.sightTransport.mapSizeNode;
+    this.sightOpacityNode = this.sightTransport.opacityNode;
+    this.sightMaskNode = this.sightTransport.maskNode;
     this._sampleSightVisibility = (x, z) => (
-      this.currentSightFrame?.displayVisibilityAt(x, z) ?? 1
+      this.currentSightFrame
+        ? this.sightTransport.sampleVisibilityAt(x, z)
+        : 1
     );
 
     this.webRenderer = new THREE.WebGPURenderer({
@@ -338,6 +322,9 @@ export class ThreePresentation {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot */
   async initialize(initialSnapshot) {
     try {
+      if (!this.currentSightFrame) {
+        throw new Error("Three presentation requires an initial TrueSight frame");
+      }
       await this.webRenderer.init();
       this.activeBackend = this.webRenderer.backend.isWebGPUBackend === true
         ? "webgpu"
@@ -501,6 +488,7 @@ export class ThreePresentation {
         aa: this.options.aa,
       },
       lightGroups: this.lightBudget.diagnostics(),
+      trueSightTransport: this.sightTransport.diagnostics(),
       trueSightCpuMs: this.currentSightFrame?.timing.totalMs ?? null,
       trueSight: this.currentSightFrame
         ? {
@@ -597,20 +585,7 @@ export class ThreePresentation {
   #syncSightFrame(sightFrame) {
     this.currentSightFrame = sightFrame;
     if (!sightFrame) return;
-    const image = this.sightTexture.image;
-    if (
-      image.data !== sightFrame.displayMask
-      || image.width !== sightFrame.maskWidth
-      || image.height !== sightFrame.maskHeight
-    ) {
-      this.sightTexture.image = {
-        data: sightFrame.displayMask,
-        width: sightFrame.maskWidth,
-        height: sightFrame.maskHeight,
-      };
-    }
-    this.sightMapSize.set(sightFrame.mapWidth, sightFrame.mapHeight);
-    this.sightTexture.needsUpdate = true;
+    this.sightTransport.stage(sightFrame);
   }
 
   /** @param {import('../visibility/true_sight.js').TrueSightFrame|null} sightFrame */

@@ -31,6 +31,11 @@ const ui = new ArenaUi();
 const presentationOptions = parsePresentationOptions(window.location.search);
 const presentationFlags = new PresentationFlags(presentationOptions);
 const trueSight = new TrueSightSystem({ flags: presentationFlags });
+let mode = /** @type {"play"|"edit"} */ ("play");
+let sightFrame = trueSight.update(initialSnapshot, 0, {
+  mode,
+  deltaMs: 0,
+});
 const renderLab = new RenderLab(presentationOptions);
 document.body.dataset.renderer = presentationOptions.renderer;
 ui.beginPresentationWarmup(presentationOptions.renderer);
@@ -41,6 +46,7 @@ try {
     presentationOptions,
     initialSnapshot,
     presentationFlags,
+    sightFrame,
   );
 } catch (error) {
   ui.failPresentationWarmup();
@@ -51,16 +57,11 @@ if (presentationBundle) {
 const { camera, presentation } = presentationBundle;
 renderLab.attachPresentation(presentation);
 document.body.dataset.backend = presentation.diagnostics().activeBackend;
-let mode = /** @type {"play"|"edit"} */ ("play");
 let editorTool = "wall";
 let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
 let performanceCapture;
-let sightFrame = trueSight.update(initialSnapshot, 0, {
-  mode,
-  deltaMs: 0,
-});
 
 function presentationDiagnostics() {
   const diagnostics = presentation.diagnostics();

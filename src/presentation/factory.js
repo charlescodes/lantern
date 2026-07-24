@@ -10,8 +10,15 @@ import { CanvasPresentation } from "./canvas_presentation.js";
  * @param {ReturnType<import('./options.js').parsePresentationOptions>} options
  * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
  * @param {import('./options.js').PresentationFlags} flags
+ * @param {import('../visibility/true_sight.js').TrueSightFrame} initialSightFrame
  */
-export async function createPresentation(canvas, options, initialSnapshot, flags) {
+export async function createPresentation(
+  canvas,
+  options,
+  initialSnapshot,
+  flags,
+  initialSightFrame,
+) {
   if (options.renderer === "3d") {
     const warmupStartedAt = performance.now();
     const { ThreePresentation } = await import("./three_presentation.js");
@@ -22,6 +29,7 @@ export async function createPresentation(canvas, options, initialSnapshot, flags
       options,
       warmupStartedAt,
       flags,
+      initialSightFrame,
     );
     await presentation.initialize(initialSnapshot);
     return { camera, presentation };
