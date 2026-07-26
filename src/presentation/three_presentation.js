@@ -1,7 +1,7 @@
 // @ts-check
 
 import * as THREE from "three/webgpu";
-import { pass } from "three/tsl";
+import { instancedDynamicBufferAttribute, pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ROCK_ARCHETYPES } from "../config.js";
@@ -9,14 +9,22 @@ import {
   completeInstancedPoolSubmission,
   createDynamicInstancedPool,
   publishInstancedPool,
+  setInstancedEmissiveAt,
 } from "./instanced_pool.js";
-import { PresentationLightBudget, writeSparkFireColor } from "./light_budget.js";
+import { PresentationLightBudget } from "./light_budget.js";
 import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
 import { TrueSightTextureTransport } from "./true_sight_transport.js";
 import { PresentationWarmupStatus } from "./warmup.js";
 import { TRUE_SIGHT_MAX_RAYS } from "../visibility/true_sight.js";
+import {
+  FIREBALL_COLOR_CORE,
+  FIREBALL_COLOR_PARTICLE,
+  FIREBALL_COLOR_PROJECTILE,
+  writeFireballPaletteColor,
+} from "../spells/palette.js";
+import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
 const WALL_HEIGHT_METERS = 2.5;
 const PLAYER_HEIGHT_METERS = 1.6;
@@ -176,11 +184,12 @@ export class ThreePresentation {
     }));
     this.projectileGeometry = new THREE.IcosahedronGeometry(1, 1);
     this.projectileMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
-      color: 0xffcb72,
+      color: 0xffffff,
       emissive: 0xff4d0d,
       emissiveIntensity: 3.8,
       roughness: 0.25,
       metalness: 0,
+      vertexColors: true,
     }));
     this.particleGeometry = new THREE.IcosahedronGeometry(1, 0);
     this.particleMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
@@ -308,6 +317,7 @@ export class ThreePresentation {
     this._quaternion = new THREE.Quaternion();
     this._scale = new THREE.Vector3();
     this._color = new THREE.Color();
+    this._emissiveColor = new THREE.Color();
     this._cameraTarget = new THREE.Vector3();
     this._bloomEnabled = false;
     this.renderPipeline = null;
@@ -404,6 +414,7 @@ export class ThreePresentation {
       this.webRenderer.render(this.scene, this.threeCamera);
     }
     completeInstancedPoolSubmission(this.particleMesh);
+    completeInstancedPoolSubmission(this.projectileMesh);
     this._bloomEnabled = bloomEnabled;
     const submitFinished = performance.now();
     this.#sampleGpuTimer();
@@ -793,6 +804,11 @@ export class ThreePresentation {
         this.projectileMaterial,
         capacity,
         "fireballs",
+        { instanceColors: true, instanceEmissive: true },
+      );
+      this.projectileMaterial.emissiveNode = instancedDynamicBufferAttribute(
+        this.projectileMesh.userData.instanceEmissive,
+        "vec3",
       );
       this.scene.add(this.projectileMesh);
     }
@@ -804,8 +820,30 @@ export class ThreePresentation {
       this._scale.setScalar(projectile.radius * 1.15);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.projectileMesh.setMatrixAt(index, this._matrix);
+      const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
+      writeFireballPaletteColor(this._color, definition, {
+        kind: FIREBALL_COLOR_PROJECTILE,
+        effectSeed: projectile.effectSeed,
+        variationEnabled: this.flags.values.lightColorVariation,
+      });
+      this.projectileMesh.setColorAt(index, this._color);
+      writeFireballPaletteColor(this._emissiveColor, definition, {
+        kind: FIREBALL_COLOR_CORE,
+        effectSeed: projectile.effectSeed,
+        variationEnabled: this.flags.values.lightColorVariation,
+      });
+      setInstancedEmissiveAt(
+        this.projectileMesh,
+        index,
+        this._emissiveColor,
+        Number(definition.presentation.projectileEmissiveStrength),
+      );
     }
-    publishInstancedPool(this.projectileMesh, snapshot.projectiles.length);
+    publishInstancedPool(this.projectileMesh, snapshot.projectiles.length, {
+      deferCountGrowth: true,
+      instanceColors: true,
+      instanceEmissive: true,
+    });
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
@@ -818,7 +856,11 @@ export class ThreePresentation {
         this.particleMaterial,
         capacity,
         "spark-particles",
-        { instanceColors: true },
+        { instanceColors: true, instanceEmissive: true },
+      );
+      this.particleMaterial.emissiveNode = instancedDynamicBufferAttribute(
+        this.particleMesh.userData.instanceEmissive,
+        "vec3",
       );
       this.scene.add(this.particleMesh);
     }
@@ -830,12 +872,27 @@ export class ThreePresentation {
       this._scale.set(size, size * 1.25, size);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.particleMesh.setMatrixAt(index, this._matrix);
-      writeSparkFireColor(this._color, life);
+      const definition = fireballDefinitionFromSnapshot(snapshot, particle);
+      writeFireballPaletteColor(this._color, definition, {
+        kind: FIREBALL_COLOR_PARTICLE,
+        life,
+        effectSeed: particle.effectSeed,
+        sampleOrdinal: particle.sampleOrdinal,
+        sampleSeed: particle.sampleSeed,
+        variationEnabled: this.flags.values.lightColorVariation,
+      });
       this.particleMesh.setColorAt(index, this._color);
+      setInstancedEmissiveAt(
+        this.particleMesh,
+        index,
+        this._color,
+        Number(definition.presentation.particleEmissiveStrength),
+      );
     }
     publishInstancedPool(this.particleMesh, snapshot.particles.length, {
       deferCountGrowth: true,
       instanceColors: true,
+      instanceEmissive: true,
     });
   }
 

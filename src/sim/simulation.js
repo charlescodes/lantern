@@ -22,6 +22,23 @@ import {
 import { RingBuffer } from "../core/ring_buffer.js";
 import { normalizeSeed, SeededRng } from "../core/rng.js";
 import {
+  cloneFireballDefinition,
+  DEFAULT_FIREBALL_DEFINITION,
+  FIREBALL_SPELL_CODE,
+  FIREBALL_SPELL_ID,
+} from "../spells/fireball_definition.js";
+import {
+  fireballColorToHex,
+  FIREBALL_COLOR_PARTICLE,
+  writeFireballPaletteColor,
+} from "../spells/palette.js";
+import {
+  deriveCastSeed,
+  deriveSampleSeed,
+  laneUnit,
+} from "../spells/random.js";
+import { SpellRegistry } from "../spells/spell_registry.js";
+import {
   circleCircleContact,
   firstSolidContact,
   gridRayBlocked,
@@ -66,6 +83,39 @@ function pointFrom(value) {
 }
 
 /** @param {unknown} value */
+function castFrom(value) {
+  const point = pointFrom(value);
+  if (!point || !value || typeof value !== "object") return null;
+  const record = /** @type {Record<string, unknown>} */ (value);
+  /** @type {{x:number,z:number,spellId?:string,variationSeed?:number}} */
+  const cast = { ...point };
+  if (record.spellId !== undefined) cast.spellId = String(record.spellId);
+  if (record.variationSeed !== undefined) {
+    if (
+      typeof record.variationSeed !== "number"
+      || !Number.isInteger(record.variationSeed)
+      || record.variationSeed < 0
+      || record.variationSeed > 0xffff_ffff
+    ) {
+      return null;
+    }
+    cast.variationSeed = record.variationSeed >>> 0;
+  }
+  return cast;
+}
+
+/** @param {unknown} value */
+function cloneUnknown(value) {
+  if (Array.isArray(value)) return value.map(cloneUnknown);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cloneUnknown(item)]),
+    );
+  }
+  return value;
+}
+
+/** @param {unknown} value */
 function canonicalAction(value) {
   if (!value || typeof value !== "object") return null;
   const action = /** @type {Record<string, unknown>} */ (value);
@@ -100,6 +150,20 @@ function canonicalAction(value) {
       return { type: "restoreScenario" };
     case "setDebugFlag":
       return { type: "setDebugFlag", name: String(action.name), value: Boolean(action.value) };
+    case "applySpellDefinition":
+      return {
+        type: "applySpellDefinition",
+        spellId: String(action.spellId),
+        expectedRevision: action.expectedRevision === undefined
+          ? undefined
+          : Number(action.expectedRevision),
+        definition: cloneUnknown(action.definition),
+      };
+    case "clearSpellEffects":
+      return {
+        type: "clearSpellEffects",
+        spellId: String(action.spellId),
+      };
     case "reset":
       return { type: "reset", seed: normalizeSeed(action.seed) };
     default:
@@ -112,7 +176,7 @@ function cloneCanonicalCommand(command) {
   return {
     move: command.move ? { ...command.move } : null,
     cast: command.cast ? { ...command.cast } : null,
-    actions: command.actions.map((action) => ({ ...action })),
+    actions: command.actions.map((action) => cloneUnknown(action)),
   };
 }
 
@@ -166,7 +230,7 @@ export function canonicalizeCommand(input) {
   }
   const source = /** @type {Record<string, unknown>} */ (input);
   const move = pointFrom(source.move ?? source.moveTarget);
-  const cast = pointFrom(source.cast ?? source.castTarget);
+  const cast = castFrom(source.cast ?? source.castTarget);
   const actions = [];
   if (Array.isArray(source.actions)) {
     for (const item of source.actions) {
@@ -229,7 +293,10 @@ export class Simulation {
    * particleBurstCount?:number,
    * particleProfile?:string,
    * particleBounce?:boolean,
-   * particleWallCollision?:boolean
+   * particleWallCollision?:boolean,
+   * initialFireballDefinition?:unknown,
+   * spellBaseline?:Array<Record<string,any>>,
+   * legacyFireballMode?:boolean
    * }} [options]
    */
   constructor(options = {}) {
@@ -256,6 +323,30 @@ export class Simulation {
       throw new RangeError(`Unsupported particle profile: ${this.particleProfile}`);
     }
     this.particleTuning = PARTICLE_PROFILES[this.particleProfile];
+    this.legacyFireballMode = options.legacyFireballMode
+      ?? this.particleProfile === PARTICLE_PROFILE_M02;
+    let initialFireballDefinition = options.initialFireballDefinition;
+    if (
+      initialFireballDefinition === undefined
+      && options.particleBurstCount !== undefined
+      && !options.spellBaseline
+      && Number.isInteger(options.particleBurstCount)
+      && options.particleBurstCount >= 0
+      && options.particleBurstCount <= 1_024
+    ) {
+      initialFireballDefinition = cloneFireballDefinition(DEFAULT_FIREBALL_DEFINITION);
+      if (initialFireballDefinition) {
+        initialFireballDefinition.emission.burstCount = options.particleBurstCount;
+      }
+    }
+    this.spells = new SpellRegistry({
+      initialFireballDefinition,
+      recordingBaseline: options.spellBaseline,
+    });
+    this.spellCooldowns = new Float32Array(256);
+    this.castSequences = new Uint32Array(256);
+    this.nextEffectId = 1;
+    this.latestSpellSamples = new Map();
     this.impactEvents = new RingBuffer(HISTORY.events);
     this.commandLog = new RingBuffer(HISTORY.commands);
     this.commandLogDropped = 0;
@@ -271,6 +362,7 @@ export class Simulation {
     this.commandLogParticleProfile = this.particleProfile;
     this.commandLogParticleBounce = this.debugFlags.particleBounce;
     this.commandLogParticleWallCollision = this.debugFlags.particleWallCollision;
+    this.commandLogSpellBaseline = this.spells.cloneBaseline();
     this.tickCount = 0;
     this.nextExplosionId = 1;
     this.player = {
@@ -321,7 +413,9 @@ export class Simulation {
     this._dynamicBodyVelocity = { vx: 0, vz: 0, inverseMass: 0 };
     this._particleSweepHit = { x: 0, z: 0, time: 0, nx: 0, nz: 0, cx: 0, cz: 0 };
     this._particleSpawnPoint = { x: 0, z: 0, cx: 0, cz: 0, passes: 0 };
+    this._sampleColor = { r: 0, g: 0, b: 0 };
     this.lastError = null;
+    this.lastSpellResult = null;
     this.reset(this.seed);
   }
 
@@ -333,6 +427,7 @@ export class Simulation {
     this.nextExplosionId = 1;
     this.#restoreAuthoredState();
     this.impactEvents.clear();
+    this.spells.prune(new Map());
     this.contacts.count = 0;
     this.contacts.dropped = 0;
     if (options.clearLog !== false) {
@@ -343,14 +438,20 @@ export class Simulation {
       this.commandLogParticleProfile = this.particleProfile;
       this.commandLogParticleBounce = this.debugFlags.particleBounce;
       this.commandLogParticleWallCollision = this.debugFlags.particleWallCollision;
+      this.commandLogSpellBaseline = this.spells.cloneBaseline();
     }
     this.lastError = null;
+    this.lastSpellResult = null;
   }
 
   #restoreAuthoredState() {
     this.projectiles.reset();
     this.particles.reset();
     this.rocks.reset();
+    this.spellCooldowns.fill(0);
+    this.castSequences.fill(0);
+    this.nextEffectId = 1;
+    this.latestSpellSamples.clear();
     Object.assign(this.player, {
       x: this.map.playerSpawn.x,
       z: this.map.playerSpawn.z,
@@ -387,10 +488,20 @@ export class Simulation {
     this.#applyActions(command.actions);
     this.#prepareMovement(command.move, SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
-    this.player.cooldown = approach(this.player.cooldown, 0, SIMULATION.dt);
+    for (const spell of this.spells.entriesById.values()) {
+      this.spellCooldowns[spell.code] = approach(
+        this.spellCooldowns[spell.code],
+        0,
+        SIMULATION.dt,
+      );
+    }
+    this.player.cooldown = this.legacyFireballMode
+      ? approach(this.player.cooldown, 0, SIMULATION.dt)
+      : this.spellCooldowns[FIREBALL_SPELL_CODE];
     this.#castSystem(command.cast);
     this.#projectileSystem(SIMULATION.dt);
     this.#particleSystem(SIMULATION.dt);
+    this.#pruneSpellRevisions();
     this.tickCount += 1;
     if (this.commandLog.length === this.commandLog.capacity) this.commandLogDropped += 1;
     this.commandLog.push({ tick: this.tickCount, command });
@@ -452,6 +563,25 @@ export class Simulation {
           Object.hasOwn(this.debugFlags, action.name)
         ) {
           this.debugFlags[action.name] = action.value;
+        } else if (action.type === "applySpellDefinition") {
+          this.#pruneSpellRevisions();
+          const result = this.spells.apply(
+            String(action.spellId),
+            action.definition,
+            action.expectedRevision === undefined
+              ? undefined
+              : Number(action.expectedRevision),
+          );
+          this.lastSpellResult = cloneUnknown(result);
+          if (!result.ok) {
+            throw new TypeError(result.errors.map((error) => error.message).join("; "));
+          }
+        } else if (action.type === "clearSpellEffects") {
+          const result = this.clearSpellEffects(String(action.spellId));
+          this.lastSpellResult = cloneUnknown(result);
+          if (!result.ok) {
+            throw new RangeError(result.errors.map((error) => error.message).join("; "));
+          }
         }
         this.lastError = null;
       } catch (error) {
@@ -852,8 +982,59 @@ export class Simulation {
     this.contacts.count += 1;
   }
 
-  /** @param {{x:number,z:number}|null} target */
+  /** @param {{x:number,z:number,spellId?:string,variationSeed?:number}|null} target */
   #castSystem(target) {
+    if (this.legacyFireballMode) {
+      this.#legacyCastSystem(target);
+      return;
+    }
+    if (!target) return;
+    const spellId = target.spellId ?? FIREBALL_SPELL_ID;
+    const spell = this.spells.get(spellId);
+    if (!spell || spell.handler !== "fireball") return;
+    const player = this.player;
+    if (this.spellCooldowns[spell.code] > 0) return;
+    const dx = target.x - player.x;
+    const dz = target.z - player.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance <= 1e-5) return;
+    const definition = spell.definitions.get(spell.currentRevision);
+    if (!definition) throw new Error("Current Fireball definition is unavailable");
+    const nx = dx / distance;
+    const nz = dz / distance;
+    const offset = player.radius
+      + Number(definition.projectile.radius)
+      + Number(definition.projectile.spawnGap);
+    const effectSeed = target.variationSeed === undefined
+      ? deriveCastSeed(this.seed, spell.code, this.castSequences[spell.code])
+      : target.variationSeed >>> 0;
+    const effectId = this.nextEffectId;
+    const id = this.projectiles.spawn({
+      x: player.x + nx * offset,
+      z: player.z + nz * offset,
+      vx: nx * Number(definition.projectile.speed),
+      vz: nz * Number(definition.projectile.speed),
+      lifetime: Number(definition.projectile.lifetime),
+      radius: Number(definition.projectile.radius),
+      ownerId: player.id,
+      spellCode: spell.code,
+      definitionRevision: spell.currentRevision,
+      effectId,
+      effectSeed,
+    });
+    if (id !== 0) {
+      this.spellCooldowns[spell.code] = Number(definition.cast.cooldown);
+      this.player.cooldown = this.spellCooldowns[FIREBALL_SPELL_CODE];
+      this.castSequences[spell.code] = (this.castSequences[spell.code] + 1) >>> 0;
+      this.nextEffectId = (this.nextEffectId + 1) >>> 0 || 1;
+      // Successful automatic casts are made explicit in schema-v5 command
+      // history. Rejected casts never advance or record the preview seed.
+      target.variationSeed = effectSeed;
+    }
+  }
+
+  /** @param {{x:number,z:number}|null} target */
+  #legacyCastSystem(target) {
     const player = this.player;
     if (!target || player.cooldown > 0) return;
     const dx = target.x - player.x;
@@ -873,6 +1054,18 @@ export class Simulation {
       ownerId: player.id,
     });
     if (id !== 0) player.cooldown = PROJECTILE.cooldown;
+  }
+
+  /** @param {number} spellCode @param {number} definitionRevision */
+  #capturedSpellDefinition(spellCode, definitionRevision) {
+    if (!(spellCode > 0)) return null;
+    const definition = this.spells.getDefinition(spellCode, definitionRevision);
+    if (!definition) {
+      throw new Error(
+        `Missing captured spell definition ${spellCode}@${definitionRevision}`,
+      );
+    }
+    return definition;
   }
 
   /** @param {number} dt */
@@ -931,7 +1124,7 @@ export class Simulation {
         const event = this.#createExplosionEvent(index, hitKind, hitRockIndex, hitX, hitZ);
         this.#applyExplosion(event);
         this.impactEvents.push(event);
-        this.#emitParticles(event.originX, event.originZ, event.nx, event.nz);
+        this.#emitParticles(event);
         pool.removeSwap(index);
         continue;
       }
@@ -951,6 +1144,13 @@ export class Simulation {
    */
   #createExplosionEvent(projectileIndex, hitKind, rockIndex, hitX, hitZ) {
     const pool = this.projectiles;
+    const spellCode = pool.spellCode[projectileIndex];
+    const definitionRevision = pool.definitionRevision[projectileIndex];
+    const spell = this.spells.getByCode(spellCode);
+    const definition = this.#capturedSpellDefinition(
+      spellCode,
+      definitionRevision,
+    );
     let nx = this._gridContact.nx;
     let nz = this._gridContact.nz;
     let contactX = this._gridContact.px;
@@ -978,22 +1178,36 @@ export class Simulation {
     }
     const originX = contactX + nx * EXPLOSION.originEpsilon;
     const originZ = contactZ + nz * EXPLOSION.originEpsilon;
+    const spawnHeight = Number(
+      definition?.emission.spawnHeight ?? PARTICLE.initialY,
+    );
     const event = {
       type: "explosion",
       id: this.nextExplosionId,
       tick: this.tickCount + 1,
       projectileId: pool.id[projectileIndex],
+      spellId: spell?.id ?? FIREBALL_SPELL_ID,
+      spellCode,
+      definitionRevision,
+      effectId: pool.effectId[projectileIndex],
+      effectSeed: pool.effectSeed[projectileIndex],
       owner: { kind: "player", id: pool.ownerId[projectileIndex] },
       hit,
       x: originX,
-      y: PARTICLE.initialY,
+      y: spawnHeight,
       z: originZ,
       originX,
       originZ,
       nx,
       nz,
-      radius: EXPLOSION.radius,
-      pressureImpulse: EXPLOSION.pressureImpulse,
+      radius: Number(definition?.impact.blastRadius ?? EXPLOSION.radius),
+      pressureImpulse: Number(
+        definition?.impact.pressureImpulse ?? EXPLOSION.pressureImpulse,
+      ),
+      visualLifetime: Number(
+        definition?.impact.visualLifetime
+        ?? EXPLOSION.debugTicks / SIMULATION.tickHz,
+      ),
       cell,
       responses: [],
     };
@@ -1122,8 +1336,197 @@ export class Simulation {
     };
   }
 
+  /** @param {Record<string, any>} event */
+  #emitParticles(event) {
+    const definition = this.#capturedSpellDefinition(
+      Number(event.spellCode),
+      Number(event.definitionRevision),
+    );
+    if (!definition) {
+      this.#emitLegacyParticles(
+        event.originX,
+        event.originZ,
+        event.nx,
+        event.nz,
+      );
+      return;
+    }
+    const x = Number(event.originX);
+    const z = Number(event.originZ);
+    const normalX = Number(event.nx);
+    const normalZ = Number(event.nz);
+    const emission = definition.emission;
+    const lifecycle = definition.particleLifecycle;
+    const normalLength = Math.hypot(normalX, normalZ);
+    const outwardX = normalLength > 1e-9 ? normalX / normalLength : 1;
+    const outwardZ = normalLength > 1e-9 ? normalZ / normalLength : 0;
+    const statistics = {
+      spellId: event.spellId,
+      spellCode: event.spellCode,
+      definitionRevision: event.definitionRevision,
+      effectId: event.effectId,
+      effectSeed: event.effectSeed,
+      impactId: event.id,
+      tick: event.tick,
+      requested: Number(emission.burstCount),
+      spawned: 0,
+      horizontalSpeed: { minimum: Infinity, maximum: -Infinity },
+      lifetime: { minimum: Infinity, maximum: -Infinity },
+      size: { minimum: Infinity, maximum: -Infinity },
+      color: {
+        red: { minimum: Infinity, maximum: -Infinity },
+        green: { minimum: Infinity, maximum: -Infinity },
+        blue: { minimum: Infinity, maximum: -Infinity },
+        first: null,
+        last: null,
+      },
+    };
+    for (let ordinal = 0; ordinal < Number(emission.burstCount); ordinal += 1) {
+      const sampleSeed = deriveSampleSeed(event.effectSeed, ordinal);
+      const angle = laneUnit(sampleSeed, "angle") * TAU;
+      const horizontalSpeed = Number(emission.horizontalSpeedMinimum)
+        + (
+          Number(emission.horizontalSpeedMaximum)
+          - Number(emission.horizontalSpeedMinimum)
+        ) * laneUnit(sampleSeed, "speed");
+      const outwardBias = Number(emission.outwardBiasMinimum)
+        + (
+          Number(emission.outwardBiasMaximum)
+          - Number(emission.outwardBiasMinimum)
+        ) * laneUnit(sampleSeed, "bias");
+      let vx = Math.cos(angle) * horizontalSpeed + outwardX * outwardBias;
+      let vz = Math.sin(angle) * horizontalSpeed + outwardZ * outwardBias;
+      const horizontalLength = Math.hypot(vx, vz);
+      const speedCap = Number(emission.horizontalSpeedCap);
+      if (horizontalLength > speedCap && horizontalLength > 1e-12) {
+        vx = (vx / horizontalLength) * speedCap;
+        vz = (vz / horizontalLength) * speedCap;
+      }
+      const inwardSpeed = vx * outwardX + vz * outwardZ;
+      if (inwardSpeed < 0) {
+        vx -= 2 * inwardSpeed * outwardX;
+        vz -= 2 * inwardSpeed * outwardZ;
+      }
+      const size = Number(lifecycle.sizeMinimum)
+        + (
+          Number(lifecycle.sizeMaximum)
+          - Number(lifecycle.sizeMinimum)
+        ) * laneUnit(sampleSeed, "size");
+      const sizeRange = Number(lifecycle.sizeMaximum)
+        - Number(lifecycle.sizeMinimum);
+      const normalizedSize = sizeRange > 1e-12
+        ? (size - Number(lifecycle.sizeMinimum)) / sizeRange
+        : 0;
+      const vy = Number(emission.verticalMinimum)
+        + Number(emission.verticalRange)
+          * laneUnit(sampleSeed, "vertical") ** Number(emission.verticalPower);
+      const lifetime = clamp(
+        Number(lifecycle.lifetimeBase)
+          + Number(lifecycle.lifetimeSizeScale) * normalizedSize
+          + (
+            laneUnit(sampleSeed, "lifetime") - 0.5
+          ) * Number(lifecycle.lifetimeJitter),
+        Number(lifecycle.lifetimeMinimum),
+        Number(lifecycle.lifetimeMaximum),
+      );
+      if (
+        !sanitizePointAgainstGrid(
+          this.map,
+          x,
+          z,
+          outwardX,
+          outwardZ,
+          this._particleSpawnPoint,
+          PARTICLE.spawnCorrectionPasses,
+        )
+      ) {
+        this.particles.collisionDiscards += 1;
+        continue;
+      }
+      const id = this.particles.spawn({
+        x: this._particleSpawnPoint.x,
+        y: Number(emission.spawnHeight),
+        z: this._particleSpawnPoint.z,
+        vx,
+        vy,
+        vz,
+        lifetime,
+        size,
+        spellCode: event.spellCode,
+        definitionRevision: event.definitionRevision,
+        effectId: event.effectId,
+        effectSeed: event.effectSeed,
+        sampleOrdinal: ordinal,
+        sampleSeed,
+      });
+      if (id === 0) continue;
+      const sampledHorizontalSpeed = Math.hypot(vx, vz);
+      statistics.spawned += 1;
+      statistics.horizontalSpeed.minimum = Math.min(
+        statistics.horizontalSpeed.minimum,
+        sampledHorizontalSpeed,
+      );
+      statistics.horizontalSpeed.maximum = Math.max(
+        statistics.horizontalSpeed.maximum,
+        sampledHorizontalSpeed,
+      );
+      statistics.lifetime.minimum = Math.min(statistics.lifetime.minimum, lifetime);
+      statistics.lifetime.maximum = Math.max(statistics.lifetime.maximum, lifetime);
+      statistics.size.minimum = Math.min(statistics.size.minimum, size);
+      statistics.size.maximum = Math.max(statistics.size.maximum, size);
+      writeFireballPaletteColor(this._sampleColor, definition, {
+        kind: FIREBALL_COLOR_PARTICLE,
+        life: 1,
+        effectSeed: event.effectSeed,
+        sampleOrdinal: ordinal,
+        sampleSeed,
+      });
+      statistics.color.red.minimum = Math.min(
+        statistics.color.red.minimum,
+        this._sampleColor.r,
+      );
+      statistics.color.red.maximum = Math.max(
+        statistics.color.red.maximum,
+        this._sampleColor.r,
+      );
+      statistics.color.green.minimum = Math.min(
+        statistics.color.green.minimum,
+        this._sampleColor.g,
+      );
+      statistics.color.green.maximum = Math.max(
+        statistics.color.green.maximum,
+        this._sampleColor.g,
+      );
+      statistics.color.blue.minimum = Math.min(
+        statistics.color.blue.minimum,
+        this._sampleColor.b,
+      );
+      statistics.color.blue.maximum = Math.max(
+        statistics.color.blue.maximum,
+        this._sampleColor.b,
+      );
+      const color = fireballColorToHex(this._sampleColor);
+      statistics.color.first ??= color;
+      statistics.color.last = color;
+    }
+    if (statistics.spawned === 0) {
+      for (const range of [
+        statistics.horizontalSpeed,
+        statistics.lifetime,
+        statistics.size,
+        statistics.color.red,
+        statistics.color.green,
+        statistics.color.blue,
+      ]) {
+        range.minimum = null;
+        range.maximum = null;
+      }
+    }
+    this.latestSpellSamples.set(Number(event.spellCode), statistics);
+  }
+
   /** @param {number} x @param {number} z @param {number} normalX @param {number} normalZ */
-  #emitParticles(x, z, normalX, normalZ) {
+  #emitLegacyParticles(x, z, normalX, normalZ) {
     const normalLength = Math.hypot(normalX, normalZ);
     const outwardX = normalLength > 1e-9 ? normalX / normalLength : 1;
     const outwardZ = normalLength > 1e-9 ? normalZ / normalLength : 0;
@@ -1195,13 +1598,21 @@ export class Simulation {
     const pool = this.particles;
     let index = 0;
     while (index < pool.activeCount) {
+      const definition = this.#capturedSpellDefinition(
+        pool.spellCode[index],
+        pool.definitionRevision[index],
+      );
+      const collision = definition?.collision ?? null;
+      const gravity = Number(definition?.emission.gravity ?? PARTICLE.gravity);
       pool.age[index] += dt;
       if (pool.age[index] >= pool.lifetime[index]) {
         pool.removeSwap(index);
         continue;
       }
-      pool.vy[index] += PARTICLE.gravity * dt;
-      if (this.debugFlags.particleWallCollision) {
+      pool.vy[index] += gravity * dt;
+      const wallCollisionEnabled = this.debugFlags.particleWallCollision
+        && (collision?.wallCollision ?? true);
+      if (wallCollisionEnabled) {
         if (this.map.get(Math.floor(pool.x[index]), Math.floor(pool.z[index])) === 1) {
           if (
             !sanitizePointAgainstGrid(
@@ -1221,29 +1632,43 @@ export class Simulation {
           pool.x[index] = this._particleSpawnPoint.x;
           pool.z[index] = this._particleSpawnPoint.z;
         }
-        this.#advanceParticleAgainstWalls(index, dt);
+        this.#advanceParticleAgainstWalls(index, dt, collision);
       } else {
         pool.x[index] += pool.vx[index] * dt;
         pool.z[index] += pool.vz[index] * dt;
       }
       pool.y[index] += pool.vy[index] * dt;
       if (pool.y[index] <= 0) {
-        if (this.debugFlags.particleBounce && pool.bounced[index] === 0) {
+        const groundBounceEnabled = this.debugFlags.particleBounce
+          && (collision ? collision.groundMode === "bounce-settle" : true);
+        const groundVerticalRetention = Number(
+          collision?.groundVerticalRetention
+          ?? this.particleTuning.groundVerticalRetention,
+        );
+        const groundHorizontalRetention = Number(
+          collision?.groundHorizontalRetention
+          ?? this.particleTuning.groundHorizontalRetention,
+        );
+        if (groundBounceEnabled && pool.bounced[index] === 0) {
           pool.y[index] = 0;
           pool.vy[index] =
-            Math.abs(pool.vy[index]) * Number(this.particleTuning.groundVerticalRetention);
-          pool.vx[index] *= Number(this.particleTuning.groundHorizontalRetention);
-          pool.vz[index] *= Number(this.particleTuning.groundHorizontalRetention);
+            Math.abs(pool.vy[index]) * groundVerticalRetention;
+          pool.vx[index] *= groundHorizontalRetention;
+          pool.vz[index] *= groundHorizontalRetention;
           pool.bounced[index] = 1;
           pool.groundBounces += 1;
         } else if (
-          this.debugFlags.particleBounce
-          && this.particleTuning.groundSettlesAfterBounce
+          groundBounceEnabled
+          && (
+            collision
+              ? collision.groundMode === "bounce-settle"
+              : this.particleTuning.groundSettlesAfterBounce
+          )
         ) {
           pool.y[index] = 0;
           pool.vy[index] = 0;
-          pool.vx[index] *= Number(this.particleTuning.groundHorizontalRetention);
-          pool.vz[index] *= Number(this.particleTuning.groundHorizontalRetention);
+          pool.vx[index] *= groundHorizontalRetention;
+          pool.vz[index] *= groundHorizontalRetention;
         } else {
           pool.removeSwap(index);
           continue;
@@ -1253,8 +1678,8 @@ export class Simulation {
     }
   }
 
-  /** @param {number} index @param {number} dt */
-  #advanceParticleAgainstWalls(index, dt) {
+  /** @param {number} index @param {number} dt @param {Record<string,any>|null} collision */
+  #advanceParticleAgainstWalls(index, dt, collision) {
     const pool = this.particles;
     let remaining = dt;
     for (
@@ -1288,12 +1713,18 @@ export class Simulation {
       if (normalSpeed < 0) {
         const tangentX = pool.vx[index] - normalSpeed * hit.nx;
         const tangentZ = pool.vz[index] - normalSpeed * hit.nz;
+        const tangentialRetention = Number(
+          collision?.wallTangentialRetention ?? PARTICLE.wallTangentialRetention,
+        );
+        const normalRetention = Number(
+          collision?.wallNormalRetention ?? PARTICLE.wallNormalRetention,
+        );
         pool.vx[index] =
-          tangentX * PARTICLE.wallTangentialRetention
-          - normalSpeed * PARTICLE.wallNormalRetention * hit.nx;
+          tangentX * tangentialRetention
+          - normalSpeed * normalRetention * hit.nx;
         pool.vz[index] =
-          tangentZ * PARTICLE.wallTangentialRetention
-          - normalSpeed * PARTICLE.wallNormalRetention * hit.nz;
+          tangentZ * tangentialRetention
+          - normalSpeed * normalRetention * hit.nz;
         pool.wallBounceCount[index] += 1;
         pool.wallBounces += 1;
       }
@@ -1303,12 +1734,200 @@ export class Simulation {
 
   /** @param {number} index */
   #currentParticleSize(index) {
+    const definition = this.#capturedSpellDefinition(
+      this.particles.spellCode[index],
+      this.particles.definitionRevision[index],
+    );
     return currentParticleSize(
-      this.particleTuning,
+      definition?.particleLifecycle ?? this.particleTuning,
       this.particles.size[index],
       this.particles.age[index],
       this.particles.lifetime[index],
     );
+  }
+
+  /** @param {Array<Record<string,any>>} [events] */
+  #spellRevisionReferences(events = this.impactEvents.toArray()) {
+    /** @type {Map<number,Set<number>>} */
+    const references = new Map();
+    const add = (code, revision) => {
+      if (!(code > 0) || !(revision > 0)) return;
+      const revisions = references.get(code) ?? new Set();
+      revisions.add(revision);
+      references.set(code, revisions);
+    };
+    for (let index = 0; index < this.projectiles.activeCount; index += 1) {
+      add(
+        this.projectiles.spellCode[index],
+        this.projectiles.definitionRevision[index],
+      );
+    }
+    for (let index = 0; index < this.particles.activeCount; index += 1) {
+      add(
+        this.particles.spellCode[index],
+        this.particles.definitionRevision[index],
+      );
+    }
+    for (const event of events) {
+      add(Number(event.spellCode), Number(event.definitionRevision));
+    }
+    return references;
+  }
+
+  #pruneSpellRevisions() {
+    return this.spells.prune(this.#spellRevisionReferences());
+  }
+
+  listSpells() {
+    return this.spells.list();
+  }
+
+  /** @param {string} id */
+  getSpellDefinition(id) {
+    return this.spells.describe(String(id));
+  }
+
+  /**
+   * Direct simulation helper used by tick-action handling and unit tests.
+   * Browser probes still enqueue the matching command at a fixed-tick boundary.
+   *
+   * @param {string} id
+   * @param {unknown} definition
+   * @param {number|undefined} expectedRevision
+   */
+  applySpellDefinition(id, definition, expectedRevision) {
+    this.#pruneSpellRevisions();
+    return this.spells.apply(String(id), definition, expectedRevision);
+  }
+
+  /** @param {string} id @param {unknown} definition @param {number|undefined} expectedRevision */
+  validateSpellDefinition(id, definition, expectedRevision) {
+    this.#pruneSpellRevisions();
+    return this.spells.validateApply(String(id), definition, expectedRevision);
+  }
+
+  /** @param {string} id */
+  clearSpellEffects(id) {
+    const spell = this.spells.get(String(id));
+    if (!spell) {
+      return {
+        ok: false,
+        spellId: String(id),
+        errors: [{
+          path: "spellId",
+          code: "unknown_spell",
+          message: `Unknown spell "${id}"`,
+        }],
+      };
+    }
+    const matches = (code) => code === spell.code
+      || (spell.code === FIREBALL_SPELL_CODE && code === 0);
+    let projectiles = 0;
+    let particles = 0;
+    let events = 0;
+    let index = 0;
+    while (index < this.projectiles.activeCount) {
+      if (!matches(this.projectiles.spellCode[index])) {
+        index += 1;
+        continue;
+      }
+      this.projectiles.removeSwap(index);
+      projectiles += 1;
+    }
+    index = 0;
+    while (index < this.particles.activeCount) {
+      if (!matches(this.particles.spellCode[index])) {
+        index += 1;
+        continue;
+      }
+      this.particles.removeSwap(index);
+      particles += 1;
+    }
+    const retainedEvents = [];
+    for (const event of this.impactEvents.toArray()) {
+      if (matches(Number(event.spellCode ?? 0))) events += 1;
+      else retainedEvents.push(event);
+    }
+    this.impactEvents.clear();
+    for (const event of retainedEvents) this.impactEvents.push(event);
+    this.latestSpellSamples.delete(spell.code);
+    this.#pruneSpellRevisions();
+    return {
+      ok: true,
+      spellId: spell.id,
+      code: spell.code,
+      removed: { projectiles, particles, events },
+      impulsesReversed: false,
+      errors: [],
+    };
+  }
+
+  /** @param {string} id */
+  spellDiagnostics(id) {
+    const spell = this.spells.get(String(id));
+    if (!spell) {
+      return {
+        ok: false,
+        spellId: String(id),
+        errors: [{
+          path: "spellId",
+          code: "unknown_spell",
+          message: `Unknown spell "${id}"`,
+        }],
+      };
+    }
+    let activeProjectiles = 0;
+    let activeParticles = 0;
+    for (let index = 0; index < this.projectiles.activeCount; index += 1) {
+      if (this.projectiles.spellCode[index] === spell.code) activeProjectiles += 1;
+    }
+    for (let index = 0; index < this.particles.activeCount; index += 1) {
+      if (this.particles.spellCode[index] === spell.code) activeParticles += 1;
+    }
+    const latestImpact = this.impactEvents.toArray()
+      .toReversed()
+      .find((event) => Number(event.spellCode) === spell.code) ?? null;
+    const registry = this.spells.diagnostics()
+      .find((entry) => entry.code === spell.code);
+    return {
+      ok: true,
+      spellId: spell.id,
+      spellCode: spell.code,
+      appliedRevision: spell.currentRevision,
+      revisionCounter: spell.revisionCounter,
+      retainedRevisions: registry?.retainedRevisions ?? 0,
+      revisions: registry?.revisions ?? [],
+      castSequence: this.castSequences[spell.code],
+      currentSeed: deriveCastSeed(
+        this.seed,
+        spell.code,
+        this.castSequences[spell.code],
+      ),
+      cooldownRemaining: this.spellCooldowns[spell.code],
+      active: {
+        projectiles: activeProjectiles,
+        particles: activeParticles,
+        impacts: this.impactEvents.toArray().filter((event) => (
+          Number(event.spellCode) === spell.code
+          && this.tickCount - Number(event.tick)
+            <= Math.max(
+              1,
+              Math.round(
+                Number(event.visualLifetime ?? 0.2) * SIMULATION.tickHz,
+              ),
+            )
+        )).length,
+      },
+      poolDrops: {
+        projectiles: this.projectiles.dropped,
+        particles: this.particles.dropped,
+        collisionDiscards: this.particles.collisionDiscards,
+      },
+      latestImpact: latestImpact ? cloneEvent(latestImpact) : null,
+      sampledRanges: cloneUnknown(this.latestSpellSamples.get(spell.code) ?? null),
+      lastResult: cloneUnknown(this.lastSpellResult),
+      errors: [],
+    };
   }
 
   snapshot() {
@@ -1337,6 +1956,12 @@ export class Simulation {
         kind: "projectile",
         id: this.projectiles.id[index],
         ownerId: this.projectiles.ownerId[index],
+        spellId: this.spells.getByCode(this.projectiles.spellCode[index])?.id
+          ?? FIREBALL_SPELL_ID,
+        spellCode: this.projectiles.spellCode[index],
+        definitionRevision: this.projectiles.definitionRevision[index],
+        effectId: this.projectiles.effectId[index],
+        effectSeed: this.projectiles.effectSeed[index],
         index,
         x: this.projectiles.x[index],
         z: this.projectiles.z[index],
@@ -1355,6 +1980,14 @@ export class Simulation {
       particles[index] = {
         kind: "particle",
         id: this.particles.id[index],
+        spellId: this.spells.getByCode(this.particles.spellCode[index])?.id
+          ?? FIREBALL_SPELL_ID,
+        spellCode: this.particles.spellCode[index],
+        definitionRevision: this.particles.definitionRevision[index],
+        effectId: this.particles.effectId[index],
+        effectSeed: this.particles.effectSeed[index],
+        sampleOrdinal: this.particles.sampleOrdinal[index],
+        sampleSeed: this.particles.sampleSeed[index],
         index,
         x: this.particles.x[index],
         y: this.particles.y[index],
@@ -1402,6 +2035,7 @@ export class Simulation {
       };
     }
 
+    const recentEvents = this.impactEvents.toArray(32).map(cloneEvent);
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
@@ -1416,7 +2050,20 @@ export class Simulation {
         cells: Array.from(this.map.cells),
         playerSpawn: { ...this.map.playerSpawn },
       },
-      player: { kind: "player", index: 0, ...this.player },
+      player: {
+        kind: "player",
+        index: 0,
+        ...this.player,
+        cooldowns: Object.fromEntries(
+          this.spells.list().map((spell) => [
+            spell.id,
+            this.spellCooldowns[spell.code],
+          ]),
+        ),
+      },
+      spells: this.spells.snapshotTable(
+        this.#spellRevisionReferences(recentEvents),
+      ),
       rocks,
       projectiles,
       particles,
@@ -1424,7 +2071,7 @@ export class Simulation {
       contactMetrics: {
         dropped: this.contacts.dropped,
       },
-      recentEvents: this.impactEvents.toArray(32).map(cloneEvent),
+      recentEvents,
       pools: {
         rocks: {
           active: this.rocks.activeCount,
@@ -1453,6 +2100,7 @@ export class Simulation {
         dropped: this.commandLogDropped,
       },
       lastError: this.lastError,
+      lastSpellResult: cloneUnknown(this.lastSpellResult),
     };
   }
 
@@ -1578,14 +2226,20 @@ export class Simulation {
 
   /** @param {number} index */
   #describeProjectile(index) {
+    const spellCode = this.projectiles.spellCode[index];
     return {
       kind: "projectile",
       id: this.projectiles.id[index],
       ownerId: this.projectiles.ownerId[index],
+      spell: this.spells.getByCode(spellCode)?.id ?? FIREBALL_SPELL_ID,
+      spellCode,
+      definitionRevision: this.projectiles.definitionRevision[index],
+      effectId: this.projectiles.effectId[index],
+      effectSeed: this.projectiles.effectSeed[index],
       index,
       position: {
         x: this.projectiles.x[index],
-        y: PROJECTILE.radius,
+        y: this.projectiles.radius[index],
         z: this.projectiles.z[index],
       },
       velocity: { x: this.projectiles.vx[index], y: 0, z: this.projectiles.vz[index] },
@@ -1601,9 +2255,17 @@ export class Simulation {
   /** @param {number} index */
   #describeParticle(index) {
     const currentSize = this.#currentParticleSize(index);
+    const spellCode = this.particles.spellCode[index];
     return {
       kind: "particle",
       id: this.particles.id[index],
+      spell: this.spells.getByCode(spellCode)?.id ?? FIREBALL_SPELL_ID,
+      spellCode,
+      definitionRevision: this.particles.definitionRevision[index],
+      effectId: this.particles.effectId[index],
+      effectSeed: this.particles.effectSeed[index],
+      sampleOrdinal: this.particles.sampleOrdinal[index],
+      sampleSeed: this.particles.sampleSeed[index],
       index,
       position: {
         x: this.particles.x[index],
@@ -1695,6 +2357,7 @@ export class Simulation {
         particleProfile: this.commandLogParticleProfile,
         particleBounce: this.commandLogParticleBounce,
         particleWallCollision: this.commandLogParticleWallCollision,
+        spells: cloneUnknown(this.commandLogSpellBaseline),
       },
       truncated: this.commandLogDropped > 0,
       commands: this.commandLog.toArray().map((entry) => ({
@@ -1717,6 +2380,12 @@ export class Simulation {
     const particleWallCollision = recordingSchema >= 3
       ? recording.configuration?.particleWallCollision ?? true
       : false;
+    const spellBaseline = recordingSchema >= 5
+      ? recording.configuration?.spells
+      : undefined;
+    if (recordingSchema >= 5 && !Array.isArray(spellBaseline)) {
+      throw new TypeError("Schema-v5 recording is missing its spell baseline");
+    }
     const simulation = new Simulation({
       seed: recording.seed,
       scenario,
@@ -1727,6 +2396,8 @@ export class Simulation {
       particleProfile,
       particleBounce,
       particleWallCollision,
+      spellBaseline,
+      legacyFireballMode: recordingSchema < 5,
     });
     for (const entry of recording.commands) simulation.tick(entry.command);
     return simulation;

@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.4.0` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.5.0` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Current contracts
 
@@ -11,6 +11,7 @@ Lantern `0.4.0` is the current application release. Documents are separated by p
 - [0.3.2 spark-light affinity regression](./notes/0.3.2-spark-light-affinity.md) — carrier leases, smooth tail fades, and keyed resident-light slots.
 - [0.3.3 Render Lab and effect-local lighting](./notes/0.3.3-render-lab-performance.md) — atomic fireball light groups, URL settings, performance capture, LAN testing, and current support thresholds.
 - [0.4.0 TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) — player-centered wall LOS, shared renderer masks, local interaction gating, fades, probes, and performance-report v2.
+- [0.5.0 Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) — strict definitions, immutable revisions, effect-local seeds, schema-v5 replay, live controls, and stable presentation resources.
 
 ## Release and milestone history
 
@@ -24,17 +25,18 @@ Lantern `0.4.0` is the current application release. Documents are separated by p
 | 0.3.1 | [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) | Prevent controller contact from storing external recoil while preserving genuine impact knockback |
 | 0.3.2 | [Spark-light affinity](./notes/0.3.2-spark-light-affinity.md) | Prevent dying spark lights from hopping to older surviving carriers |
 | 0.3.3 | [Effect-local lighting and Render Lab](./notes/0.3.3-render-lab-performance.md) | Atomic eight-slot fireball groups, 16-light default, live render controls, capture reports, and LAN phone routes |
-| 0.4.0 | [TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) | Current 360-degree wall LOS, shared Canvas/Three shroud, local interaction gating, and report v2 |
+| 0.4.0 | [TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) | 360-degree wall LOS, shared Canvas/Three shroud, local interaction gating, and report v2 |
+| 0.5.0 | [Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) | Current spell registry, Fireball definition v1, future-casts-only revisions, deterministic seeds, and schema v5 |
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.4.0`.
-- Snapshot and command-recording schema: v4.
+- Application/package release: `0.5.0`.
+- Snapshot and command-recording schema: v5.
 - Scenario JSON schema: v2; legacy map JSON remains v1.
 - Default particle behavior profile: `m0.2.5-balanced`.
 - Historical replay particle profile: `m0.2`.
 - Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
 
-Release numbering must not rename a frozen particle profile or increment a serialization schema unless that specific compatibility contract changes.
+Release numbering must not rename a frozen particle profile or increment a serialization schema unless that specific compatibility contract changes. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 is the versioned-definition boundary.

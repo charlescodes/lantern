@@ -14,7 +14,8 @@ export class InputController {
    * toggleMode:()=>void,
    * focusPlayer:()=>void,
    * pinAt:(x:number,z:number)=>void,
-   * editAt:(tool:string,button:number,x:number,z:number)=>void
+   * editAt:(tool:string,button:number,x:number,z:number)=>void,
+   * createCast?:(x:number,z:number)=>Record<string,unknown>|null
    * }} actions
    */
   constructor(canvas, camera, actions) {
@@ -132,7 +133,11 @@ export class InputController {
       return;
     }
     if (event.button === 2) this.rightHeld = true;
-    if (event.button === 0) this.pendingCast = { ...this.mouseWorld };
+    if (event.button === 0) {
+      this.pendingCast = this.actions.createCast
+        ? this.actions.createCast(this.mouseWorld.x, this.mouseWorld.z)
+        : { ...this.mouseWorld };
+    }
   }
 
   /** @param {PointerEvent} event */
@@ -183,7 +188,13 @@ export class InputController {
   /** @param {KeyboardEvent} event */
   #onKeyDown(event) {
     const target = event.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    if (
+      target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement
+      || target instanceof HTMLButtonElement
+      || (target instanceof HTMLElement && target.isContentEditable)
+    ) {
       return;
     }
     if (event.code === "Space") {

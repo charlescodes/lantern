@@ -1,6 +1,13 @@
 // @ts-check
 
 import { EXPLOSION, PARTICLE, SIMULATION } from "../config.js";
+import {
+  FIREBALL_COLOR_FLIGHT_LIGHT,
+  FIREBALL_COLOR_IMPACT_LIGHT,
+  FIREBALL_COLOR_PARTICLE,
+  writeFireballPaletteColor,
+} from "../spells/palette.js";
+import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
 export const PRESENTATION_LIGHT_GROUP_SIZE = 8;
 export const PRESENTATION_SPARK_LIGHTS_PER_GROUP = 7;
@@ -300,13 +307,24 @@ export class PresentationLightBudget {
         this.groups.set(key, group);
         admissionRequests.add(key);
       }
-      if (group.phase === "flight") group.projectile = projectile;
+      if (group.phase === "flight") {
+        group.projectile = projectile;
+        group.effectSeed = Number(projectile.effectSeed ?? 0);
+        group.spellCode = Number(projectile.spellCode ?? 0);
+        group.definitionRevision = Number(projectile.definitionRevision ?? 0);
+      }
     }
 
     const associatedParticles = new Map();
     const orphanParticles = [];
     for (const particle of newParticles) {
-      const event = nearestEvent(particle, newEvents);
+      const effectId = Number(particle.effectId ?? 0);
+      const event = effectId > 0
+        ? newEvents.find((candidate) => (
+          Number(candidate.effectId ?? 0) === effectId
+          && Number(candidate.spellCode ?? 0) === Number(particle.spellCode ?? 0)
+        )) ?? nearestEvent(particle, newEvents)
+        : nearestEvent(particle, newEvents);
       if (!event) {
         orphanParticles.push(particle);
         continue;
@@ -336,6 +354,9 @@ export class PresentationLightBudget {
       group.phase = "impact";
       group.effectTick = Number(event.tick);
       group.effectId = Number(event.id);
+      group.effectSeed = Number(event.effectSeed ?? 0);
+      group.spellCode = Number(event.spellCode ?? 0);
+      group.definitionRevision = Number(event.definitionRevision ?? 0);
       group.event = event;
       group.projectile = null;
       group.carriers = this.#selectCarriers(
@@ -350,7 +371,10 @@ export class PresentationLightBudget {
     for (const group of this.groups.values()) {
       if (group.phase !== "impact" || !group.event) continue;
       const age = Number(snapshot.tick) - Number(group.event.tick);
-      if (age >= this.explosionLifetimeTicks) group.phase = "tail";
+      const lifetimeTicks = Number(group.event.visualLifetime) > 0
+        ? Math.max(1, Math.round(Number(group.event.visualLifetime) * SIMULATION.tickHz))
+        : this.explosionLifetimeTicks;
+      if (age >= lifetimeTicks) group.phase = "tail";
     }
 
     this.#retireCompletedGroups(particlesById, projectilesById);
@@ -438,6 +462,9 @@ export class PresentationLightBudget {
       event: null,
       carriers: [],
       tint: deriveFireballTint(seed, projectileId),
+      effectSeed: 0,
+      spellCode: 0,
+      definitionRevision: 0,
     };
   }
 
@@ -538,62 +565,113 @@ export class PresentationLightBudget {
     colorVariation,
   ) {
     const residentBase = group.block * PRESENTATION_LIGHT_GROUP_SIZE;
+    const useRevisionPalette = Array.isArray(snapshot.spells);
     if (group.phase === "flight") {
       const projectile = projectilesById.get(Number(group.projectileId));
       if (projectile) {
         const life = particleLife(projectile);
+        const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
+        const color = { r: 0, g: 0, b: 0 };
+        if (useRevisionPalette) {
+          writeFireballPaletteColor(color, definition, {
+            kind: FIREBALL_COLOR_FLIGHT_LIGHT,
+            life,
+            effectSeed: projectile.effectSeed,
+            variationEnabled: colorVariation,
+          });
+        }
         assignments.push(this.#assignment(group, 0, {
           kind: "projectile",
           sourceId: Number(projectile.id),
           x: Number(projectile.x),
           y: 0.9,
           z: Number(projectile.z),
-          color: mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, 0.68 + life * 0.22),
-          intensity: 22,
-          distance: 3,
-          decay: 2,
+          color: useRevisionPalette
+            ? color
+            : mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, 0.68 + life * 0.22),
+          paletteSampled: useRevisionPalette,
+          intensity: Number(definition.presentation.flightLightIntensity),
+          distance: Number(definition.presentation.flightLightRange),
+          decay: Number(definition.presentation.flightLightDecay),
         }, residentBase, colorVariation));
       }
     } else if (group.event) {
       const age = Number(snapshot.tick) - Number(group.event.tick);
-      if (age >= 0 && age < this.explosionLifetimeTicks) {
-        const life = clamp(1 - age / this.explosionLifetimeTicks, 0, 1);
+      const lifetimeTicks = Number(group.event.visualLifetime) > 0
+        ? Math.max(1, Math.round(Number(group.event.visualLifetime) * SIMULATION.tickHz))
+        : this.explosionLifetimeTicks;
+      if (age >= 0 && age < lifetimeTicks) {
+        const life = clamp(1 - age / lifetimeTicks, 0, 1);
         const pulse = life * (0.18 + life * 0.82);
+        const definition = fireballDefinitionFromSnapshot(snapshot, group.event);
+        const color = { r: 0, g: 0, b: 0 };
+        if (useRevisionPalette) {
+          writeFireballPaletteColor(color, definition, {
+            kind: FIREBALL_COLOR_IMPACT_LIGHT,
+            life,
+            effectSeed: group.event.effectSeed,
+            variationEnabled: colorVariation,
+          });
+        }
         assignments.push(this.#assignment(group, 0, {
           kind: "explosion",
           sourceId: Number(group.event.id),
           x: Number(group.event.originX),
           y: 0.55,
           z: Number(group.event.originZ),
-          color: mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, life),
-          intensity: 52 * pulse,
-          distance: 5,
-          decay: 2,
+          color: useRevisionPalette
+            ? color
+            : mixColor(FIRE_COLORS.amber, FIRE_COLORS.core, life),
+          paletteSampled: useRevisionPalette,
+          intensity: Number(definition.presentation.impactLightIntensity) * pulse,
+          distance: Number(definition.presentation.impactLightRange),
+          decay: Number(definition.presentation.impactLightDecay),
         }, residentBase, colorVariation));
       }
     }
 
-    const sizeRange = Math.max(1e-9, PARTICLE.maximumSize - PARTICLE.minimumSize);
     for (const carrier of group.carriers) {
       const particle = particlesById.get(carrier.id);
       if (!particle) continue;
       const life = particleLife(particle);
+      const definition = fireballDefinitionFromSnapshot(snapshot, particle);
+      const minimumSize = Number(
+        definition.particleLifecycle.sizeMinimum ?? PARTICLE.minimumSize,
+      );
+      const maximumSize = Number(
+        definition.particleLifecycle.sizeMaximum ?? PARTICLE.maximumSize,
+      );
+      const sizeRange = Math.max(1e-9, maximumSize - minimumSize);
       const normalizedMaximumSize = clamp(
-        (Number(particle.size) - PARTICLE.minimumSize) / sizeRange,
+        (Number(particle.size) - minimumSize) / sizeRange,
         0,
         1,
       );
       const fade = life * life * (3 - 2 * life);
+      const color = { r: 0, g: 0, b: 0 };
+      if (useRevisionPalette) {
+        writeFireballPaletteColor(color, definition, {
+          kind: FIREBALL_COLOR_PARTICLE,
+          life,
+          effectSeed: particle.effectSeed,
+          sampleOrdinal: particle.sampleOrdinal,
+          sampleSeed: particle.sampleSeed,
+          variationEnabled: colorVariation,
+        });
+      }
       assignments.push(this.#assignment(group, carrier.slot, {
         kind: "particle",
         sourceId: Number(particle.id),
         x: Number(particle.x),
         y: Math.max(0.08, Number(particle.y) + Number(particle.currentSize)),
         z: Number(particle.z),
-        color: sparkFireColor(life),
-        intensity: (4 + 9 * normalizedMaximumSize) * fade,
-        distance: 1.5,
-        decay: 2,
+        color: useRevisionPalette ? color : sparkFireColor(life),
+        paletteSampled: useRevisionPalette,
+        intensity: Number(definition.presentation.sparkLightIntensity)
+          * ((4 + 9 * normalizedMaximumSize) / 13)
+          * fade,
+        distance: Number(definition.presentation.sparkLightRange),
+        decay: Number(definition.presentation.sparkLightDecay),
       }, residentBase, colorVariation));
     }
   }
@@ -616,8 +694,13 @@ export class PresentationLightBudget {
         anchor: group.tint.anchor,
         amount: group.tint.amount,
       },
+      spellCode: group.spellCode,
+      definitionRevision: group.definitionRevision,
+      effectSeed: group.effectSeed,
       ...value,
-      color: applyFireballTint(value.color, group.tint, colorVariation),
+      color: value.paletteSampled
+        ? value.color
+        : applyFireballTint(value.color, group.tint, colorVariation),
     };
   }
 }

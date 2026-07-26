@@ -18,6 +18,10 @@ export class ProjectilePool {
     this.lifetime = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
     this.ownerId = new Uint32Array(capacity);
+    this.spellCode = new Uint8Array(capacity);
+    this.definitionRevision = new Uint32Array(capacity);
+    this.effectId = new Uint32Array(capacity);
+    this.effectSeed = new Uint32Array(capacity);
   }
 
   reset() {
@@ -26,7 +30,7 @@ export class ProjectilePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number}} value */
+  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -46,6 +50,10 @@ export class ProjectilePool {
     this.lifetime[index] = value.lifetime;
     this.radius[index] = value.radius;
     this.ownerId[index] = value.ownerId ?? 0;
+    this.spellCode[index] = value.spellCode ?? 0;
+    this.definitionRevision[index] = value.definitionRevision ?? 0;
+    this.effectId[index] = value.effectId ?? 0;
+    this.effectSeed[index] = value.effectSeed ?? 0;
     this.activeCount += 1;
     return id;
   }
@@ -66,6 +74,10 @@ export class ProjectilePool {
       this.lifetime[index] = this.lifetime[last];
       this.radius[index] = this.radius[last];
       this.ownerId[index] = this.ownerId[last];
+      this.spellCode[index] = this.spellCode[last];
+      this.definitionRevision[index] = this.definitionRevision[last];
+      this.effectId[index] = this.effectId[last];
+      this.effectSeed[index] = this.effectSeed[last];
     }
     this.activeCount = last;
     return true;
@@ -195,6 +207,12 @@ export class ParticlePool {
     this.size = new Float32Array(capacity);
     this.bounced = new Uint8Array(capacity);
     this.wallBounceCount = new Uint16Array(capacity);
+    this.spellCode = new Uint8Array(capacity);
+    this.definitionRevision = new Uint32Array(capacity);
+    this.effectId = new Uint32Array(capacity);
+    this.effectSeed = new Uint32Array(capacity);
+    this.sampleOrdinal = new Uint16Array(capacity);
+    this.sampleSeed = new Uint32Array(capacity);
   }
 
   reset() {
@@ -206,7 +224,7 @@ export class ParticlePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,y:number,z:number,vx:number,vy:number,vz:number,lifetime:number,size:number}} value */
+  /** @param {{x:number,y:number,z:number,vx:number,vy:number,vz:number,lifetime:number,size:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,sampleOrdinal?:number,sampleSeed?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -227,6 +245,12 @@ export class ParticlePool {
     this.size[index] = value.size;
     this.bounced[index] = 0;
     this.wallBounceCount[index] = 0;
+    this.spellCode[index] = value.spellCode ?? 0;
+    this.definitionRevision[index] = value.definitionRevision ?? 0;
+    this.effectId[index] = value.effectId ?? 0;
+    this.effectSeed[index] = value.effectSeed ?? 0;
+    this.sampleOrdinal[index] = value.sampleOrdinal ?? 0;
+    this.sampleSeed[index] = value.sampleSeed ?? 0;
     this.activeCount += 1;
     return id;
   }
@@ -248,6 +272,12 @@ export class ParticlePool {
       this.size[index] = this.size[last];
       this.bounced[index] = this.bounced[last];
       this.wallBounceCount[index] = this.wallBounceCount[last];
+      this.spellCode[index] = this.spellCode[last];
+      this.definitionRevision[index] = this.definitionRevision[last];
+      this.effectId[index] = this.effectId[last];
+      this.effectSeed[index] = this.effectSeed[last];
+      this.sampleOrdinal[index] = this.sampleOrdinal[last];
+      this.sampleSeed[index] = this.sampleSeed[last];
     }
     this.activeCount = last;
     return true;

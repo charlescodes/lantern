@@ -75,7 +75,7 @@ export class PerformanceCapture {
    * }} options
    */
   constructor(options) {
-    this.applicationVersion = options.applicationVersion ?? "0.4.0";
+    this.applicationVersion = options.applicationVersion ?? "0.5.0";
     this.durationMs = Math.max(
       1,
       Math.trunc(options.durationMs ?? PERFORMANCE_CAPTURE_DURATION_MS),

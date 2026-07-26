@@ -1,6 +1,14 @@
 // @ts-check
 
-import { EXPLOSION, ROCK_ARCHETYPES } from "../config.js";
+import { EXPLOSION, ROCK_ARCHETYPES, SIMULATION } from "../config.js";
+import {
+  FIREBALL_COLOR_CORE,
+  FIREBALL_COLOR_IMPACT_LIGHT,
+  FIREBALL_COLOR_PARTICLE,
+  FIREBALL_COLOR_PROJECTILE,
+  writeFireballPaletteColor,
+} from "../spells/palette.js";
+import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
 const COLORS = Object.freeze({
   void: "#090c0b",
@@ -40,6 +48,14 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/** @param {{r:number,g:number,b:number}} color @param {number} [alpha] */
+function cssColor(color, alpha = 1) {
+  const r = Math.round(clamp(color.r, 0, 1) * 255);
+  const g = Math.round(clamp(color.g, 0, 1) * 255);
+  const b = Math.round(clamp(color.b, 0, 1) * 255);
+  return alpha >= 1 ? `rgb(${r} ${g} ${b})` : `rgb(${r} ${g} ${b} / ${alpha})`;
+}
+
 export class DebugRenderer {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -59,6 +75,7 @@ export class DebugRenderer {
     this.sightCanvas = null;
     this.sightContext = null;
     this.sightImageData = null;
+    this._fireColor = { r: 1, g: 1, b: 1 };
   }
 
   /** @param {number} value */
@@ -97,7 +114,7 @@ export class DebugRenderer {
    * @param {number} alpha
    * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame}} view
    */
-  render(snapshot, alpha, view) {
+  render(snapshot, alpha, view, colorVariation = true) {
     this.resize();
     const context = this.context;
     const scale = this.camera.worldToViewportScale;
@@ -116,10 +133,12 @@ export class DebugRenderer {
     context.lineJoin = "round";
 
     this.#drawMap(snapshot, view);
-    if (snapshot.debugFlags.explosionForces) this.#drawExplosionForces(snapshot);
-    this.#drawParticles(snapshot);
+    if (snapshot.debugFlags.explosionForces) {
+      this.#drawExplosionForces(snapshot, colorVariation);
+    }
+    this.#drawParticles(snapshot, colorVariation);
     this.#drawRocks(snapshot, alpha);
-    this.#drawProjectiles(snapshot);
+    this.#drawProjectiles(snapshot, colorVariation);
     this.#drawPlayer(snapshot, alpha);
     if (snapshot.debugFlags.contacts) this.#drawContacts(snapshot.contacts);
     this.#drawInspection(view.hover, view.selected);
@@ -297,11 +316,21 @@ export class DebugRenderer {
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
-  #drawParticles(snapshot) {
+  #drawParticles(snapshot, colorVariation) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const particle of snapshot.particles) {
       const life = 1 - particle.age / particle.lifetime;
+      const definition = fireballDefinitionFromSnapshot(snapshot, particle);
+      writeFireballPaletteColor(this._fireColor, definition, {
+        kind: FIREBALL_COLOR_PARTICLE,
+        life,
+        effectSeed: particle.effectSeed,
+        sampleOrdinal: particle.sampleOrdinal,
+        sampleSeed: particle.sampleSeed,
+        variationEnabled: colorVariation,
+      });
+      const particleColor = cssColor(this._fireColor);
       const liftedZ =
         particle.z
         - particle.y * HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER;
@@ -318,13 +347,16 @@ export class DebugRenderer {
         context.beginPath();
         context.moveTo(particle.x, particle.z);
         context.lineTo(particle.x, liftedZ);
-        context.strokeStyle = `rgba(255, 155, 70, ${clamp(life * 0.35, 0, 0.35)})`;
+        context.strokeStyle = cssColor(
+          this._fireColor,
+          clamp(life * 0.35, 0, 0.35),
+        );
         context.lineWidth = line;
         context.stroke();
       }
       context.beginPath();
       context.arc(particle.x, liftedZ, particle.currentSize, 0, Math.PI * 2);
-      context.fillStyle = life > 0.55 ? COLORS.particle : COLORS.projectile;
+      context.fillStyle = particleColor;
       context.globalAlpha = clamp(life, 0, 1);
       context.fill();
       context.globalAlpha = 1;
@@ -375,33 +407,50 @@ export class DebugRenderer {
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
-  #drawExplosionForces(snapshot) {
+  #drawExplosionForces(snapshot, colorVariation) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const event of snapshot.recentEvents) {
       if (event.type !== "explosion") continue;
       const age = snapshot.tick - event.tick;
-      if (age < 0 || age > EXPLOSION.debugTicks) continue;
-      const life = 1 - age / EXPLOSION.debugTicks;
+      const visualTicks = Math.max(
+        1,
+        Math.round(
+          Number(
+            event.visualLifetime
+            ?? EXPLOSION.debugTicks / SIMULATION.tickHz,
+          ) * SIMULATION.tickHz,
+        ),
+      );
+      if (age < 0 || age > visualTicks) continue;
+      const life = 1 - age / visualTicks;
+      const definition = fireballDefinitionFromSnapshot(snapshot, event);
+      writeFireballPaletteColor(this._fireColor, definition, {
+        kind: FIREBALL_COLOR_IMPACT_LIGHT,
+        life,
+        effectSeed: event.effectSeed,
+        variationEnabled: colorVariation,
+      });
+      const impactColor = cssColor(this._fireColor);
       context.save();
       context.globalAlpha = 0.2 + life * 0.45;
       context.beginPath();
       context.arc(event.originX, event.originZ, event.radius, 0, Math.PI * 2);
-      context.strokeStyle = COLORS.explosion;
+      context.strokeStyle = impactColor;
       context.lineWidth = line * 1.5;
       context.setLineDash([line * 5, line * 4]);
       context.stroke();
       context.setLineDash([]);
       context.beginPath();
       context.arc(event.originX, event.originZ, 0.08 + (1 - life) * 0.18, 0, Math.PI * 2);
-      context.fillStyle = COLORS.explosion;
+      context.fillStyle = impactColor;
       context.fill();
       for (const response of event.responses) {
         if (!response?.position) continue;
         context.beginPath();
         context.moveTo(event.originX, event.originZ);
         context.lineTo(response.position.x, response.position.z);
-        context.strokeStyle = response.blocked ? COLORS.blocked : COLORS.explosion;
+        context.strokeStyle = response.blocked ? COLORS.blocked : impactColor;
         context.lineWidth = response.blocked ? line * 2 : line;
         if (response.blocked) context.setLineDash([line * 3, line * 3]);
         context.stroke();
@@ -421,27 +470,39 @@ export class DebugRenderer {
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
-  #drawProjectiles(snapshot) {
+  #drawProjectiles(snapshot, colorVariation) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const projectile of snapshot.projectiles) {
+      const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
+      writeFireballPaletteColor(this._fireColor, definition, {
+        kind: FIREBALL_COLOR_PROJECTILE,
+        effectSeed: projectile.effectSeed,
+        variationEnabled: colorVariation,
+      });
+      const projectileColor = cssColor(this._fireColor);
       context.beginPath();
       context.moveTo(projectile.previousX, projectile.previousZ);
       context.lineTo(projectile.x, projectile.z);
-      context.strokeStyle = "rgba(255, 126, 69, 0.6)";
+      context.strokeStyle = cssColor(this._fireColor, 0.6);
       context.lineWidth = line * 2;
       context.stroke();
       context.beginPath();
       context.arc(projectile.x, projectile.z, projectile.radius * 1.6, 0, Math.PI * 2);
-      context.fillStyle = "rgba(255, 91, 47, 0.18)";
+      context.fillStyle = cssColor(this._fireColor, 0.18);
       context.fill();
       context.beginPath();
       context.arc(projectile.x, projectile.z, projectile.radius, 0, Math.PI * 2);
-      context.fillStyle = COLORS.projectile;
+      context.fillStyle = projectileColor;
       context.fill();
       context.beginPath();
       context.arc(projectile.x, projectile.z, projectile.radius * 0.42, 0, Math.PI * 2);
-      context.fillStyle = COLORS.projectileCore;
+      writeFireballPaletteColor(this._fireColor, definition, {
+        kind: FIREBALL_COLOR_CORE,
+        effectSeed: projectile.effectSeed,
+        variationEnabled: colorVariation,
+      });
+      context.fillStyle = cssColor(this._fireColor);
       context.fill();
     }
   }

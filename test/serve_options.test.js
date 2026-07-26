@@ -59,13 +59,13 @@ test("LAN address enumeration returns unique non-loopback IPv4 routes", () => {
 
 test("printed network routes are phone-ready and include the unauthenticated-LAN warning", () => {
   const lines = startupMessages({
-    version: "0.4.0",
+    version: "0.5.0",
     host: "0.0.0.0",
     port: 4173,
     lanAddresses: ["192.168.1.50"],
   });
   const output = lines.join("\n");
-  assert.match(output, /Lantern 0\.4\.0/);
+  assert.match(output, /Lantern 0\.5\.0/);
   assert.match(output, /http:\/\/192\.168\.1\.50:4173\/\?renderer=2d/);
   assert.match(output, /http:\/\/192\.168\.1\.50:4173\/\?renderer=3d/);
   assert.match(

@@ -1,6 +1,6 @@
-# Lantern 0.4.0 / Blast Lab
+# Lantern 0.5.0 / Spell Lab
 
-A browser-first fixed-step X/Z simulation for inspecting collision, fireball explosions, physical knockback, size-linked ember lifecycles, current line of sight, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots and TrueSight frame.
+A browser-first fixed-step X/Z simulation for authoring replay-safe Fireball revisions while inspecting collision, explosions, physical knockback, ember lifecycles, current line of sight, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots, spell table, and TrueSight frame.
 
 ## Run
 
@@ -27,7 +27,7 @@ Presentation routes:
 - <http://127.0.0.1:4173/?renderer=3d> — Three.js with automatic WebGPU/WebGL 2 selection.
 - <http://127.0.0.1:4173/?renderer=3d&backend=webgl> — forced WebGL 2 fallback test.
 
-The Balanced defaults are 16 resident lights, a 1.5× pixel-density cap, antialiasing on, automatic backend selection, dynamic lights, subtle light-color variation, TrueSight, and sight fading on; bloom, shadows, and sight debug are off. URL options are `lights=8|16|32|64`, `dpr=1|1.5|2`, `aa=0|1`, `dynamicLights=0|1`, `lightColorVariation=0|1`, `bloom=0|1`, `shadows=0|1`, `trueSight=0|1`, `sightFade=0|1`, and `sightDebug=0|1`.
+The Balanced defaults are 16 resident lights, a 1.5× pixel-density cap, antialiasing on, automatic backend selection, dynamic lights, spell-color variation, TrueSight, and sight fading on; bloom, shadows, and sight debug are off. URL options are `lights=8|16|32|64`, `dpr=1|1.5|2`, `aa=0|1`, `dynamicLights=0|1`, `lightColorVariation=0|1`, `bloom=0|1`, `shadows=0|1`, `trueSight=0|1`, `sightFade=0|1`, and `sightDebug=0|1`. The compatibility URL/probe key remains `lightColorVariation`; the UI labels it **Spell color variation**.
 
 ## Validate
 
@@ -36,16 +36,18 @@ npm test
 npm run check
 npm run test:soak
 npm run test:soak:sight
+npm run test:soak:spell
 ```
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.4.0` adds TrueSight without changing the `0.3.0` presentation milestone, schema v4, scenario v2, or frozen `m0.2.5-balanced` particle profile.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.5.0` adds the [Spell Lab and versioned Fireball definition contract](./docs/milestones/0.5.0-spell-lab.md), advances runtime/snapshot/recording schema to v5, and leaves scenario v2, map v1, performance-report v2, and the frozen legacy particle profiles unchanged.
 
 ## Play controls
 
 - Hold RMB to accelerate toward the pointer; release it to brake.
-- Press LMB to cast a fireball. Fireballs explode on the first wall or rock they hit.
+- Press LMB to cast the selected spell; Fireball is the only 0.5.0 handler. Fireballs explode on the first wall or rock they hit.
+- Keep Spell Lab open while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed.
 - Press `Space` to pause, `.` to pause and advance one tick, `R` to reset the current seed, and `Shift+R` to choose a new seed.
 - Press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state.
 - Press `F` to focus the player. Use the wheel to zoom and MMB drag to pan.
@@ -66,6 +68,18 @@ Choose Wall, Rock .1m, Rock .3m, Rock .9m, or Erase from the authoring palette. 
 
 Scenario JSON v2 stores the grid, player spawn, and authored rocks. Legacy map v1 JSON still loads as a scenario with no rocks. Save exports authored positions, while **Restore positions** reconstructs the player and rocks and clears transient projectiles, particles, and motion.
 
+## Spell Lab
+
+Spell Lab is a collapsible, non-modal arena overlay and a bottom drawer on narrow screens. It edits a validated complete Fireball definition v1 draft. Numeric fields pair a range control with an exact numeric input; collapsible sections cover essentials, projectile motion, distribution, lifecycle, collision, palette, emissive response, and lighting. The visible formulas explain the size-linked lifetime and lower-biased vertical sample.
+
+Its primary purpose is developer-side effect tuning. Revision numbers are runtime bookkeeping that keeps an effect stable when settings change mid-flight, not a player-facing version-management feature. A future cosmetic-customization system could reuse the validated catalog and presentation fields, but 0.5.0 adds no player persistence, ownership, or loadout rules.
+
+**Apply** creates a monotonically numbered immutable revision for future casts only. Existing projectiles, impacts, particles, colors, collision responses, and light leases continue resolving through the revision captured when that cast spawned. **Revert to applied** discards draft edits; **Reset draft to defaults** changes only the draft. Import replaces the draft and never applies it. Apply, Copy, and Download remain unavailable until the complete document validates. A reset preserves the applied definition and the panel draft, while a browser reload returns to built-in defaults because no Spell Lab state is written to the URL or local storage.
+
+Automatic variation seeds are stable 32-bit hashes of simulation seed, spell code, and successful-cast sequence. Locked seeds reproduce the same semantic angle, speed, bias, vertical, lifetime, size, hue, saturation, and brightness samples. Rejected casts do not advance the sequence. **Clear active effects** removes Fireball projectiles, sparks, retained impact visuals, and their presentation light leases; physical impulses already applied to bodies are not reversed.
+
+The authoritative definition format, limits, replay boundary, and extension seam are in the [0.5.0 Spell Lab milestone](./docs/milestones/0.5.0-spell-lab.md).
+
 ## TrueSight
 
 TrueSight derives a player-centered, 360-degree visibility polygon from the current interpolated X/Z position and the loaded grid map. Solid wall cells block sight; the camera, rocks, particles, and fireballs do not. Visibility has no range cutoff and no remembered exploration. Edit mode reveals the complete map immediately.
@@ -80,11 +94,11 @@ The player is 75 kg. Rock mass is derived from a 2,600 kg/m3 stone density and s
 
 Player velocity remains split between control-driven locomotion and damped external momentum. Player/rock contact now resolves genuine body or external momentum through the external channel, while controller-driven closure reacts through locomotion with zero restitution. This prevents held movement against a heavy rock from storing delayed recoil without suppressing real impact knockback. See the [dynamic-contact velocity-channel regression contract](./docs/notes/dynamic-contact-velocity-channels.md).
 
-An explosion applies an instantaneous, radial impulse to bodies within 2.5m. Surface-distance falloff, projected body area, and mass determine velocity change. Solid map cells completely block the impulse ray.
+The default Fireball explosion applies an instantaneous, radial impulse to bodies within 2.5m using an 800 N·s/m² pressure budget. Both values are authorable simulation fields. Surface-distance falloff, projected body area, and mass determine velocity change. Solid map cells completely block the impulse ray.
 
 The visual spark shower remains presentation-only. Spark centers sweep against solid map cells and map boundaries and ignore the player, rocks, other particles, and gameplay force. Walls are infinitely tall for this X/Z test; particle Y does not bypass them. Wall response retains 80% of normal speed and 95% of tangential speed.
 
-Maximum spark size remains randomly sampled from `0.025-0.085m`. Size now drives a seeded `0.18-1.10s` lifetime, so larger embers persist longer while every visible radius shrinks smoothly toward zero. A lower-biased vertical distribution sends roughly 60% of a full burst to the ground. The first ground contact retains 45% vertical and 82% horizontal speed; the next ground contact settles the ember at `Y=0`, where it slows and remains visible until its assigned lifetime expires.
+The built-in Fireball default still samples maximum spark size from `0.025-0.085m` and seeded lifetime from `0.18-1.10s`, so larger embers persist longer while every visible radius shrinks smoothly toward zero. A lower-biased vertical distribution sends roughly 60% of a full burst to the ground. The first default ground contact retains 45% vertical and 82% horizontal speed; the next contact settles the ember at `Y=0`, where it slows and remains visible until its assigned lifetime expires. Schema-v5 effects use the collision and lifecycle values captured with their definition revision; schema-v2/v3/v4 replay stays on the frozen legacy paths.
 
 See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the force model, [0.2.0 particle collision](./docs/milestones/0.2.0-particle-collision.md) for wall behavior, and [0.2.5 particle lifecycle](./docs/milestones/0.2.5-particle-lifecycle.md) for size-linked lifetime behavior.
 
@@ -92,19 +106,21 @@ See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the forc
 
 The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. Its default pool contains 16 resident, shadowless point lights: two atomic eight-slot effect groups. Within a group, slot zero follows one projectile and becomes that projectile's explosion pulse; slots one through seven remain leased to the seven largest newly observed sparks associated with that impact. A disappearing carrier leaves its slot dark, a retired tail never relights, and admitting a newer effect retires an older group as a unit.
 
-Particles associate presentation-side with the nearest explosion first observed in the same snapshot, using event ID for distance ties; direct particle fixtures use a deterministic orphan group. Each fireball receives a stable seeded 1–3% red, green, or blue light bias with Rec.709 luminance restored after mixing. Tint applies only to point lights, so projectile and spark mesh colors remain the established fire gradient.
+Particles associate presentation-side with their captured effect identity; legacy/direct fixtures retain the nearest-impact and deterministic orphan fallbacks. Projectile, spark, impact, and light colors use one allocation-free palette sampler. The `lightColorVariation` compatibility switch is the global A/B master for per-cast and per-particle variation across both renderers and light assignments.
 
-Dynamic lights are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md), [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md), [0.3.2 spark-light affinity regression](./docs/notes/0.3.2-spark-light-affinity.md), and [0.3.3 Render Lab/performance note](./docs/notes/0.3.3-render-lab-performance.md). Canvas2D remains the default regression route.
+Dynamic lights, emissive energy, bloom response, and color are visual-only. They cannot affect AI, visibility, collision, damage, replay, or command authority. Projectile and particle color/emissive attributes are preallocated at full pool capacity before warmup; applying a definition updates resident bytes without replacing geometry, materials, nodes, buffers, pipelines, or the eight-slot light-group topology. Bloom and directional shadows default off. See the [0.3.0 3D presentation contract](./docs/milestones/0.3.0-3d-presentation.md), [renderer regression notes](./docs/notes/0.3.0-renderer-regressions.md), [0.3.2 spark-light affinity regression](./docs/notes/0.3.2-spark-light-affinity.md), and [0.3.3 Render Lab/performance note](./docs/notes/0.3.3-render-lab-performance.md). Canvas2D remains the default regression route.
 
 ## Render Lab and capture
 
-Open **Render Lab** before, during, or after renderer warmup. Renderer, backend, resident-light capacity, and antialiasing are startup topology and show **reload required** when changed. Pixel-density cap, dynamic lights, color variation, bloom, directional shadows, TrueSight, sight fading, and sight debug apply live. Settings persist only through the visible URL; Lantern does not keep a second `localStorage` configuration.
+Open **Render Lab** before, during, or after renderer warmup. Renderer, backend, resident-light capacity, and antialiasing are startup topology and show **reload required** when changed. Pixel-density cap, dynamic lights, Spell color variation, bloom, directional shadows, TrueSight, sight fading, and sight debug apply live. Settings persist only through the visible URL; Lantern does not keep a second `localStorage` configuration.
 
 The panel reports backend, CSS/backing resolution, effective DPR, active/resident lights, frame and CPU timing, TrueSight geometry/mask/timing, and GPU timestamp availability. **Capture 10 seconds** resets timing histories without scripting gameplay. Performance-report v2 adds maximum rays, polygon vertices, visible walls, mask dimensions, and separate TrueSight CPU percentiles to the existing browser/device, workload, presentation, light, spike, and GPU data.
 
 ## Snapshots and recordings
 
-Snapshots, runtime metrics, and command recordings use schema v4. Scenario JSON remains v2. A v4 recording stores the particle profile plus initial **Ground bounce** and **Spark walls** modes, then replays later flag commands at their original tick boundaries. Schema-v3 recordings use the exact M0.2 particle profile; schema-v2 recordings additionally disable spark wall collision.
+Snapshots, runtime metrics, and command recordings use schema v5. Scenario JSON remains v2. Snapshots carry a compact `spells` table of only current and referenced immutable revisions; projectiles, particles, and retained impact events store spell code, definition revision, effect ID, and effect seed. Particle entries additionally retain their sample ordinal and seed.
+
+A v5 recording stores initial spell definitions and revision counters, deep-cloned complete apply documents, and explicit successful-cast seeds. Replay reconstructs revision application and effect-local randomness exactly. Schema-v4 recordings stay on their frozen profile and global-RNG Fireball path; schema-v3 uses the exact M0.2 particle profile; schema-v2 additionally disables spark wall collision. Legacy recordings never pass through the versioned Fireball handler.
 
 Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspector output uses the current radius and reports its maximum separately. Pool telemetry exposes cumulative wall bounces, ground bounces, and collision-safety discards without copying particle impacts into the main contact history.
 
@@ -112,7 +128,7 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 `src/sim` has no DOM, Canvas, or Three.js dependencies. Browser input and probe mutations become commands consumed at fixed-tick boundaries. Canvas2D, Three.js, and DOM panels consume copied JSON-safe snapshots and do not mutate simulation state.
 
-The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
+The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. Spell probes are `listSpells()`, `getSpellDefinition(id)`, `applySpellDefinition(id, definition, expectedRevision?)`, `castSpell(id, x, z, options?)`, `clearSpellEffects(id)`, and `spellDiagnostics(id)`. Invalid definitions and probe arguments return structured errors rather than being clamped. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
 
 `window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation and TrueSight timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears runtime, presentation, and TrueSight timing histories. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts the lighting flags plus `trueSight`, `sightFade`, and `sightDebug` without adding simulation commands.
 

@@ -1,6 +1,7 @@
 // @ts-check
 
 import { InputController } from "./browser/input.js";
+import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
 import { createPresentation } from "./presentation/factory.js";
@@ -61,6 +62,7 @@ let editorTool = "wall";
 let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
+let spellLab;
 let performanceCapture;
 
 function presentationDiagnostics() {
@@ -123,6 +125,7 @@ const runtime = new FixedStepRuntime({
       pinnedHidden,
       mode,
     }, currentPresentationDiagnostics);
+    spellLab?.update(snapshot);
     renderLab.update(currentPresentationDiagnostics, metrics);
     performanceCapture?.observe(
       snapshot,
@@ -231,6 +234,14 @@ function editAt(tool, button, x, z) {
   }
 }
 
+spellLab = new SpellLab({
+  listSpells: () => simulation.listSpells(),
+  getDefinition: (id) => simulation.getSpellDefinition(id),
+  inject: injectMutation,
+  diagnostics: (id) => simulation.spellDiagnostics(id),
+  announce: (message) => ui.announce(message),
+});
+
 input = new InputController(canvas, camera, {
   inject: injectMutation,
   togglePause,
@@ -240,6 +251,7 @@ input = new InputController(canvas, camera, {
   focusPlayer: () => camera.focus(simulation.player.x, simulation.player.z),
   pinAt,
   editAt,
+  createCast: (x, z) => spellLab.createCast(x, z),
 });
 
 /** @param {string} id @param {()=>void} handler */
@@ -414,6 +426,165 @@ const probe = Object.freeze({
   },
   exportCommandLog() {
     return simulation.exportCommandLog();
+  },
+  listSpells() {
+    return simulation.listSpells();
+  },
+  getSpellDefinition(id) {
+    return simulation.getSpellDefinition(String(id));
+  },
+  applySpellDefinition(id, definition, expectedRevision) {
+    const spellId = String(id);
+    const before = simulation.getSpellDefinition(spellId);
+    const validation = simulation.validateSpellDefinition(
+      spellId,
+      definition,
+      expectedRevision === undefined ? undefined : Number(expectedRevision),
+    );
+    if (!validation.ok) {
+      return {
+        ok: false,
+        spellId,
+        queued: false,
+        errors: validation.errors,
+      };
+    }
+    const requestedRevision = expectedRevision === undefined
+      ? before?.revision
+      : Number(expectedRevision);
+    const consumedImmediately = runtime.paused;
+    const accepted = injectMutation({
+      type: "applySpellDefinition",
+      spellId,
+      expectedRevision,
+      definition,
+    });
+    const after = simulation.getSpellDefinition(spellId);
+    const applied = Boolean(
+      accepted
+      && consumedImmediately
+      && before
+      && after
+      && after.revision === before.revision + 1,
+    );
+    const immediateErrors = consumedImmediately
+      && simulation.lastSpellResult?.ok === false
+      ? simulation.lastSpellResult.errors
+      : [];
+    return {
+      ok: accepted && immediateErrors.length === 0,
+      spellId,
+      queued: accepted && !consumedImmediately,
+      applied,
+      revision: applied ? after?.revision ?? null : null,
+      expectedRevision: requestedRevision,
+      nextRevision: applied
+        ? after?.revision ?? null
+        : before
+          ? before.revision + 1
+          : null,
+      errors: immediateErrors.length > 0
+        ? immediateErrors
+        : !accepted
+          ? [{
+            path: "",
+            code: "command_queue",
+            message: "Runtime command queue is full",
+          }]
+          : [],
+    };
+  },
+  castSpell(id, x, z, options = {}) {
+    const spellId = String(id);
+    if (!simulation.getSpellDefinition(spellId)) {
+      return {
+        ok: false,
+        queued: false,
+        errors: [{
+          path: "spellId",
+          code: "unknown_spell",
+          message: `Unknown spell "${spellId}"`,
+        }],
+      };
+    }
+    const castX = Number(x);
+    const castZ = Number(z);
+    if (!Number.isFinite(castX) || !Number.isFinite(castZ)) {
+      return {
+        ok: false,
+        queued: false,
+        errors: [{
+          path: "cast",
+          code: "finite_number",
+          message: "Cast x and z must be finite",
+        }],
+      };
+    }
+    const cast = { x: castX, z: castZ, spellId };
+    if (options && Object.hasOwn(options, "variationSeed")) {
+      const seed = options.variationSeed;
+      if (
+        typeof seed !== "number"
+        || !Number.isInteger(seed)
+        || seed < 0
+        || seed > 0xffff_ffff
+      ) {
+        return {
+          ok: false,
+          queued: false,
+          errors: [{
+            path: "options.variationSeed",
+            code: "uint32",
+            message: "variationSeed must be a uint32",
+          }],
+        };
+      }
+      Object.assign(cast, { variationSeed: seed >>> 0 });
+    }
+    const accepted = injectMutation({ cast });
+    return {
+      ok: accepted,
+      queued: accepted,
+      spellId,
+      cast,
+      errors: accepted
+        ? []
+        : [{
+          path: "",
+          code: "command_queue",
+          message: "Runtime command queue is full",
+        }],
+    };
+  },
+  clearSpellEffects(id) {
+    const spellId = String(id);
+    if (!simulation.getSpellDefinition(spellId)) {
+      return {
+        ok: false,
+        queued: false,
+        errors: [{
+          path: "spellId",
+          code: "unknown_spell",
+          message: `Unknown spell "${spellId}"`,
+        }],
+      };
+    }
+    const accepted = injectMutation({ type: "clearSpellEffects", spellId });
+    return {
+      ok: accepted,
+      queued: accepted,
+      spellId,
+      errors: accepted
+        ? []
+        : [{
+          path: "",
+          code: "command_queue",
+          message: "Runtime command queue is full",
+        }],
+    };
+  },
+  spellDiagnostics(id) {
+    return simulation.spellDiagnostics(String(id));
   },
   setDebugFlag(name, value) {
     if (!Object.hasOwn(simulation.debugFlags, String(name))) return false;

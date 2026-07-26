@@ -7,7 +7,7 @@ import * as THREE from "three/webgpu";
  * @param {THREE.Material} material
  * @param {number} capacity
  * @param {string} name
- * @param {{instanceColors?:boolean}} [options]
+ * @param {{instanceColors?:boolean,instanceEmissive?:boolean}} [options]
  */
 export function createDynamicInstancedPool(
   geometry,
@@ -30,6 +30,14 @@ export function createDynamicInstancedPool(
     mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
   }
   mesh.userData.capacity = capacity;
+  if (options.instanceEmissive) {
+    const emissive = new THREE.InstancedBufferAttribute(
+      new Float32Array(count * 3),
+      3,
+    );
+    emissive.setUsage(THREE.DynamicDrawUsage);
+    mesh.userData.instanceEmissive = emissive;
+  }
   return mesh;
 }
 
@@ -46,7 +54,7 @@ function markActiveRange(attribute, scalarCount) {
  *
  * @param {THREE.InstancedMesh} mesh
  * @param {number} activeCount
- * @param {{instanceColors?:boolean,deferCountGrowth?:boolean}} [options]
+ * @param {{instanceColors?:boolean,instanceEmissive?:boolean,deferCountGrowth?:boolean}} [options]
  */
 export function publishInstancedPool(mesh, activeCount, options = {}) {
   const capacity = Math.max(0, Math.trunc(Number(mesh.userData.capacity)));
@@ -69,6 +77,12 @@ export function publishInstancedPool(mesh, activeCount, options = {}) {
   if (options.instanceColors && mesh.instanceColor) {
     markActiveRange(mesh.instanceColor, count * mesh.instanceColor.itemSize);
   }
+  if (options.instanceEmissive && mesh.userData.instanceEmissive) {
+    markActiveRange(
+      mesh.userData.instanceEmissive,
+      count * mesh.userData.instanceEmissive.itemSize,
+    );
+  }
   mesh.visible = true;
 
   if (state) {
@@ -86,6 +100,27 @@ export function publishInstancedPool(mesh, activeCount, options = {}) {
   }
 
   mesh.count = count;
+}
+
+/**
+ * Writes one preallocated emissive RGB value without replacing its backing
+ * attribute or changing renderer topology.
+ *
+ * @param {THREE.InstancedMesh} mesh
+ * @param {number} index
+ * @param {{r:number,g:number,b:number}} color
+ * @param {number} strength
+ */
+export function setInstancedEmissiveAt(mesh, index, color, strength) {
+  const attribute = mesh.userData.instanceEmissive;
+  if (!attribute || index < 0 || index >= attribute.count) return false;
+  attribute.setXYZ(
+    index,
+    Number(color.r) * strength,
+    Number(color.g) * strength,
+    Number(color.b) * strength,
+  );
+  return true;
 }
 
 /**

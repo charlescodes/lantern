@@ -35,7 +35,12 @@ export class CanvasPresentation {
   /** @param {any} snapshot @param {number} alpha @param {any} view */
   render(snapshot, alpha, view) {
     const started = performance.now();
-    this.renderer.render(snapshot, alpha, view);
+    this.renderer.render(
+      snapshot,
+      alpha,
+      view,
+      this.flags.values.lightColorVariation,
+    );
     const finished = performance.now();
     const submitMs = finished - started;
     this.profiler.record({

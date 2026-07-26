@@ -76,7 +76,7 @@ test("contact-heavy command recording replays to identical current-build state",
 
   const recording = simulation.exportCommandLog();
   const replayed = Simulation.replay(recording);
-  assert.equal(recording.schemaVersion, 4);
+  assert.equal(recording.schemaVersion, 5);
   assert.ok(contactTicks >= 120, `expected sustained contact, received ${contactTicks} ticks`);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
@@ -111,15 +111,21 @@ test("snapshots and exported recordings cannot mutate simulation history", () =>
   const snapshot = simulation.snapshot();
   const originalEventX = simulation.impactEvents.toArray()[0].x;
   snapshot.recentEvents[0].x = -999;
+  snapshot.spells[0].revisions[0].definition.projectile.speed = -999;
   const recording = simulation.exportCommandLog();
   recording.initialMap.cells[0] = 0;
   recording.commands[0].command.move.x = -999;
+  recording.configuration.spells[0].definition.projectile.speed = -999;
   assert.equal(simulation.impactEvents.toArray()[0].x, originalEventX);
+  assert.equal(
+    simulation.getSpellDefinition("fireball").definition.projectile.speed,
+    9,
+  );
   assert.equal(simulation.commandLogMap.cells[0], 1);
   assert.equal(simulation.commandLog.toArray()[0].command.move.x, 5);
 });
 
-test("snapshot, runtime, and recording schema are v4 while scenarios remain v2", () => {
+test("snapshot, runtime, and recording schema are v5 while scenarios remain v2", () => {
   const simulation = new Simulation({
     particleBounce: false,
     particleWallCollision: false,
@@ -127,12 +133,15 @@ test("snapshot, runtime, and recording schema are v4 while scenarios remain v2",
   const runtime = new FixedStepRuntime({ simulation });
   const snapshot = simulation.snapshot();
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 4);
-  assert.equal(snapshot.schemaVersion, 4);
-  assert.equal(runtime.metrics().schemaVersion, 4);
+  assert.equal(SCHEMA_VERSION, 5);
+  assert.equal(snapshot.schemaVersion, 5);
+  assert.equal(runtime.metrics().schemaVersion, 5);
   assert.deepEqual(Object.keys(runtime.metrics().snapshotMs), ["p50", "p95", "p99"]);
   assert.ok(runtime.metrics().snapshotMs.p99 >= 0);
-  assert.equal(recording.schemaVersion, 4);
+  assert.equal(recording.schemaVersion, 5);
+  assert.equal(recording.configuration.spells.length, 1);
+  assert.equal(recording.configuration.spells[0].id, "fireball");
+  assert.equal(recording.configuration.spells[0].currentRevision, 1);
   assert.equal(snapshot.particleProfile, PARTICLE_PROFILE_M0_2_5);
   assert.equal(snapshot.scenarioVersion, 2);
   assert.equal(recording.initialScenario.version, 2);
@@ -155,6 +164,8 @@ test("schema-4 recordings capture initial particle profile and collision modes",
     ],
   });
   const recording = simulation.exportCommandLog();
+  recording.schemaVersion = 4;
+  delete recording.configuration.spells;
   assert.equal(recording.configuration.particleProfile, PARTICLE_PROFILE_M02);
   assert.equal(recording.configuration.particleBounce, true);
   assert.equal(recording.configuration.particleWallCollision, true);
@@ -166,9 +177,14 @@ test("schema-4 recordings capture initial particle profile and collision modes",
 });
 
 test("schema-4 recordings normalize the temporary m0.25 profile spelling", () => {
-  const simulation = new Simulation({ particleBurstCount: 4 });
+  const simulation = new Simulation({
+    particleBurstCount: 4,
+    legacyFireballMode: true,
+  });
   simulation.tick({ cast: { x: 11.5, z: 19.5 } });
   const recording = simulation.exportCommandLog();
+  recording.schemaVersion = 4;
+  delete recording.configuration.spells;
   recording.configuration.particleProfile = "m0.25-balanced";
 
   const replayed = Simulation.replay(recording);

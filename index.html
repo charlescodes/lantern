@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#101511">
-    <title>Lantern 0.4.0 · Blast Lab</title>
+    <title>Lantern 0.5.0 · Spell Lab</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="importmap">
       {
@@ -22,8 +22,8 @@
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="eyebrow">Project Lantern / 0.4.0</p>
-          <h1>Blast Lab</h1>
+          <p class="eyebrow">Project Lantern / 0.5.0</p>
+          <h1>Spell Lab</h1>
         </div>
       </div>
       <div class="run-summary" aria-label="Simulation status">
@@ -37,6 +37,7 @@
         <button id="reset-button" type="button">Reset</button>
         <button id="mode-button" class="accent-button" type="button">Enter edit</button>
         <button id="focus-button" type="button">Focus</button>
+        <button id="spell-lab-open" type="button" hidden>Spell Lab</button>
         <button id="render-lab-button" type="button" data-render-lab>Render Lab</button>
       </nav>
     </header>
@@ -44,6 +45,91 @@
     <main class="workspace">
       <section id="arena-viewport" class="arena-shell" aria-label="Lantern simulation viewport">
         <canvas id="arena" tabindex="0"></canvas>
+        <aside
+          id="spell-lab"
+          class="spell-lab"
+          data-collapsed="false"
+          aria-label="Spell Lab authoring panel"
+        >
+          <header class="spell-lab-heading">
+            <div>
+              <p class="eyebrow">Live definition authoring</p>
+              <h2>Spell Lab</h2>
+            </div>
+            <button
+              id="spell-lab-toggle"
+              type="button"
+              aria-expanded="true"
+              aria-controls="spell-lab-body"
+            >Collapse</button>
+          </header>
+          <div id="spell-lab-body" class="spell-lab-body">
+            <div class="spell-lab-selector">
+              <label for="spell-selector">Spell</label>
+              <select id="spell-selector"></select>
+              <output id="spell-lab-status" data-valid="true" data-dirty="false">
+                r1 · draft matches applied · valid
+              </output>
+            </div>
+
+            <div class="spell-cast-controls">
+              <button id="spell-recast" type="button" disabled>Recast last target</button>
+              <label class="spell-seed-lock">
+                <input id="spell-lock-seed" type="checkbox">
+                Lock seed
+              </label>
+              <label class="spell-seed-field">
+                Seed
+                <input
+                  id="spell-seed"
+                  type="text"
+                  value="0x00000000"
+                  maxlength="10"
+                  spellcheck="false"
+                  inputmode="text"
+                  aria-label="Hexadecimal variation seed"
+                >
+              </label>
+              <button id="spell-new-variation" type="button">New variation</button>
+              <button id="spell-clear" type="button">Clear active effects</button>
+            </div>
+
+            <p class="spell-formula">
+              lifetime = clamp(base + size-scale × normalized-size +
+              (lifetime-lane − 0.5) × jitter, minimum, maximum)<br>
+              vertical velocity = minimum + range × vertical-lane<sup>power</sup>
+            </p>
+
+            <div id="spell-controls"></div>
+
+            <pre id="spell-validation" class="spell-validation">
+              Complete document valid. Apply affects future casts only.
+            </pre>
+
+            <div class="spell-lab-actions">
+              <button id="spell-apply" class="accent-button" type="button">Apply</button>
+              <button id="spell-revert" type="button">Revert to applied</button>
+              <button id="spell-reset-defaults" type="button">Reset draft to defaults</button>
+              <button id="spell-copy" type="button">Copy JSON</button>
+              <button id="spell-download" type="button">Download JSON</button>
+              <button id="spell-import" type="button">Import JSON</button>
+              <input
+                id="spell-import-input"
+                type="file"
+                accept="application/json,.json"
+                hidden
+              >
+            </div>
+
+            <section class="spell-diagnostics">
+              <div class="section-heading">
+                <h2>Spell diagnostics</h2>
+                <span>captured revision truth</span>
+              </div>
+              <pre id="spell-lab-diagnostics">Waiting for the first fixed tick…</pre>
+            </section>
+          </div>
+        </aside>
         <div class="editor-palette" aria-label="Scenario authoring tools">
           <span>AUTHOR</span>
           <button type="button" data-editor-tool="wall" aria-pressed="true">Wall</button>
@@ -188,7 +274,7 @@
               <input type="checkbox" data-presentation-option="dynamicLights"> Dynamic lights
             </label>
             <label class="render-check">
-              <input type="checkbox" data-presentation-option="lightColorVariation"> Color variation
+              <input type="checkbox" data-presentation-option="lightColorVariation"> Spell color variation
             </label>
             <label class="render-check">
               <input type="checkbox" data-presentation-option="bloom"> Bloom
