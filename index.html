@@ -38,6 +38,7 @@
         <button id="mode-button" class="accent-button" type="button">Enter edit</button>
         <button id="focus-button" type="button">Focus</button>
         <button id="spell-lab-open" type="button" hidden>Spell Lab</button>
+        <button id="ai-view-open" type="button" aria-expanded="false" aria-controls="ai-view-panel">AI View</button>
         <button id="render-lab-button" type="button" data-render-lab>Render Lab</button>
       </nav>
     </header>
@@ -45,6 +46,7 @@
     <main class="workspace">
       <section id="arena-viewport" class="arena-shell" aria-label="Lantern simulation viewport">
         <canvas id="arena" tabindex="0"></canvas>
+        <canvas id="ai-view-overlay" aria-hidden="true" hidden></canvas>
         <div id="defeat-overlay" class="defeat-overlay" role="status" hidden>
           <strong>DEFEATED</strong>
           <span id="defeat-countdown">Restarting this seed in 1.5s</span>
@@ -131,6 +133,53 @@
                 <span>captured revision truth</span>
               </div>
               <pre id="spell-lab-diagnostics">Waiting for the first fixed tick…</pre>
+            </section>
+          </div>
+        </aside>
+        <aside
+          id="ai-view-panel"
+          class="ai-view-panel"
+          aria-label="AI View diagnostics panel"
+          hidden
+        >
+          <header class="ai-view-heading">
+            <div>
+              <p class="eyebrow">Read-only presentation</p>
+              <h2>AI View</h2>
+            </div>
+            <button id="ai-view-close" type="button">Close</button>
+          </header>
+          <div class="ai-view-body">
+            <fieldset class="ai-view-modes">
+              <legend>Draw diagnostics</legend>
+              <label><input type="radio" name="ai-view-mode" value="off" checked> Off</label>
+              <label><input type="radio" name="ai-view-mode" value="selected"> Selected mob</label>
+              <label><input type="radio" name="ai-view-mode" value="all"> All mobs</label>
+            </fieldset>
+            <label class="ai-view-selector" for="ai-view-mob">
+              Selected mob
+              <select id="ai-view-mob" disabled>
+                <option value="">No living AI mobs</option>
+              </select>
+            </label>
+            <output id="ai-view-status" class="ai-view-status" data-mode="off">
+              View off · AI remains active
+            </output>
+            <p class="ai-view-note">
+              This view never toggles mob AI. Diagnostics intentionally remain visible
+              through TrueSight so hidden decisions can be inspected.
+            </p>
+            <section class="ai-view-diagnostics">
+              <div class="section-heading">
+                <h2>Selected mob</h2>
+                <span>schema-v7 truth</span>
+              </div>
+              <pre id="ai-view-details">Waiting for a living AI mob. Selection is read-only.</pre>
+            </section>
+            <section class="ai-view-legend">
+              <div class="section-heading"><h2>Overlay</h2><span>world-space vectors</span></div>
+              <p><i data-ai-color="goal"></i>movement goal <i data-ai-color="aim"></i>predicted aim</p>
+              <p><i data-ai-color="sight"></i>line of sight <i data-ai-color="threat"></i>tracked threat / dodge</p>
             </section>
           </div>
         </aside>

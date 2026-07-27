@@ -1,6 +1,7 @@
 // @ts-check
 
 import { InputController } from "./browser/input.js";
+import { AiView } from "./browser/ai_view.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
@@ -63,6 +64,7 @@ let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
 let spellLab;
+let aiView;
 let performanceCapture;
 
 function presentationDiagnostics() {
@@ -120,6 +122,7 @@ const runtime = new FixedStepRuntime({
         : true,
       sightFrame,
     });
+    aiView?.update(snapshot, alpha, sightFrame);
     const currentPresentationDiagnostics = presentationDiagnostics();
     ui.update(snapshot, metrics, {
       mouseWorld: input.mouseWorld,
@@ -223,6 +226,7 @@ function pinAt(x, z) {
     ui.announce("Inspector unpinned");
   } else {
     pinned = { kind: entity.kind, id: entity.id };
+    aiView?.selectMob(entity.kind, entity.id);
     ui.announce(`Pinned ${entity.kind} ${entity.id}`);
   }
 }
@@ -257,6 +261,12 @@ spellLab = new SpellLab({
   getDefinition: (id) => simulation.getSpellDefinition(id),
   inject: injectMutation,
   diagnostics: (id) => simulation.spellDiagnostics(id),
+  announce: (message) => ui.announce(message),
+});
+
+aiView = new AiView({
+  canvas,
+  camera,
   announce: (message) => ui.announce(message),
 });
 
@@ -399,6 +409,13 @@ const probe = Object.freeze({
   },
   enemyDiagnostics(id) {
     return simulation.enemyDiagnostics(id === undefined ? undefined : Number(id));
+  },
+  aiView() {
+    return aiView.snapshot();
+  },
+  setAiView(viewMode, id, kind = "enemyWizard") {
+    if (id !== undefined && !aiView.selectMob(String(kind), id)) return false;
+    return aiView.setMode(viewMode);
   },
   isVisible(x, z, radius = 0) {
     return sightFrame.isCircleVisible(

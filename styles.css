@@ -240,6 +240,18 @@ h1 {
   touch-action: none;
 }
 
+#ai-view-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  pointer-events: none;
+}
+
+#ai-view-overlay[hidden] {
+  display: none;
+}
+
 .defeat-overlay {
   position: absolute;
   inset: 0;
@@ -275,6 +287,7 @@ body[data-mode="edit"] #arena {
 
 .editor-palette {
   position: absolute;
+  z-index: 2;
   top: 14px;
   right: 14px;
   display: none;
@@ -316,6 +329,7 @@ body[data-mode="edit"] .editor-palette {
 
 .viewport-rail {
   position: absolute;
+  z-index: 2;
   right: 10px;
   bottom: 10px;
   left: 10px;
@@ -347,6 +361,7 @@ body[data-mode="edit"] .edit-hint {
 
 .corner-readout {
   position: absolute;
+  z-index: 2;
   top: 14px;
   left: 14px;
   display: grid;
@@ -642,6 +657,176 @@ body[data-mode="edit"] .edit-hint {
   max-height: 180px;
   overflow: auto;
   color: var(--mint);
+}
+
+.ai-view-panel {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 5;
+  width: min(410px, calc(100% - 96px));
+  max-height: calc(100% - 66px);
+  overflow: hidden;
+  border: 1px solid rgba(107, 200, 168, 0.82);
+  border-radius: 4px;
+  background: rgba(10, 16, 13, 0.96);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(12px);
+}
+
+.ai-view-panel[hidden] {
+  display: none;
+}
+
+.ai-view-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 52px;
+  padding: 9px 10px 9px 13px;
+  border-bottom: 1px solid var(--rule);
+  background: rgba(15, 24, 19, 0.98);
+}
+
+.ai-view-heading h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.ai-view-heading button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.ai-view-body {
+  max-height: calc(100vh - 150px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: var(--rule-bright) transparent;
+}
+
+.ai-view-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 11px 12px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.ai-view-modes legend {
+  grid-column: 1 / -1;
+  padding: 0;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ai-view-modes label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.ai-view-modes input {
+  margin: 0;
+  accent-color: var(--mint);
+}
+
+.ai-view-selector {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ai-view-selector select {
+  min-width: 0;
+  width: 100%;
+}
+
+.ai-view-status {
+  display: block;
+  padding: 8px 12px;
+  border-left: 2px solid var(--quiet);
+  background: rgba(100, 113, 104, 0.06);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.ai-view-status:not([data-mode="off"]) {
+  border-left-color: var(--mint);
+  background: rgba(107, 200, 168, 0.07);
+  color: var(--mint);
+}
+
+.ai-view-note {
+  margin: 0;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--rule);
+  color: #c9b881;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.ai-view-diagnostics,
+.ai-view-legend {
+  padding: 11px 12px 13px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.ai-view-diagnostics pre {
+  max-height: 260px;
+  overflow: auto;
+  color: var(--mint);
+}
+
+.ai-view-legend p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.ai-view-legend i {
+  width: 15px;
+  height: 2px;
+  background: var(--ink);
+}
+
+.ai-view-legend i[data-ai-color="goal"] {
+  background: #62d9d0;
+}
+
+.ai-view-legend i[data-ai-color="aim"] {
+  background: #ffcf6a;
+}
+
+.ai-view-legend i[data-ai-color="sight"] {
+  background: #68d69f;
+}
+
+.ai-view-legend i[data-ai-color="threat"] {
+  background: #ff72bd;
 }
 
 .instrument-panel {
@@ -1021,6 +1206,22 @@ kbd {
 
   .spell-lab-body {
     max-height: calc(58vh - 54px);
+  }
+
+  .ai-view-panel {
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-height: calc(58vh - 16px);
+  }
+
+  .ai-view-body {
+    max-height: calc(58vh - 70px);
+  }
+
+  .ai-view-modes {
+    grid-template-columns: 1fr;
   }
 
   .spell-control {

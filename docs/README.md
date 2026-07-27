@@ -15,6 +15,7 @@ Lantern `0.7.0` is the current application release. Documents are separated by p
 - [0.6.0 Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) — singleton obelisk encounter, bounded enemy wizards, symmetric health/damage, schema-v6 replay, defeat/restart, and presentation parity.
 - [0.6.1 health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) — keeps Three.js health fills above their dark tracks through normal visibility and TrueSight fading.
 - [0.7.0 Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) — shared bounded navigation, deterministic strafe/intercept/dodge/retreat behavior, schema-v7 diagnostics, and frozen schema-v6 basic replay.
+- [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
 
 ## Open defects
 
