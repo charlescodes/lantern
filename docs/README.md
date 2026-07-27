@@ -16,6 +16,10 @@ Lantern `0.7.0` is the current application release. Documents are separated by p
 - [0.6.1 health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) — keeps Three.js health fills above their dark tracks through normal visibility and TrueSight fading.
 - [0.7.0 Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) — shared bounded navigation, deterministic strafe/intercept/dodge/retreat behavior, schema-v7 diagnostics, and frozen schema-v6 basic replay.
 
+## Open defects
+
+- [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
+
 ## Release and milestone history
 
 | Version | Contract | Scope |
