@@ -1,13 +1,14 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
-export const APPLICATION_VERSION = "0.6.1";
+export const APPLICATION_VERSION = "0.7.0";
 
 export const GAMEPLAY_PROFILE_OBELISK_DUEL = "obelisk-duel-v1";
 export const GAMEPLAY_PROFILE_PRE_COMBAT = "pre-combat-v1";
 export const ENEMY_AI_PROFILE_BASIC = "basic-wizard-v1";
+export const ENEMY_AI_PROFILE_TACTICAL = "tactical-wizard-v1";
 export const ENEMY_AI_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
@@ -62,6 +63,26 @@ export const ENEMY_WIZARD = Object.freeze({
   withdrawInsideMeters: 6,
   shotIntervalTicks: 75,
   spawnIntervalTicks: 1_800,
+});
+
+export const TACTICAL_WIZARD = Object.freeze({
+  navigationCardinalCost: 10,
+  navigationDiagonalCost: 14,
+  navigationExpansionsPerTick: 2_048,
+  strafeSpeed: 3.5,
+  strafeMinimumTicks: 90,
+  strafeMaximumTicks: 180,
+  maximumLeadSeconds: 1.5,
+  leadScale: 0.75,
+  threatMinimumSeconds: 0.25,
+  threatMaximumSeconds: 0.90,
+  threatMinimumDistance: 2,
+  threatPadding: 0.20,
+  dodgeSpeed: 6,
+  dodgeTicks: 18,
+  dodgeCooldownTicks: 105,
+  retreatEnterHealth: 30,
+  retreatExitHealth: 60,
 });
 
 export const PROJECTILE = Object.freeze({

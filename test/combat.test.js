@@ -318,6 +318,12 @@ test("enemy pool swap removal preserves every caster and AI identity field", () 
     "externalVx", "externalVz", "radius", "massKg", "inverseMass", "health",
     "maximumHealth", "damageFreeTicks", "lastDamageTick", "cooldown",
     "castSequence", "shotReadyTick", "aiState", "lineOfSight",
+    "movementGoalKind", "movementGoalX", "movementGoalZ", "movementGoalCx",
+    "movementGoalCz", "navigationCost", "navigationVersion", "strafeDirection",
+    "strafeChangeTick", "strafeDecisionSequence", "predictedAimX", "predictedAimZ",
+    "aimInterceptTime", "aimLeadTime", "trackedThreatEffectId",
+    "trackedThreatProjectileId", "dodgeTicksRemaining", "dodgeCooldownTicks",
+    "dodgeDirectionX", "dodgeDirectionZ", "dodgeSide", "retreating",
   ];
   for (let ordinal = 0; ordinal < components.length; ordinal += 1) {
     pool[components[ordinal]][2] = 100 + ordinal;
@@ -798,7 +804,7 @@ test("player defeat freezes autonomy for 90 ticks then restarts the same seed an
   assert.equal(recording.seed, 0xfeed_0600);
   assert.equal(recording.configuration.spells[0].currentRevision, 3);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
-  assert.equal(recording.configuration.enemyAiProfile, "basic-wizard-v1");
+  assert.equal(recording.configuration.enemyAiProfile, "tactical-wizard-v1");
 });
 
 test("manual reset during defeat ignores movement and casting and leaves a clean tick-zero baseline", () => {
@@ -831,7 +837,7 @@ test("manual reset during defeat ignores movement and casting and leaves a clean
   assert.equal(simulation.commandLog.length, 0);
 });
 
-test("snapshots, queries, diagnostics, ownership, and combat history expose bounded schema-v6 state", () => {
+test("snapshots, queries, diagnostics, ownership, and combat history expose bounded schema-v7 state", () => {
   const simulation = sandboxSimulation();
   const enemyId = spawnEnemy(simulation, 5.5, 4.5, { spawnSequence: 9 });
   for (let tick = 0; tick < 300; tick += 1) {
@@ -849,7 +855,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
     simulation.enemies.health[current] = 100;
   }
   const snapshot = simulation.snapshot();
-  assert.equal(snapshot.schemaVersion, 6);
+  assert.equal(snapshot.schemaVersion, 7);
   assert.equal(snapshot.player.maximumHealth, 100);
   assert.equal(snapshot.enemies[0].maximumHealth, 100);
   assert.equal(snapshot.pools.enemies.capacity, 4);
@@ -876,8 +882,8 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
   assert.equal(diagnostics.encounter.nextSpawnTick, 1);
 });
 
-test("schema-v6 replay is exact and schema-v2 through v5 force frozen pre-combat behavior", () => {
-  const live = new Simulation({ seed: 0x6000_0006, particleBurstCount: 0 });
+test("schema-v7 replay is exact and schema-v2 through v5 force frozen pre-combat behavior", () => {
+  const live = new Simulation({ seed: 0x7000_0007, particleBurstCount: 0 });
   for (let tick = 0; tick < 180; tick += 1) {
     live.tick({
       move: { x: 12.5, z: 12.5 },
@@ -885,9 +891,9 @@ test("schema-v6 replay is exact and schema-v2 through v5 force frozen pre-combat
     });
   }
   const recording = live.exportCommandLog();
-  assert.equal(recording.schemaVersion, 6);
+  assert.equal(recording.schemaVersion, 7);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
-  assert.equal(recording.configuration.enemyAiProfile, "basic-wizard-v1");
+  assert.equal(recording.configuration.enemyAiProfile, "tactical-wizard-v1");
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());
   assert.throws(
     () => Simulation.replay({

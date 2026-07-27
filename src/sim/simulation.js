@@ -8,6 +8,7 @@ import {
   DYNAMIC_PHYSICS,
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_NONE,
+  ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
   EXPLOSION,
   GAMEPLAY_PROFILE_OBELISK_DUEL,
@@ -26,6 +27,7 @@ import {
   SCHEMA_VERSION,
   SCENARIO_VERSION,
   SIMULATION,
+  TACTICAL_WIZARD,
 } from "../config.js";
 import { RingBuffer } from "../core/ring_buffer.js";
 import { normalizeSeed, SeededRng } from "../core/rng.js";
@@ -58,6 +60,10 @@ import { resolvePlayerDynamicBodyVelocity } from "./dynamic_body_velocity.js";
 import { computeExplosionResponse } from "./explosion.js";
 import { GridMap } from "./grid_map.js";
 import {
+  NAVIGATION_UNREACHABLE,
+  SharedNavigationField,
+} from "./navigation_field.js";
+import {
   EnemyWizardPool,
   ParticlePool,
   ProjectilePool,
@@ -68,6 +74,12 @@ import {
   createDebugArenaScenario,
   getRockArchetype,
 } from "./scenario.js";
+import {
+  chooseDodgeDirection,
+  hostileThreatMetrics,
+  predictSoftenedIntercept,
+  strafeDecision,
+} from "./tactical_wizard.js";
 
 const TAU = Math.PI * 2;
 const CONTACT_CAPACITY = 256;
@@ -80,7 +92,28 @@ const CONTACT_BODY = 2;
 const ENEMY_AI_HOLD = 0;
 const ENEMY_AI_APPROACH = 1;
 const ENEMY_AI_WITHDRAW = 2;
-const ENEMY_AI_STATE_NAMES = Object.freeze(["hold", "approach", "withdraw"]);
+const ENEMY_AI_RETREAT = 3;
+const ENEMY_AI_DODGE = 4;
+const ENEMY_AI_STATE_NAMES_BASIC = Object.freeze(["hold", "approach", "withdraw"]);
+const ENEMY_AI_STATE_NAMES_TACTICAL = Object.freeze([
+  "engage",
+  "approach",
+  "withdraw",
+  "retreat",
+  "dodge",
+]);
+const ENEMY_GOAL_NONE = 0;
+const ENEMY_GOAL_DIRECT = 1;
+const ENEMY_GOAL_NAVIGATION = 2;
+const ENEMY_GOAL_STRAFE = 3;
+const ENEMY_GOAL_DODGE = 4;
+const ENEMY_GOAL_NAMES = Object.freeze([
+  "none",
+  "direct",
+  "navigation",
+  "strafe",
+  "dodge",
+]);
 const SPAWN_OFFSETS = Object.freeze([
   Object.freeze({ x: 0, z: -1, name: "north" }),
   Object.freeze({ x: 1, z: 0, name: "east" }),
@@ -382,10 +415,11 @@ export class Simulation {
     }
     this.enemyAiProfile = options.enemyAiProfile
       ?? (this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
-        ? ENEMY_AI_PROFILE_BASIC
+        ? ENEMY_AI_PROFILE_TACTICAL
         : ENEMY_AI_PROFILE_NONE);
     if (
       this.enemyAiProfile !== ENEMY_AI_PROFILE_BASIC
+      && this.enemyAiProfile !== ENEMY_AI_PROFILE_TACTICAL
       && this.enemyAiProfile !== ENEMY_AI_PROFILE_NONE
     ) {
       throw new RangeError(`Unsupported enemy AI profile: ${this.enemyAiProfile}`);
@@ -393,7 +427,10 @@ export class Simulation {
     if (!(
       (
         this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
-        && this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+        && (
+          this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+          || this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+        )
       ) || (
         this.gameplayProfile === GAMEPLAY_PROFILE_PRE_COMBAT
         && this.enemyAiProfile === ENEMY_AI_PROFILE_NONE
@@ -410,6 +447,8 @@ export class Simulation {
     }
     this.rocks = new RockPool(rockCapacity);
     this.enemies = new EnemyWizardPool(ENEMY_WIZARD.capacity);
+    this.mapRevision = 1;
+    this.navigationField = new SharedNavigationField(this.map);
     this.projectiles = new ProjectilePool(options.projectileCapacity ?? PROJECTILE.capacity);
     this.particles = new ParticlePool(options.particleCapacity ?? PARTICLE.capacity);
     this.particleBurstCount = options.particleBurstCount ?? PARTICLE.burstCount;
@@ -554,6 +593,7 @@ export class Simulation {
     this.rng.reset(this.seed);
     this.tickCount = 0;
     this.nextExplosionId = 1;
+    this.mapRevision = 1;
     this.#restoreAuthoredState();
     this.impactEvents.clear();
     this.combatEvents.clear();
@@ -582,6 +622,7 @@ export class Simulation {
     this.particles.reset();
     this.rocks.reset();
     this.enemies.reset();
+    this.navigationField.reset(this.map);
     this.spellCooldowns.fill(0);
     this.castSequences.fill(0);
     this.nextEffectId = 1;
@@ -609,7 +650,10 @@ export class Simulation {
     this.defeatedTicksRemaining = 0;
     Object.assign(this.encounter, {
       enabled: this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
-        && this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+        && (
+          this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+          || this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+        )
         && Boolean(this.scenario.obelisk),
       nextSpawnTick: this.tickCount + 1,
       spawnCursor: 0,
@@ -651,8 +695,9 @@ export class Simulation {
     }
     const simulationTick = this.tickCount + 1;
     this.#encounterSystem(simulationTick);
+    this.#navigationSystem();
     this.#prepareMovement(command.move, SIMULATION.dt);
-    this.#prepareEnemyMovement(SIMULATION.dt);
+    this.#prepareEnemyMovement(SIMULATION.dt, simulationTick);
     this.#bodyPhysicsSystem(SIMULATION.dt);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
@@ -722,6 +767,7 @@ export class Simulation {
           }
           this.scenario = loadedScenario;
           this.map = loadedScenario.map;
+          this.mapRevision += 1;
           this.#restoreAuthoredState();
           this.impactEvents.clear();
           this.combatEvents.clear();
@@ -791,7 +837,10 @@ export class Simulation {
     if (!this.map.inBounds(cx, cz)) return false;
     const previous = this.map.get(cx, cz);
     if (!this.scenario.setTile(cx, cz, tile)) return false;
-    if (tile !== 1) return true;
+    if (tile !== 1) {
+      if (previous !== tile) this.mapRevision += 1;
+      return true;
+    }
     if (
       firstSolidContact(
         this.map,
@@ -832,6 +881,7 @@ export class Simulation {
         return false;
       }
     }
+    if (previous !== tile) this.mapRevision += 1;
     return true;
   }
 
@@ -942,8 +992,312 @@ export class Simulation {
     return true;
   }
 
+  #navigationSystem() {
+    if (this.enemyAiProfile !== ENEMY_AI_PROFILE_TACTICAL) return;
+    this.navigationField.update(
+      this.map,
+      this.mapRevision,
+      Math.floor(this.player.x),
+      Math.floor(this.player.z),
+      TACTICAL_WIZARD.navigationExpansionsPerTick,
+    );
+  }
+
+  /** @param {number} index @param {number} kind @param {number} x @param {number} z @param {number} [cx] @param {number} [cz] */
+  #setEnemyMovementGoal(index, kind, x, z, cx = -1, cz = -1) {
+    const pool = this.enemies;
+    pool.movementGoalKind[index] = kind;
+    pool.movementGoalX[index] = x;
+    pool.movementGoalZ[index] = z;
+    pool.movementGoalCx[index] = cx;
+    pool.movementGoalCz[index] = cz;
+  }
+
+  /** @param {number} index */
+  #clearEnemyMovementGoal(index) {
+    this.#setEnemyMovementGoal(index, ENEMY_GOAL_NONE, Number.NaN, Number.NaN);
+  }
+
+  /** @param {number} index @param {number} desiredVx @param {number} desiredVz @param {number} dt @param {boolean} [immediate] */
+  #applyEnemyDesiredVelocity(index, desiredVx, desiredVz, dt, immediate = false) {
+    const pool = this.enemies;
+    pool.desiredVx[index] = desiredVx;
+    pool.desiredVz[index] = desiredVz;
+    if (immediate) {
+      pool.locomotionVx[index] = desiredVx;
+      pool.locomotionVz[index] = desiredVz;
+      return;
+    }
+    const deltaVx = desiredVx - pool.locomotionVx[index];
+    const deltaVz = desiredVz - pool.locomotionVz[index];
+    const deltaLength = Math.hypot(deltaVx, deltaVz);
+    const rate = Math.hypot(desiredVx, desiredVz) <= 1e-9
+      ? ENEMY_WIZARD.braking
+      : ENEMY_WIZARD.acceleration;
+    const maximumDelta = rate * dt;
+    if (deltaLength <= maximumDelta || deltaLength <= 1e-9) {
+      pool.locomotionVx[index] = desiredVx;
+      pool.locomotionVz[index] = desiredVz;
+    } else {
+      pool.locomotionVx[index] += (deltaVx / deltaLength) * maximumDelta;
+      pool.locomotionVz[index] += (deltaVz / deltaLength) * maximumDelta;
+    }
+  }
+
+  /** @param {number} index @param {number} dx @param {number} dz @param {number} speed @param {number} dt @param {boolean} [immediate] */
+  #moveEnemyAlong(index, dx, dz, speed, dt, immediate = false) {
+    const length = Math.hypot(dx, dz);
+    if (length <= 1e-9) {
+      this.#applyEnemyDesiredVelocity(index, 0, 0, dt, immediate);
+      return;
+    }
+    this.#applyEnemyDesiredVelocity(
+      index,
+      (dx / length) * speed,
+      (dz / length) * speed,
+      dt,
+      immediate,
+    );
+  }
+
+  /** @param {number} index @param {number} simulationTick */
+  #advanceEnemyStrafeDecision(index, simulationTick) {
+    const pool = this.enemies;
+    if (pool.strafeDirection[index] === 0) {
+      const decision = strafeDecision(this.seed, pool.spawnSequence[index], 0);
+      pool.strafeDirection[index] = decision.direction;
+      pool.strafeDecisionSequence[index] = 0;
+      pool.strafeChangeTick[index] = pool.spawnTick[index] + decision.durationTicks;
+    }
+    while (simulationTick >= pool.strafeChangeTick[index]) {
+      const sequence = pool.strafeDecisionSequence[index] + 1;
+      const decision = strafeDecision(this.seed, pool.spawnSequence[index], sequence);
+      pool.strafeDirection[index] = -pool.strafeDirection[index];
+      pool.strafeDecisionSequence[index] = sequence;
+      pool.strafeChangeTick[index] += decision.durationTicks;
+    }
+  }
+
+  /** @param {number} index */
+  #selectEnemyThreat(index) {
+    const pool = this.enemies;
+    let bestIndex = -1;
+    let bestMetrics = null;
+    for (let projectileIndex = 0; projectileIndex < this.projectiles.activeCount; projectileIndex += 1) {
+      if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player) continue;
+      const metrics = hostileThreatMetrics({
+        x: pool.x[index],
+        z: pool.z[index],
+        vx: pool.vx[index],
+        vz: pool.vz[index],
+        radius: pool.radius[index],
+      }, {
+        x: this.projectiles.x[projectileIndex],
+        z: this.projectiles.z[projectileIndex],
+        vx: this.projectiles.vx[projectileIndex],
+        vz: this.projectiles.vz[projectileIndex],
+        radius: this.projectiles.radius[projectileIndex],
+        age: this.projectiles.age[projectileIndex],
+        lifetime: this.projectiles.lifetime[projectileIndex],
+      });
+      if (!metrics) continue;
+      if (bestMetrics) {
+        const later = metrics.time > bestMetrics.time + 1e-9;
+        const sameTime = Math.abs(metrics.time - bestMetrics.time) <= 1e-9;
+        const widerMiss = metrics.missDistance > bestMetrics.missDistance + 1e-9;
+        const sameMiss = Math.abs(metrics.missDistance - bestMetrics.missDistance) <= 1e-9;
+        const effectId = this.projectiles.effectId[projectileIndex];
+        const bestEffectId = this.projectiles.effectId[bestIndex];
+        const projectileId = this.projectiles.id[projectileIndex];
+        const bestProjectileId = this.projectiles.id[bestIndex];
+        if (
+          later
+          || (sameTime && widerMiss)
+          || (sameTime && sameMiss && effectId > bestEffectId)
+          || (
+            sameTime
+            && sameMiss
+            && effectId === bestEffectId
+            && projectileId >= bestProjectileId
+          )
+        ) {
+          continue;
+        }
+      }
+      bestIndex = projectileIndex;
+      bestMetrics = metrics;
+    }
+    return bestIndex < 0 ? null : { index: bestIndex, metrics: bestMetrics };
+  }
+
+  /** @param {number} index @param {number} dt */
+  #applyEnemyDodge(index, dt) {
+    const pool = this.enemies;
+    pool.aiState[index] = ENEMY_AI_DODGE;
+    const remainingDistance = TACTICAL_WIZARD.dodgeSpeed
+      * pool.dodgeTicksRemaining[index]
+      * dt;
+    this.#setEnemyMovementGoal(
+      index,
+      ENEMY_GOAL_DODGE,
+      pool.x[index] + pool.dodgeDirectionX[index] * remainingDistance,
+      pool.z[index] + pool.dodgeDirectionZ[index] * remainingDistance,
+    );
+    this.#applyEnemyDesiredVelocity(
+      index,
+      pool.dodgeDirectionX[index] * TACTICAL_WIZARD.dodgeSpeed,
+      pool.dodgeDirectionZ[index] * TACTICAL_WIZARD.dodgeSpeed,
+      dt,
+      true,
+    );
+    pool.dodgeTicksRemaining[index] -= 1;
+    if (pool.dodgeTicksRemaining[index] === 0) {
+      pool.dodgeCooldownTicks[index] = TACTICAL_WIZARD.dodgeCooldownTicks;
+    }
+  }
+
+  /** @param {number} index @param {number} dt @param {number} simulationTick */
+  #prepareTacticalEnemyMovement(index, dt, simulationTick) {
+    const pool = this.enemies;
+    this.#advanceEnemyStrafeDecision(index, simulationTick);
+    if (!pool.retreating[index] && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
+      pool.retreating[index] = 1;
+    } else if (
+      pool.retreating[index]
+      && pool.health[index] >= TACTICAL_WIZARD.retreatExitHealth
+    ) {
+      pool.retreating[index] = 0;
+    }
+
+    const cellX = Math.floor(pool.x[index]);
+    const cellZ = Math.floor(pool.z[index]);
+    pool.navigationCost[index] = this.navigationField.rawCostAt(cellX, cellZ);
+    pool.navigationVersion[index] = this.navigationField.completed
+      ? this.navigationField.version
+      : 0;
+
+    if (pool.dodgeTicksRemaining[index] > 0) {
+      this.#applyEnemyDodge(index, dt);
+      return;
+    }
+    const wasCoolingDown = pool.dodgeCooldownTicks[index] > 0;
+    if (wasCoolingDown) pool.dodgeCooldownTicks[index] -= 1;
+    if (!wasCoolingDown) {
+      const threat = this.#selectEnemyThreat(index);
+      if (threat) {
+        const projectileIndex = threat.index;
+        const direction = chooseDodgeDirection(
+          this.map,
+          { x: pool.x[index], z: pool.z[index], radius: pool.radius[index] },
+          {
+            id: this.projectiles.id[projectileIndex],
+            effectId: this.projectiles.effectId[projectileIndex],
+            x: this.projectiles.x[projectileIndex],
+            z: this.projectiles.z[projectileIndex],
+            vx: this.projectiles.vx[projectileIndex],
+            vz: this.projectiles.vz[projectileIndex],
+            radius: this.projectiles.radius[projectileIndex],
+          },
+          threat.metrics,
+          this.seed,
+          pool.spawnSequence[index],
+        );
+        if (direction) {
+          pool.trackedThreatEffectId[index] = this.projectiles.effectId[projectileIndex];
+          pool.trackedThreatProjectileId[index] = this.projectiles.id[projectileIndex];
+          pool.dodgeDirectionX[index] = direction.x;
+          pool.dodgeDirectionZ[index] = direction.z;
+          pool.dodgeSide[index] = direction.code;
+          pool.dodgeTicksRemaining[index] = TACTICAL_WIZARD.dodgeTicks;
+          this.#applyEnemyDodge(index, dt);
+          return;
+        }
+      }
+    }
+    pool.trackedThreatEffectId[index] = 0;
+    pool.trackedThreatProjectileId[index] = 0;
+    pool.dodgeDirectionX[index] = 0;
+    pool.dodgeDirectionZ[index] = 0;
+    pool.dodgeSide[index] = 0;
+
+    const dx = this.player.x - pool.x[index];
+    const dz = this.player.z - pool.z[index];
+    const distance = Math.hypot(dx, dz);
+    let gradientMode = null;
+    let directDx = 0;
+    let directDz = 0;
+    if (pool.retreating[index]) {
+      pool.aiState[index] = ENEMY_AI_RETREAT;
+      gradientMode = "retreat";
+      directDx = -dx;
+      directDz = -dz;
+    } else if (distance > ENEMY_WIZARD.approachBeyondMeters) {
+      pool.aiState[index] = ENEMY_AI_APPROACH;
+      gradientMode = "approach";
+      directDx = dx;
+      directDz = dz;
+    } else if (distance < ENEMY_WIZARD.withdrawInsideMeters) {
+      pool.aiState[index] = ENEMY_AI_WITHDRAW;
+      gradientMode = "retreat";
+      directDx = -dx;
+      directDz = -dz;
+    } else {
+      pool.aiState[index] = ENEMY_AI_HOLD;
+      if (distance <= 1e-9) {
+        this.#clearEnemyMovementGoal(index);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+        return;
+      }
+      const direction = pool.strafeDirection[index];
+      const tangentX = (-dz / distance) * direction;
+      const tangentZ = (dx / distance) * direction;
+      this.#setEnemyMovementGoal(
+        index,
+        ENEMY_GOAL_STRAFE,
+        pool.x[index] + tangentX,
+        pool.z[index] + tangentZ,
+      );
+      this.#applyEnemyDesiredVelocity(
+        index,
+        tangentX * TACTICAL_WIZARD.strafeSpeed,
+        tangentZ * TACTICAL_WIZARD.strafeSpeed,
+        dt,
+      );
+      return;
+    }
+
+    const step = this.navigationField.completed
+      ? this.navigationField.gradientStep(this.map, cellX, cellZ, gradientMode)
+      : null;
+    if (step) {
+      this.#setEnemyMovementGoal(
+        index,
+        ENEMY_GOAL_NAVIGATION,
+        step.x,
+        step.z,
+        step.cx,
+        step.cz,
+      );
+      this.#moveEnemyAlong(
+        index,
+        step.x - pool.x[index],
+        step.z - pool.z[index],
+        ENEMY_WIZARD.desiredSpeed,
+        dt,
+      );
+      return;
+    }
+    this.#setEnemyMovementGoal(
+      index,
+      ENEMY_GOAL_DIRECT,
+      pool.x[index] + directDx,
+      pool.z[index] + directDz,
+    );
+    this.#moveEnemyAlong(index, directDx, directDz, ENEMY_WIZARD.desiredSpeed, dt);
+  }
+
   /** @param {number} dt */
-  #prepareEnemyMovement(dt) {
+  #prepareBasicEnemyMovement(dt) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
       const dx = this.player.x - pool.x[index];
@@ -968,6 +1322,18 @@ export class Simulation {
       pool.aiState[index] = state;
       pool.desiredVx[index] = desiredVx;
       pool.desiredVz[index] = desiredVz;
+      pool.navigationCost[index] = NAVIGATION_UNREACHABLE;
+      pool.navigationVersion[index] = 0;
+      if (state === ENEMY_AI_HOLD) {
+        this.#clearEnemyMovementGoal(index);
+      } else {
+        this.#setEnemyMovementGoal(
+          index,
+          ENEMY_GOAL_DIRECT,
+          pool.x[index] + desiredVx,
+          pool.z[index] + desiredVz,
+        );
+      }
       const deltaVx = desiredVx - pool.locomotionVx[index];
       const deltaVz = desiredVz - pool.locomotionVz[index];
       const deltaLength = Math.hypot(deltaVx, deltaVz);
@@ -985,6 +1351,17 @@ export class Simulation {
     }
   }
 
+  /** @param {number} dt @param {number} simulationTick */
+  #prepareEnemyMovement(dt, simulationTick) {
+    if (this.enemyAiProfile !== ENEMY_AI_PROFILE_TACTICAL) {
+      this.#prepareBasicEnemyMovement(dt);
+      return;
+    }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#prepareTacticalEnemyMovement(index, dt, simulationTick);
+    }
+  }
+
   /** @param {number} simulationTick */
   #enemyCastSystem(simulationTick) {
     const spell = this.spells.get(FIREBALL_SPELL_ID);
@@ -993,6 +1370,30 @@ export class Simulation {
     if (!definition) throw new Error("Current Fireball definition is unavailable");
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      let aimX = this.player.x;
+      let aimZ = this.player.z;
+      let interceptTime = 0;
+      let leadTime = 0;
+      if (this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL) {
+        const prediction = predictSoftenedIntercept({
+          shooterX: pool.x[index],
+          shooterZ: pool.z[index],
+          targetX: this.player.x,
+          targetZ: this.player.z,
+          targetVx: this.player.vx,
+          targetVz: this.player.vz,
+          projectileSpeed: Number(definition.projectile.speed),
+          projectileLifetime: Number(definition.projectile.lifetime),
+        });
+        aimX = prediction.x;
+        aimZ = prediction.z;
+        interceptTime = prediction.interceptTime ?? 0;
+        leadTime = prediction.leadTime;
+      }
+      pool.predictedAimX[index] = aimX;
+      pool.predictedAimZ[index] = aimZ;
+      pool.aimInterceptTime[index] = interceptTime;
+      pool.aimLeadTime[index] = leadTime;
       const blocked = gridRayBlocked(
         this.map,
         pool.x[index],
@@ -1003,14 +1404,18 @@ export class Simulation {
       pool.lineOfSight[index] = blocked ? 0 : 1;
       if (
         pool.health[index] <= 0
+        || (
+          this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+          && Boolean(pool.retreating[index])
+        )
         || simulationTick < pool.shotReadyTick[index]
         || pool.cooldown[index] > 0
         || blocked
       ) {
         continue;
       }
-      const dx = this.player.x - pool.x[index];
-      const dz = this.player.z - pool.z[index];
+      const dx = aimX - pool.x[index];
+      const dz = aimZ - pool.z[index];
       const distance = Math.hypot(dx, dz);
       if (distance <= 1e-5) continue;
       const nx = dx / distance;
@@ -1055,6 +1460,9 @@ export class Simulation {
         effectSeed,
         projectileId,
         target: { kind: "player", id: this.player.id },
+        ...(this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+          ? { aim: { x: aimX, z: aimZ, interceptTime, leadTime } }
+          : {}),
       });
     }
   }
@@ -2977,6 +3385,7 @@ export class Simulation {
       tick: snapshot.tick,
       level: cloneUnknown(snapshot.level),
       encounter: cloneUnknown(snapshot.encounter),
+      navigation: cloneUnknown(snapshot.navigation),
       player: {
         id: snapshot.player.id,
         health: snapshot.player.health,
@@ -2997,10 +3406,119 @@ export class Simulation {
         shotReadyTick: enemy.shotReadyTick,
         ticksUntilShot: enemy.ticksUntilShot,
         aiState: enemy.aiState,
+        behaviorState: enemy.behaviorState,
+        movementGoal: cloneUnknown(enemy.movementGoal),
+        navigationField: cloneUnknown(enemy.navigationField),
+        strafe: cloneUnknown(enemy.strafe),
+        predictedAimPoint: cloneUnknown(enemy.predictedAimPoint),
+        aimLeadTime: enemy.aimLeadTime,
+        trackedThreatEffectId: enemy.trackedThreatEffectId,
+        dodge: cloneUnknown(enemy.dodge),
+        retreating: enemy.retreating,
         lineOfSight: enemy.lineOfSight,
       })),
       recentCombatEvents: snapshot.recentCombatEvents.map(cloneUnknown),
       combatEventMetrics: { ...snapshot.combatEventMetrics },
+    };
+  }
+
+  /** @param {number} index */
+  #enemyBehaviorState(index) {
+    const names = this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+      ? ENEMY_AI_STATE_NAMES_TACTICAL
+      : ENEMY_AI_STATE_NAMES_BASIC;
+    return names[this.enemies.aiState[index]] ?? names[0];
+  }
+
+  /** @param {number} index */
+  #enemyMovementGoal(index) {
+    const kindCode = this.enemies.movementGoalKind[index];
+    const x = this.enemies.movementGoalX[index];
+    const z = this.enemies.movementGoalZ[index];
+    if (
+      kindCode === ENEMY_GOAL_NONE
+      || !Number.isFinite(x)
+      || !Number.isFinite(z)
+    ) {
+      return null;
+    }
+    return {
+      kind: ENEMY_GOAL_NAMES[kindCode] ?? "none",
+      x,
+      z,
+      cell: kindCode === ENEMY_GOAL_NAVIGATION
+        ? {
+          cx: this.enemies.movementGoalCx[index],
+          cz: this.enemies.movementGoalCz[index],
+        }
+        : null,
+    };
+  }
+
+  /** @param {number} index */
+  #enemyTacticalState(index) {
+    const pool = this.enemies;
+    const navigationCost = pool.navigationCost[index];
+    const aimX = pool.predictedAimX[index];
+    const aimZ = pool.predictedAimZ[index];
+    return {
+      behaviorState: this.#enemyBehaviorState(index),
+      movementGoal: this.#enemyMovementGoal(index),
+      navigationField: {
+        cost: navigationCost === NAVIGATION_UNREACHABLE ? null : navigationCost,
+        version: pool.navigationVersion[index],
+      },
+      strafe: {
+        direction: pool.strafeDirection[index] > 0
+          ? "left"
+          : pool.strafeDirection[index] < 0
+            ? "right"
+            : null,
+        directionCode: pool.strafeDirection[index],
+        decisionSequence: pool.strafeDecisionSequence[index],
+        changeTick: pool.strafeChangeTick[index] || null,
+        ticksUntilChange: pool.strafeChangeTick[index]
+          ? Math.max(0, pool.strafeChangeTick[index] - this.tickCount)
+          : null,
+      },
+      predictedAimPoint: Number.isFinite(aimX) && Number.isFinite(aimZ)
+        ? { x: aimX, z: aimZ }
+        : null,
+      aimInterceptTime: pool.aimInterceptTime[index],
+      aimLeadTime: pool.aimLeadTime[index],
+      trackedThreatEffectId: pool.trackedThreatEffectId[index] || null,
+      trackedThreatProjectileId: pool.trackedThreatProjectileId[index] || null,
+      dodge: {
+        ticksRemaining: pool.dodgeTicksRemaining[index],
+        cooldownTicks: pool.dodgeCooldownTicks[index],
+        side: pool.dodgeSide[index] > 0
+          ? "left"
+          : pool.dodgeSide[index] < 0
+            ? "right"
+            : null,
+        direction: pool.dodgeSide[index] === 0
+          ? null
+          : {
+            x: pool.dodgeDirectionX[index],
+            z: pool.dodgeDirectionZ[index],
+          },
+      },
+      retreating: Boolean(pool.retreating[index]),
+    };
+  }
+
+  /** @param {number} [id] */
+  enemyDiagnostics(id) {
+    const snapshot = this.snapshot();
+    const requestedId = id === undefined ? null : Number(id);
+    return {
+      schemaVersion: snapshot.schemaVersion,
+      tick: snapshot.tick,
+      enemyAiProfile: snapshot.enemyAiProfile,
+      navigation: cloneUnknown(snapshot.navigation),
+      enemies: snapshot.enemies
+        .filter((enemy) => requestedId === null || enemy.id === requestedId)
+        .map(cloneUnknown),
     };
   }
 
@@ -3042,6 +3560,7 @@ export class Simulation {
       const health = this.enemies.health[index];
       const maximumHealth = this.enemies.maximumHealth[index];
       const damageFreeTicks = this.enemies.damageFreeTicks[index];
+      const tacticalState = this.#enemyTacticalState(index);
       enemies[index] = {
         kind: "enemyWizard",
         id: this.enemies.id[index],
@@ -3082,7 +3601,8 @@ export class Simulation {
           0,
           this.enemies.shotReadyTick[index] - this.tickCount,
         ),
-        aiState: ENEMY_AI_STATE_NAMES[this.enemies.aiState[index]] ?? "hold",
+        aiState: tacticalState.behaviorState,
+        ...tacticalState,
         lineOfSight: Boolean(this.enemies.lineOfSight[index]),
       };
     }
@@ -3190,6 +3710,14 @@ export class Simulation {
       tick: this.tickCount,
       gameplayProfile: this.gameplayProfile,
       enemyAiProfile: this.enemyAiProfile,
+      navigation: {
+        mapRevision: this.mapRevision,
+        ...this.navigationField.diagnostics(
+          this.mapRevision,
+          Math.floor(this.player.x),
+          Math.floor(this.player.z),
+        ),
+      },
       level: {
         state: this.levelState,
         defeatedTicksRemaining: this.defeatedTicksRemaining,
@@ -3446,6 +3974,7 @@ export class Simulation {
     const health = this.enemies.health[index];
     const maximumHealth = this.enemies.maximumHealth[index];
     const damageFreeTicks = this.enemies.damageFreeTicks[index];
+    const tacticalState = this.#enemyTacticalState(index);
     return {
       kind: "enemyWizard",
       id: this.enemies.id[index],
@@ -3477,7 +4006,8 @@ export class Simulation {
       cooldowns: { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
       castSequence: this.enemies.castSequence[index],
       shotReadyTick: this.enemies.shotReadyTick[index],
-      aiState: ENEMY_AI_STATE_NAMES[this.enemies.aiState[index]] ?? "hold",
+      aiState: tacticalState.behaviorState,
+      ...tacticalState,
       lineOfSight: Boolean(this.enemies.lineOfSight[index]),
       regeneration: {
         delayTicks: COMBAT.regenerationDelayTicks,
@@ -3493,6 +4023,8 @@ export class Simulation {
       flags: {
         coolingDown: this.enemies.cooldown[index] > 0,
         lineOfSight: Boolean(this.enemies.lineOfSight[index]),
+        retreating: tacticalState.retreating,
+        dodging: tacticalState.dodge.ticksRemaining > 0,
       },
     };
   }
@@ -3699,7 +4231,7 @@ export class Simulation {
   /** @param {Record<string, any>} recording */
   static replay(recording) {
     const recordingSchema = Number(recording.schemaVersion);
-    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 6) {
+    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 7) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
     const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
@@ -3720,7 +4252,7 @@ export class Simulation {
     }
     let gameplayProfile = GAMEPLAY_PROFILE_PRE_COMBAT;
     let enemyAiProfile = ENEMY_AI_PROFILE_NONE;
-    if (recordingSchema >= 6) {
+    if (recordingSchema === 6) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
       const validProfiles = (
@@ -3732,6 +4264,19 @@ export class Simulation {
       );
       if (!validProfiles) {
         throw new TypeError("Schema-v6 recording has invalid or missing gameplay profiles");
+      }
+    } else if (recordingSchema >= 7) {
+      gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
+      enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
+      const validProfiles = (
+        gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+      ) || (
+        gameplayProfile === GAMEPLAY_PROFILE_PRE_COMBAT
+        && enemyAiProfile === ENEMY_AI_PROFILE_NONE
+      );
+      if (!validProfiles) {
+        throw new TypeError("Schema-v7 recording has invalid or missing gameplay profiles");
       }
     }
     const simulation = new Simulation({

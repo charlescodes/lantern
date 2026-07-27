@@ -397,6 +397,9 @@ const probe = Object.freeze({
   encounterDiagnostics() {
     return simulation.encounterDiagnostics();
   },
+  enemyDiagnostics(id) {
+    return simulation.enemyDiagnostics(id === undefined ? undefined : Number(id));
+  },
   isVisible(x, z, radius = 0) {
     return sightFrame.isCircleVisible(
       Number(x),

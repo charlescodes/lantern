@@ -132,6 +132,28 @@ export class EnemyWizardPool {
     this.shotReadyTick = new Uint32Array(capacity);
     this.aiState = new Uint8Array(capacity);
     this.lineOfSight = new Uint8Array(capacity);
+    this.movementGoalKind = new Uint8Array(capacity);
+    this.movementGoalX = new Float32Array(capacity);
+    this.movementGoalZ = new Float32Array(capacity);
+    this.movementGoalCx = new Int16Array(capacity);
+    this.movementGoalCz = new Int16Array(capacity);
+    this.navigationCost = new Uint32Array(capacity);
+    this.navigationVersion = new Uint32Array(capacity);
+    this.strafeDirection = new Int8Array(capacity);
+    this.strafeChangeTick = new Uint32Array(capacity);
+    this.strafeDecisionSequence = new Uint32Array(capacity);
+    this.predictedAimX = new Float32Array(capacity);
+    this.predictedAimZ = new Float32Array(capacity);
+    this.aimInterceptTime = new Float32Array(capacity);
+    this.aimLeadTime = new Float32Array(capacity);
+    this.trackedThreatEffectId = new Uint32Array(capacity);
+    this.trackedThreatProjectileId = new Uint32Array(capacity);
+    this.dodgeTicksRemaining = new Uint16Array(capacity);
+    this.dodgeCooldownTicks = new Uint16Array(capacity);
+    this.dodgeDirectionX = new Float32Array(capacity);
+    this.dodgeDirectionZ = new Float32Array(capacity);
+    this.dodgeSide = new Int8Array(capacity);
+    this.retreating = new Uint8Array(capacity);
   }
 
   reset() {
@@ -176,6 +198,28 @@ export class EnemyWizardPool {
     this.shotReadyTick[index] = value.shotReadyTick;
     this.aiState[index] = 0;
     this.lineOfSight[index] = 0;
+    this.movementGoalKind[index] = 0;
+    this.movementGoalX[index] = Number.NaN;
+    this.movementGoalZ[index] = Number.NaN;
+    this.movementGoalCx[index] = -1;
+    this.movementGoalCz[index] = -1;
+    this.navigationCost[index] = 0xffff_ffff;
+    this.navigationVersion[index] = 0;
+    this.strafeDirection[index] = 0;
+    this.strafeChangeTick[index] = 0;
+    this.strafeDecisionSequence[index] = 0;
+    this.predictedAimX[index] = Number.NaN;
+    this.predictedAimZ[index] = Number.NaN;
+    this.aimInterceptTime[index] = 0;
+    this.aimLeadTime[index] = 0;
+    this.trackedThreatEffectId[index] = 0;
+    this.trackedThreatProjectileId[index] = 0;
+    this.dodgeTicksRemaining[index] = 0;
+    this.dodgeCooldownTicks[index] = 0;
+    this.dodgeDirectionX[index] = 0;
+    this.dodgeDirectionZ[index] = 0;
+    this.dodgeSide[index] = 0;
+    this.retreating[index] = 0;
     this.activeCount += 1;
     return id;
   }
@@ -213,6 +257,28 @@ export class EnemyWizardPool {
         this.shotReadyTick,
         this.aiState,
         this.lineOfSight,
+        this.movementGoalKind,
+        this.movementGoalX,
+        this.movementGoalZ,
+        this.movementGoalCx,
+        this.movementGoalCz,
+        this.navigationCost,
+        this.navigationVersion,
+        this.strafeDirection,
+        this.strafeChangeTick,
+        this.strafeDecisionSequence,
+        this.predictedAimX,
+        this.predictedAimZ,
+        this.aimInterceptTime,
+        this.aimLeadTime,
+        this.trackedThreatEffectId,
+        this.trackedThreatProjectileId,
+        this.dodgeTicksRemaining,
+        this.dodgeCooldownTicks,
+        this.dodgeDirectionX,
+        this.dodgeDirectionZ,
+        this.dodgeSide,
+        this.retreating,
       ]) {
         component[index] = component[last];
       }
