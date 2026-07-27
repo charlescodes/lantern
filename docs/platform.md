@@ -1,6 +1,6 @@
 # Platform Contract
 
-> **Current through:** Lantern 0.6.0
+> **Current through:** Lantern 0.6.1
 
 The engine is browser-first and built with standard JavaScript ES modules, HTML, and CSS. It targets modern desktop browsers, while Node.js is used only for development tooling, dependency management, testing, and the local development server. The core simulation should remain independent of the browser, renderer, and input devices so it can later run in a Web Worker, Node.js server, Electron application, or another host with minimal changes. The prototype runs entirely on the client, but the code preserves a clear boundary between commands, simulation state, and presentation so authoritative multiplayer can be added later without redesigning the engine.
 
@@ -12,4 +12,4 @@ The default scenario owns exactly one invulnerable obelisk. Its solid cell is or
 
 Combat health is symmetric and fixed outside Fireball definition v1: actors have 100 maximum health, direct opponent hits deal 25, and splash damage uses the captured blast radius with linear surface-distance falloff. Team immunity affects health and projectile actor collision only; physical explosion impulse remains neutral. Defeat freezes autonomous gameplay for 90 fixed ticks while reset and Spell Lab actions remain authoritative, then rebuilds the same-seed encounter baseline while preserving the applied spell revision and panel draft.
 
-Presentation must keep Canvas2D and Three.js behavior aligned from the same snapshot data. The Three.js adapter preallocates four enemy instances and five health-track/fill instances before warmup. Combat adds no external art, lights, or dynamic-light topology. TrueSight hides an enemy, its health bar, and every hostile effect carrier together, but never changes AI knowledge or replay truth.
+Presentation must keep Canvas2D and Three.js behavior aligned from the same snapshot data. The Three.js adapter preallocates four enemy instances and five health-track/fill instances before warmup. Health tracks and fills share the transparent render queue, with the fill ordered after the track, so the color remains visible during ordinary rendering and TrueSight fades. Combat adds no external art, lights, or dynamic-light topology. TrueSight hides an enemy, its health bar, and every hostile effect carrier together, but never changes AI knowledge or replay truth.

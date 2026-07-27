@@ -1,4 +1,4 @@
-# Lantern 0.6.0 / Obelisk Combat
+# Lantern 0.6.1 / Obelisk Combat
 
 A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and a bounded enemy-wizard encounter. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, and TrueSight frame.
 
@@ -42,7 +42,7 @@ npm run test:soak:combat
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.6.0` adds the [Obelisk Combat Foundation](./docs/milestones/0.6.0-obelisk-combat.md), advances runtime/snapshot/recording schema to v6 and scenario JSON to v3, and leaves map v1, Fireball definition v1, performance-report v2, and frozen legacy replay profiles unchanged.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.6.0` added the [Obelisk Combat Foundation](./docs/milestones/0.6.0-obelisk-combat.md); patch `0.6.1` fixes [Three.js health-bar compositing](./docs/notes/0.6.1-health-bar-compositing.md). Snapshot/recording schema v6, scenario JSON v3, map v1, Fireball definition v1, performance-report v2, and frozen legacy replay profiles remain unchanged.
 
 ## Play controls
 

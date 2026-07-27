@@ -253,6 +253,7 @@ export class ThreePresentation {
     this.healthFillMaterial = this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
       color: 0xffffff,
       vertexColors: true,
+      transparent: true,
       depthTest: false,
       depthWrite: false,
       side: THREE.DoubleSide,

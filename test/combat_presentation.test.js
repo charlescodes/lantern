@@ -201,6 +201,11 @@ test("Three preallocates four enemies and five resident health track/fill instan
   assert.equal(presentation.healthTrackMesh.count, 2);
   assert.equal(presentation.healthFillMesh.count, 2);
   assert.equal(presentation.obeliskGroup.visible, true);
+  assert.equal(presentation.healthTrackMaterial.transparent, true);
+  assert.equal(presentation.healthFillMaterial.transparent, true);
+  assert.equal(presentation.healthTrackMaterial.depthTest, false);
+  assert.equal(presentation.healthFillMaterial.depthTest, false);
+  assert.ok(presentation.healthTrackMesh.renderOrder < presentation.healthFillMesh.renderOrder);
 
   const trackMatrix = new THREE.Matrix4();
   const fillMatrix = new THREE.Matrix4();

@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.6.0` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.6.1` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Current contracts
 
@@ -13,6 +13,7 @@ Lantern `0.6.0` is the current application release. Documents are separated by p
 - [0.4.0 TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) — player-centered wall LOS, shared renderer masks, local interaction gating, fades, probes, and performance-report v2.
 - [0.5.0 Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) — strict definitions, immutable revisions, effect-local seeds, schema-v5 replay, live controls, and stable presentation resources.
 - [0.6.0 Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) — singleton obelisk encounter, bounded enemy wizards, symmetric health/damage, schema-v6 replay, defeat/restart, and presentation parity.
+- [0.6.1 health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) — keeps Three.js health fills above their dark tracks through normal visibility and TrueSight fading.
 
 ## Release and milestone history
 
@@ -29,12 +30,13 @@ Lantern `0.6.0` is the current application release. Documents are separated by p
 | 0.4.0 | [TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) | 360-degree wall LOS, shared Canvas/Three shroud, local interaction gating, and report v2 |
 | 0.5.0 | [Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) | Current spell registry, Fireball definition v1, future-casts-only revisions, deterministic seeds, and schema v5 |
 | 0.6.0 | [Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) | Singleton obelisk, basic enemy encounter, shared Fireball combat, health/defeat flow, and schema v6 |
+| 0.6.1 | [Health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) | Correct Three.js track/fill render-queue ordering without simulation or schema changes |
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.6.0`.
+- Application/package release: `0.6.1`.
 - Snapshot and command-recording schema: v6.
 - Scenario JSON schema: v3; legacy scenario v2 and map v1 remain importable.
 - Fireball definition format: v1.

@@ -3,7 +3,7 @@
 export const SCHEMA_VERSION = 6;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
-export const APPLICATION_VERSION = "0.6.0";
+export const APPLICATION_VERSION = "0.6.1";
 
 export const GAMEPLAY_PROFILE_OBELISK_DUEL = "obelisk-duel-v1";
 export const GAMEPLAY_PROFILE_PRE_COMBAT = "pre-combat-v1";
