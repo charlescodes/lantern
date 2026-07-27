@@ -1,10 +1,17 @@
 // @ts-check
 
 import {
+  ACTOR_TEAM,
+  COMBAT,
   DEFAULT_DEBUG_FLAGS,
   DEFAULT_PARTICLE_PROFILE,
   DYNAMIC_PHYSICS,
+  ENEMY_AI_PROFILE_BASIC,
+  ENEMY_AI_PROFILE_NONE,
+  ENEMY_WIZARD,
   EXPLOSION,
+  GAMEPLAY_PROFILE_OBELISK_DUEL,
+  GAMEPLAY_PROFILE_PRE_COMBAT,
   HISTORY,
   MAP_VERSION,
   normalizeParticleProfile,
@@ -12,6 +19,7 @@ import {
   PARTICLE_PROFILES,
   PARTICLE_PROFILE_M02,
   PLAYER,
+  PROJECTILE_OWNER_KIND,
   PROJECTILE,
   ROCK,
   ROCK_ARCHETYPES,
@@ -34,6 +42,7 @@ import {
 } from "../spells/palette.js";
 import {
   deriveCastSeed,
+  deriveEnemyCastSeed,
   deriveSampleSeed,
   laneUnit,
 } from "../spells/random.js";
@@ -48,7 +57,12 @@ import {
 import { resolvePlayerDynamicBodyVelocity } from "./dynamic_body_velocity.js";
 import { computeExplosionResponse } from "./explosion.js";
 import { GridMap } from "./grid_map.js";
-import { ParticlePool, ProjectilePool, RockPool } from "./pools.js";
+import {
+  EnemyWizardPool,
+  ParticlePool,
+  ProjectilePool,
+  RockPool,
+} from "./pools.js";
 import {
   ArenaScenario,
   createDebugArenaScenario,
@@ -60,8 +74,23 @@ const CONTACT_CAPACITY = 256;
 const BODY_PLAYER = 1;
 const BODY_ROCK = 2;
 const BODY_CELL = 3;
+const BODY_ENEMY_WIZARD = 4;
 const CONTACT_GRID = 1;
 const CONTACT_BODY = 2;
+const ENEMY_AI_HOLD = 0;
+const ENEMY_AI_APPROACH = 1;
+const ENEMY_AI_WITHDRAW = 2;
+const ENEMY_AI_STATE_NAMES = Object.freeze(["hold", "approach", "withdraw"]);
+const SPAWN_OFFSETS = Object.freeze([
+  Object.freeze({ x: 0, z: -1, name: "north" }),
+  Object.freeze({ x: 1, z: 0, name: "east" }),
+  Object.freeze({ x: 0, z: 1, name: "south" }),
+  Object.freeze({ x: -1, z: 0, name: "west" }),
+  Object.freeze({ x: 1, z: -1, name: "northeast" }),
+  Object.freeze({ x: 1, z: 1, name: "southeast" }),
+  Object.freeze({ x: -1, z: 1, name: "southwest" }),
+  Object.freeze({ x: -1, z: -1, name: "northwest" }),
+]);
 
 const ROCK_NAME_BY_CODE = new Map(
   Object.entries(ROCK_ARCHETYPES).map(([name, definition]) => [definition.code, name]),
@@ -263,6 +292,32 @@ function clamp(value, minimum, maximum) {
 }
 
 /**
+ * Direct health damage is independent of the authored blast radius. This
+ * finite zero-impulse record keeps the actor hit inspectable when a valid
+ * zero-radius definition has no physical blast response at its contact point.
+ * @param {Record<string, any>} event
+ * @param {number} bodyX
+ * @param {number} bodyZ
+ * @param {number} bodyRadius
+ */
+function zeroImpulseResponse(event, bodyX, bodyZ, bodyRadius) {
+  const dx = bodyX - event.originX;
+  const dz = bodyZ - event.originZ;
+  const centerDistance = Math.hypot(dx, dz);
+  return {
+    centerDistance,
+    surfaceDistance: Math.max(0, centerDistance - bodyRadius),
+    falloff: 0,
+    projectedArea: Math.PI * bodyRadius * bodyRadius,
+    impulse: 0,
+    nx: centerDistance > 1e-9 ? dx / centerDistance : -event.nx,
+    nz: centerDistance > 1e-9 ? dz / centerDistance : -event.nz,
+    deltaVx: 0,
+    deltaVz: 0,
+  };
+}
+
+/**
  * @param {Record<string, number | boolean>} tuning
  * @param {number} maximumSize
  * @param {number} age
@@ -278,7 +333,18 @@ function currentParticleSize(tuning, maximumSize, age, lifetime) {
 function bodyKindName(code) {
   if (code === BODY_PLAYER) return "player";
   if (code === BODY_ROCK) return "rock";
+  if (code === BODY_ENEMY_WIZARD) return "enemyWizard";
   return "cell";
+}
+
+/** @param {number} code */
+function ownerKindName(code) {
+  return code === PROJECTILE_OWNER_KIND.enemyWizard ? "enemyWizard" : "player";
+}
+
+/** @param {number} code */
+function teamName(code) {
+  return code === ACTOR_TEAM.enemy ? "enemy" : "player";
 }
 
 export class Simulation {
@@ -296,7 +362,9 @@ export class Simulation {
    * particleWallCollision?:boolean,
    * initialFireballDefinition?:unknown,
    * spellBaseline?:Array<Record<string,any>>,
-   * legacyFireballMode?:boolean
+   * legacyFireballMode?:boolean,
+   * gameplayProfile?:string,
+   * enemyAiProfile?:string
    * }} [options]
    */
   constructor(options = {}) {
@@ -305,14 +373,43 @@ export class Simulation {
     this.map = this.scenario.map;
     this.seed = normalizeSeed(options.seed ?? 0x1a2b3c4d);
     this.rng = new SeededRng(this.seed);
+    this.gameplayProfile = options.gameplayProfile ?? GAMEPLAY_PROFILE_OBELISK_DUEL;
+    if (
+      this.gameplayProfile !== GAMEPLAY_PROFILE_OBELISK_DUEL
+      && this.gameplayProfile !== GAMEPLAY_PROFILE_PRE_COMBAT
+    ) {
+      throw new RangeError(`Unsupported gameplay profile: ${this.gameplayProfile}`);
+    }
+    this.enemyAiProfile = options.enemyAiProfile
+      ?? (this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        ? ENEMY_AI_PROFILE_BASIC
+        : ENEMY_AI_PROFILE_NONE);
+    if (
+      this.enemyAiProfile !== ENEMY_AI_PROFILE_BASIC
+      && this.enemyAiProfile !== ENEMY_AI_PROFILE_NONE
+    ) {
+      throw new RangeError(`Unsupported enemy AI profile: ${this.enemyAiProfile}`);
+    }
+    if (!(
+      (
+        this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+      ) || (
+        this.gameplayProfile === GAMEPLAY_PROFILE_PRE_COMBAT
+        && this.enemyAiProfile === ENEMY_AI_PROFILE_NONE
+      )
+    )) {
+      throw new RangeError("Gameplay and enemy AI profiles are incompatible");
+    }
     const rockCapacity = options.rockCapacity ?? ROCK.capacity;
     if (!Number.isInteger(rockCapacity) || rockCapacity <= 0) {
       throw new RangeError("Rock capacity must be a positive integer");
     }
-    if (this.scenario.entities.length > rockCapacity) {
+    if (this.scenario.entities.filter((entity) => entity.kind === "rock").length > rockCapacity) {
       throw new RangeError("Scenario has more rocks than the configured rock pool");
     }
     this.rocks = new RockPool(rockCapacity);
+    this.enemies = new EnemyWizardPool(ENEMY_WIZARD.capacity);
     this.projectiles = new ProjectilePool(options.projectileCapacity ?? PROJECTILE.capacity);
     this.particles = new ParticlePool(options.particleCapacity ?? PARTICLE.capacity);
     this.particleBurstCount = options.particleBurstCount ?? PARTICLE.burstCount;
@@ -348,6 +445,8 @@ export class Simulation {
     this.nextEffectId = 1;
     this.latestSpellSamples = new Map();
     this.impactEvents = new RingBuffer(HISTORY.events);
+    this.combatEvents = new RingBuffer(COMBAT.eventCapacity);
+    this.combatEventDropped = 0;
     this.commandLog = new RingBuffer(HISTORY.commands);
     this.commandLogDropped = 0;
     this.commandLogScenario = this.scenario.toJSON();
@@ -363,8 +462,22 @@ export class Simulation {
     this.commandLogParticleBounce = this.debugFlags.particleBounce;
     this.commandLogParticleWallCollision = this.debugFlags.particleWallCollision;
     this.commandLogSpellBaseline = this.spells.cloneBaseline();
+    this.commandLogGameplayProfile = this.gameplayProfile;
+    this.commandLogEnemyAiProfile = this.enemyAiProfile;
     this.tickCount = 0;
     this.nextExplosionId = 1;
+    this.levelState = "running";
+    this.defeatedTicksRemaining = 0;
+    this.encounter = {
+      enabled: false,
+      nextSpawnTick: 1,
+      spawnCursor: 0,
+      attempts: 0,
+      successfulSpawns: 0,
+      skippedBlocked: 0,
+      skippedCapped: 0,
+      nextSpawnSequence: 1,
+    };
     this.player = {
       id: 1,
       x: this.map.playerSpawn.x,
@@ -383,6 +496,11 @@ export class Simulation {
       massKg: PLAYER.massKg,
       inverseMass: 1 / PLAYER.massKg,
       cooldown: 0,
+      team: "player",
+      health: COMBAT.maximumHealth,
+      maximumHealth: COMBAT.maximumHealth,
+      damageFreeTicks: 0,
+      lastDamageTick: 0,
     };
     this.contacts = {
       count: 0,
@@ -411,6 +529,17 @@ export class Simulation {
     };
     this._bodyContact = { nx: 0, nz: 0, penetration: 0, x: 0, z: 0 };
     this._dynamicBodyVelocity = { vx: 0, vz: 0, inverseMass: 0 };
+    this._enemyBodyVelocity = {
+      vx: 0,
+      vz: 0,
+      desiredVx: 0,
+      desiredVz: 0,
+      locomotionVx: 0,
+      locomotionVz: 0,
+      externalVx: 0,
+      externalVz: 0,
+      inverseMass: 0,
+    };
     this._particleSweepHit = { x: 0, z: 0, time: 0, nx: 0, nz: 0, cx: 0, cz: 0 };
     this._particleSpawnPoint = { x: 0, z: 0, cx: 0, cz: 0, passes: 0 };
     this._sampleColor = { r: 0, g: 0, b: 0 };
@@ -427,6 +556,8 @@ export class Simulation {
     this.nextExplosionId = 1;
     this.#restoreAuthoredState();
     this.impactEvents.clear();
+    this.combatEvents.clear();
+    this.combatEventDropped = 0;
     this.spells.prune(new Map());
     this.contacts.count = 0;
     this.contacts.dropped = 0;
@@ -439,6 +570,8 @@ export class Simulation {
       this.commandLogParticleBounce = this.debugFlags.particleBounce;
       this.commandLogParticleWallCollision = this.debugFlags.particleWallCollision;
       this.commandLogSpellBaseline = this.spells.cloneBaseline();
+      this.commandLogGameplayProfile = this.gameplayProfile;
+      this.commandLogEnemyAiProfile = this.enemyAiProfile;
     }
     this.lastError = null;
     this.lastSpellResult = null;
@@ -448,6 +581,7 @@ export class Simulation {
     this.projectiles.reset();
     this.particles.reset();
     this.rocks.reset();
+    this.enemies.reset();
     this.spellCooldowns.fill(0);
     this.castSequences.fill(0);
     this.nextEffectId = 1;
@@ -466,8 +600,27 @@ export class Simulation {
       externalVx: 0,
       externalVz: 0,
       cooldown: 0,
+      health: COMBAT.maximumHealth,
+      maximumHealth: COMBAT.maximumHealth,
+      damageFreeTicks: 0,
+      lastDamageTick: 0,
+    });
+    this.levelState = "running";
+    this.defeatedTicksRemaining = 0;
+    Object.assign(this.encounter, {
+      enabled: this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+        && Boolean(this.scenario.obelisk),
+      nextSpawnTick: this.tickCount + 1,
+      spawnCursor: 0,
+      attempts: 0,
+      successfulSpawns: 0,
+      skippedBlocked: 0,
+      skippedCapped: 0,
+      nextSpawnSequence: 1,
     });
     for (const entity of this.scenario.entities) {
+      if (entity.kind !== "rock") continue;
       const definition = getRockArchetype(entity.archetype);
       if (!definition) continue;
       this.rocks.spawn({
@@ -485,8 +638,21 @@ export class Simulation {
   tick(input) {
     const command = canonicalizeCommand(input);
     this.contacts.count = 0;
-    this.#applyActions(command.actions);
+    const startedDefeated = this.levelState === "defeated";
+    this.#applyActions(command.actions, startedDefeated);
+    if (startedDefeated && this.levelState !== "defeated") {
+      return this.tickCount;
+    }
+    if (startedDefeated) {
+      if (this.#advanceDefeat()) return this.tickCount;
+      this.tickCount += 1;
+      this.#recordCommand(command);
+      return this.tickCount;
+    }
+    const simulationTick = this.tickCount + 1;
+    this.#encounterSystem(simulationTick);
     this.#prepareMovement(command.move, SIMULATION.dt);
+    this.#prepareEnemyMovement(SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
@@ -498,38 +664,68 @@ export class Simulation {
     this.player.cooldown = this.legacyFireballMode
       ? approach(this.player.cooldown, 0, SIMULATION.dt)
       : this.spellCooldowns[FIREBALL_SPELL_CODE];
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.enemies.cooldown[index] = approach(
+        this.enemies.cooldown[index],
+        0,
+        SIMULATION.dt,
+      );
+    }
     this.#castSystem(command.cast);
+    this.#enemyCastSystem(simulationTick);
     this.#projectileSystem(SIMULATION.dt);
+    this.#removeDeadEnemies();
     this.#particleSystem(SIMULATION.dt);
+    this.#healthRegenerationSystem(simulationTick);
     this.#pruneSpellRevisions();
     this.tickCount += 1;
-    if (this.commandLog.length === this.commandLog.capacity) this.commandLogDropped += 1;
-    this.commandLog.push({ tick: this.tickCount, command });
+    this.#recordCommand(command);
     return this.tickCount;
   }
 
-  /** @param {Array<Record<string, unknown>>} actions */
-  #applyActions(actions) {
+  /** @param {ReturnType<typeof canonicalizeCommand>} command */
+  #recordCommand(command) {
+    if (this.commandLog.length === this.commandLog.capacity) this.commandLogDropped += 1;
+    this.commandLog.push({ tick: this.tickCount, command });
+  }
+
+  /** @param {Array<Record<string, unknown>>} actions @param {boolean} [defeatedOnly] */
+  #applyActions(actions, defeatedOnly = false) {
     for (const action of actions) {
+      if (
+        defeatedOnly
+        && action.type !== "reset"
+        && action.type !== "applySpellDefinition"
+        && action.type !== "clearSpellEffects"
+      ) {
+        continue;
+      }
       try {
         if (action.type === "reset") {
           this.reset(action.seed);
         } else if (action.type === "restoreScenario") {
           this.#restoreAuthoredState();
           this.impactEvents.clear();
+          this.combatEvents.clear();
+          this.combatEventDropped = 0;
         } else if (action.type === "setTile") {
           if (!this.#setTile(action.cx, action.cz, action.tile)) {
             throw new RangeError("Tile would overlap an authored or active body");
           }
         } else if (action.type === "loadScenario") {
           const loadedScenario = ArenaScenario.fromJSON(action.json);
-          if (loadedScenario.entities.length > this.rocks.capacity) {
+          if (
+            loadedScenario.entities.filter((entity) => entity.kind === "rock").length
+            > this.rocks.capacity
+          ) {
             throw new RangeError("Scenario has more rocks than the configured rock pool");
           }
           this.scenario = loadedScenario;
           this.map = loadedScenario.map;
           this.#restoreAuthoredState();
           this.impactEvents.clear();
+          this.combatEvents.clear();
+          this.combatEventDropped = 0;
         } else if (action.type === "placeRock") {
           if (!this.canPlaceRock(action.archetype, action.x, action.z)) {
             throw new RangeError("Rock placement is invalid or overlaps another body");
@@ -622,7 +818,280 @@ export class Simulation {
         return false;
       }
     }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (
+        firstSolidContact(
+          this.map,
+          this.enemies.x[index],
+          this.enemies.z[index],
+          this.enemies.radius[index],
+          this._gridContact,
+        )
+      ) {
+        this.map.set(cx, cz, previous);
+        return false;
+      }
+    }
     return true;
+  }
+
+  #advanceDefeat() {
+    this.defeatedTicksRemaining = Math.max(0, this.defeatedTicksRemaining - 1);
+    if (this.defeatedTicksRemaining > 0) return false;
+    const seed = this.seed;
+    this.reset(seed);
+    return true;
+  }
+
+  /** @param {Record<string, any>} event */
+  #recordCombatEvent(event) {
+    if (this.combatEvents.length === this.combatEvents.capacity) {
+      this.combatEventDropped += 1;
+    }
+    this.combatEvents.push(event);
+  }
+
+  /** @param {number} simulationTick */
+  #encounterSystem(simulationTick) {
+    if (!this.encounter.enabled || simulationTick < this.encounter.nextSpawnTick) return;
+    this.#attemptEnemySpawn(simulationTick);
+    this.encounter.nextSpawnTick += ENEMY_WIZARD.spawnIntervalTicks;
+  }
+
+  /** @param {number} simulationTick */
+  #attemptEnemySpawn(simulationTick) {
+    const obelisk = this.scenario.obelisk;
+    if (!obelisk) return;
+    const slot = this.encounter.spawnCursor;
+    const offset = SPAWN_OFFSETS[slot];
+    this.encounter.spawnCursor = (slot + 1) % SPAWN_OFFSETS.length;
+    this.encounter.attempts += 1;
+    const x = obelisk.x + offset.x;
+    const z = obelisk.z + offset.z;
+    const event = {
+      type: "spawn",
+      tick: simulationTick,
+      slot,
+      direction: offset.name,
+      position: { x, z },
+      result: "blocked",
+      enemy: null,
+    };
+    if (this.enemies.activeCount >= this.enemies.capacity) {
+      this.encounter.skippedCapped += 1;
+      event.result = "capped";
+      this.#recordCombatEvent(event);
+      return;
+    }
+    if (!this.#enemySpawnIsSafe(x, z)) {
+      this.encounter.skippedBlocked += 1;
+      this.#recordCombatEvent(event);
+      return;
+    }
+    const spawnSequence = this.encounter.nextSpawnSequence;
+    const id = this.enemies.spawn({
+      spawnSequence,
+      spawnTick: simulationTick,
+      x,
+      z,
+      radius: ENEMY_WIZARD.radius,
+      massKg: ENEMY_WIZARD.massKg,
+      maximumHealth: COMBAT.maximumHealth,
+      shotReadyTick: simulationTick + ENEMY_WIZARD.shotIntervalTicks,
+    });
+    if (id === 0) {
+      this.encounter.skippedCapped += 1;
+      event.result = "capped";
+      this.#recordCombatEvent(event);
+      return;
+    }
+    this.encounter.nextSpawnSequence += 1;
+    this.encounter.successfulSpawns += 1;
+    event.result = "spawned";
+    event.enemy = { kind: "enemyWizard", id, spawnSequence };
+    this.#recordCombatEvent(event);
+  }
+
+  /** @param {number} x @param {number} z */
+  #enemySpawnIsSafe(x, z) {
+    if (firstSolidContact(this.map, x, z, ENEMY_WIZARD.radius, this._gridContact)) {
+      return false;
+    }
+    if (
+      Math.hypot(x - this.player.x, z - this.player.z)
+      < ENEMY_WIZARD.radius + this.player.radius
+    ) {
+      return false;
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      if (
+        Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index])
+        < ENEMY_WIZARD.radius + this.rocks.radius[index]
+      ) {
+        return false;
+      }
+    }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (
+        Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index])
+        < ENEMY_WIZARD.radius + this.enemies.radius[index]
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** @param {number} dt */
+  #prepareEnemyMovement(dt) {
+    const pool = this.enemies;
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      const dx = this.player.x - pool.x[index];
+      const dz = this.player.z - pool.z[index];
+      const distance = Math.hypot(dx, dz);
+      let desiredVx = 0;
+      let desiredVz = 0;
+      let state = ENEMY_AI_HOLD;
+      if (distance > ENEMY_WIZARD.approachBeyondMeters) {
+        state = ENEMY_AI_APPROACH;
+        if (distance > 1e-9) {
+          desiredVx = (dx / distance) * ENEMY_WIZARD.desiredSpeed;
+          desiredVz = (dz / distance) * ENEMY_WIZARD.desiredSpeed;
+        }
+      } else if (distance < ENEMY_WIZARD.withdrawInsideMeters) {
+        state = ENEMY_AI_WITHDRAW;
+        if (distance > 1e-9) {
+          desiredVx = (-dx / distance) * ENEMY_WIZARD.desiredSpeed;
+          desiredVz = (-dz / distance) * ENEMY_WIZARD.desiredSpeed;
+        }
+      }
+      pool.aiState[index] = state;
+      pool.desiredVx[index] = desiredVx;
+      pool.desiredVz[index] = desiredVz;
+      const deltaVx = desiredVx - pool.locomotionVx[index];
+      const deltaVz = desiredVz - pool.locomotionVz[index];
+      const deltaLength = Math.hypot(deltaVx, deltaVz);
+      const rate = state === ENEMY_AI_HOLD
+        ? ENEMY_WIZARD.braking
+        : ENEMY_WIZARD.acceleration;
+      const maximumDelta = rate * dt;
+      if (deltaLength <= maximumDelta || deltaLength <= 1e-9) {
+        pool.locomotionVx[index] = desiredVx;
+        pool.locomotionVz[index] = desiredVz;
+      } else {
+        pool.locomotionVx[index] += (deltaVx / deltaLength) * maximumDelta;
+        pool.locomotionVz[index] += (deltaVz / deltaLength) * maximumDelta;
+      }
+    }
+  }
+
+  /** @param {number} simulationTick */
+  #enemyCastSystem(simulationTick) {
+    const spell = this.spells.get(FIREBALL_SPELL_ID);
+    if (!spell || spell.handler !== "fireball") return;
+    const definition = spell.definitions.get(spell.currentRevision);
+    if (!definition) throw new Error("Current Fireball definition is unavailable");
+    const pool = this.enemies;
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      const blocked = gridRayBlocked(
+        this.map,
+        pool.x[index],
+        pool.z[index],
+        this.player.x,
+        this.player.z,
+      );
+      pool.lineOfSight[index] = blocked ? 0 : 1;
+      if (
+        pool.health[index] <= 0
+        || simulationTick < pool.shotReadyTick[index]
+        || pool.cooldown[index] > 0
+        || blocked
+      ) {
+        continue;
+      }
+      const dx = this.player.x - pool.x[index];
+      const dz = this.player.z - pool.z[index];
+      const distance = Math.hypot(dx, dz);
+      if (distance <= 1e-5) continue;
+      const nx = dx / distance;
+      const nz = dz / distance;
+      const offset = pool.radius[index]
+        + Number(definition.projectile.radius)
+        + Number(definition.projectile.spawnGap);
+      const effectSeed = deriveEnemyCastSeed(
+        this.seed,
+        pool.spawnSequence[index],
+        spell.code,
+        pool.castSequence[index],
+      );
+      const effectId = this.nextEffectId;
+      const projectileId = this.projectiles.spawn({
+        x: pool.x[index] + nx * offset,
+        z: pool.z[index] + nz * offset,
+        vx: nx * Number(definition.projectile.speed),
+        vz: nz * Number(definition.projectile.speed),
+        lifetime: Number(definition.projectile.lifetime),
+        radius: Number(definition.projectile.radius),
+        ownerId: pool.id[index],
+        ownerKind: PROJECTILE_OWNER_KIND.enemyWizard,
+        ownerTeam: ACTOR_TEAM.enemy,
+        spellCode: spell.code,
+        definitionRevision: spell.currentRevision,
+        effectId,
+        effectSeed,
+      });
+      if (projectileId === 0) continue;
+      pool.cooldown[index] = Number(definition.cast.cooldown);
+      pool.castSequence[index] = (pool.castSequence[index] + 1) >>> 0;
+      pool.shotReadyTick[index] = simulationTick + ENEMY_WIZARD.shotIntervalTicks;
+      this.nextEffectId = (this.nextEffectId + 1) >>> 0 || 1;
+      this.#recordCombatEvent({
+        type: "cast",
+        tick: simulationTick,
+        caster: { kind: "enemyWizard", id: pool.id[index], team: "enemy" },
+        spellId: spell.id,
+        definitionRevision: spell.currentRevision,
+        effectId,
+        effectSeed,
+        projectileId,
+        target: { kind: "player", id: this.player.id },
+      });
+    }
+  }
+
+  #removeDeadEnemies() {
+    let index = 0;
+    while (index < this.enemies.activeCount) {
+      if (this.enemies.health[index] <= 0) {
+        this.enemies.removeSwap(index);
+      } else {
+        index += 1;
+      }
+    }
+  }
+
+  /** @param {number} simulationTick */
+  #healthRegenerationSystem(simulationTick) {
+    if (this.player.health > 0 && this.player.health < this.player.maximumHealth) {
+      if (this.player.lastDamageTick !== simulationTick) this.player.damageFreeTicks += 1;
+      if (this.player.damageFreeTicks >= COMBAT.regenerationDelayTicks) {
+        this.player.health = Math.min(
+          this.player.maximumHealth,
+          this.player.health + COMBAT.regenerationPerSecond * SIMULATION.dt,
+        );
+      }
+    }
+    const pool = this.enemies;
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      if (pool.health[index] >= pool.maximumHealth[index]) continue;
+      if (pool.lastDamageTick[index] !== simulationTick) pool.damageFreeTicks[index] += 1;
+      if (pool.damageFreeTicks[index] >= COMBAT.regenerationDelayTicks) {
+        pool.health[index] = Math.min(
+          pool.maximumHealth[index],
+          pool.health[index] + COMBAT.regenerationPerSecond * SIMULATION.dt,
+        );
+      }
+    }
   }
 
   /** @param {{x:number,z:number}|null} target @param {number} dt */
@@ -659,8 +1128,13 @@ export class Simulation {
   /** @param {number} dt */
   #bodyPhysicsSystem(dt) {
     const player = this.player;
+    const enemies = this.enemies;
     player.previousX = player.x;
     player.previousZ = player.z;
+    for (let index = 0; index < enemies.activeCount; index += 1) {
+      enemies.previousX[index] = enemies.x[index];
+      enemies.previousZ[index] = enemies.z[index];
+    }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       this.rocks.previousX[index] = this.rocks.x[index];
       this.rocks.previousZ[index] = this.rocks.z[index];
@@ -669,12 +1143,22 @@ export class Simulation {
     const playerDamping = Math.exp(-PLAYER.externalDamping * dt);
     player.externalVx *= playerDamping;
     player.externalVz *= playerDamping;
+    const enemyDamping = Math.exp(-ENEMY_WIZARD.externalDamping * dt);
+    for (let index = 0; index < enemies.activeCount; index += 1) {
+      enemies.externalVx[index] *= enemyDamping;
+      enemies.externalVz[index] *= enemyDamping;
+      this.#syncEnemyVelocity(index);
+    }
     const rockDamping = Math.exp(-ROCK.damping * dt);
     let maximumSpeed = Math.hypot(
       player.locomotionVx + player.externalVx,
       player.locomotionVz + player.externalVz,
     );
     let minimumRadius = player.radius;
+    for (let index = 0; index < enemies.activeCount; index += 1) {
+      maximumSpeed = Math.max(maximumSpeed, Math.hypot(enemies.vx[index], enemies.vz[index]));
+      minimumRadius = Math.min(minimumRadius, enemies.radius[index]);
+    }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       this.rocks.vx[index] *= rockDamping;
       this.rocks.vz[index] *= rockDamping;
@@ -701,12 +1185,20 @@ export class Simulation {
       this.#syncPlayerVelocity();
       player.x += player.vx * stepDt;
       player.z += player.vz * stepDt;
+      for (let index = 0; index < enemies.activeCount; index += 1) {
+        this.#syncEnemyVelocity(index);
+        enemies.x[index] += enemies.vx[index] * stepDt;
+        enemies.z[index] += enemies.vz[index] * stepDt;
+      }
       for (let index = 0; index < this.rocks.activeCount; index += 1) {
         this.rocks.x[index] += this.rocks.vx[index] * stepDt;
         this.rocks.z[index] += this.rocks.vz[index] * stepDt;
       }
 
       this.#resolvePlayerGrid(substep === 0);
+      for (let index = 0; index < enemies.activeCount; index += 1) {
+        this.#resolveEnemyGrid(index, substep === 0);
+      }
       for (let index = 0; index < this.rocks.activeCount; index += 1) {
         this.#resolveRockGrid(index, substep === 0);
       }
@@ -715,12 +1207,28 @@ export class Simulation {
         for (let index = 0; index < this.rocks.activeCount; index += 1) {
           this.#resolvePlayerRock(index, record);
         }
+        for (let enemyIndex = 0; enemyIndex < enemies.activeCount; enemyIndex += 1) {
+          this.#resolvePlayerEnemy(enemyIndex, record);
+          for (let rockIndex = 0; rockIndex < this.rocks.activeCount; rockIndex += 1) {
+            this.#resolveEnemyRock(enemyIndex, rockIndex, record);
+          }
+          for (
+            let rightEnemy = enemyIndex + 1;
+            rightEnemy < enemies.activeCount;
+            rightEnemy += 1
+          ) {
+            this.#resolveEnemyEnemy(enemyIndex, rightEnemy, record);
+          }
+        }
         for (let left = 0; left < this.rocks.activeCount; left += 1) {
           for (let right = left + 1; right < this.rocks.activeCount; right += 1) {
             this.#resolveRockRock(left, right, record);
           }
         }
         this.#resolvePlayerGrid(false);
+        for (let index = 0; index < enemies.activeCount; index += 1) {
+          this.#resolveEnemyGrid(index, false);
+        }
         for (let index = 0; index < this.rocks.activeCount; index += 1) {
           this.#resolveRockGrid(index, false);
         }
@@ -734,11 +1242,22 @@ export class Simulation {
       }
     }
     this.#syncPlayerVelocity();
+    for (let index = 0; index < enemies.activeCount; index += 1) {
+      this.#syncEnemyVelocity(index);
+    }
   }
 
   #syncPlayerVelocity() {
     this.player.vx = this.player.locomotionVx + this.player.externalVx;
     this.player.vz = this.player.locomotionVz + this.player.externalVz;
+  }
+
+  /** @param {number} index */
+  #syncEnemyVelocity(index) {
+    this.enemies.vx[index] = this.enemies.locomotionVx[index]
+      + this.enemies.externalVx[index];
+    this.enemies.vz[index] = this.enemies.locomotionVz[index]
+      + this.enemies.externalVz[index];
   }
 
   /** @param {boolean} record */
@@ -778,6 +1297,46 @@ export class Simulation {
       this.player.externalVz -= nz * externalInward;
     }
     this.#syncPlayerVelocity();
+  }
+
+  /** @param {number} index @param {boolean} record */
+  #resolveEnemyGrid(index, record) {
+    const pool = this.enemies;
+    for (let pass = 0; pass < 8; pass += 1) {
+      if (
+        !firstSolidContact(
+          this.map,
+          pool.x[index],
+          pool.z[index],
+          pool.radius[index],
+          this._gridContact,
+        )
+      ) {
+        break;
+      }
+      const contact = this._gridContact;
+      const correction = contact.penetration + 1e-6;
+      pool.x[index] += contact.nx * correction;
+      pool.z[index] += contact.nz * correction;
+      this.#removeInwardEnemyVelocity(index, contact.nx, contact.nz);
+      if (record) this.#recordGridContact(BODY_ENEMY_WIZARD, pool.id[index], contact);
+    }
+  }
+
+  /** @param {number} index @param {number} nx @param {number} nz */
+  #removeInwardEnemyVelocity(index, nx, nz) {
+    const pool = this.enemies;
+    const locomotionInward = pool.locomotionVx[index] * nx + pool.locomotionVz[index] * nz;
+    if (locomotionInward < 0) {
+      pool.locomotionVx[index] -= nx * locomotionInward;
+      pool.locomotionVz[index] -= nz * locomotionInward;
+    }
+    const externalInward = pool.externalVx[index] * nx + pool.externalVz[index] * nz;
+    if (externalInward < 0) {
+      pool.externalVx[index] -= nx * externalInward;
+      pool.externalVz[index] -= nz * externalInward;
+    }
+    this.#syncEnemyVelocity(index);
   }
 
   /** @param {number} index @param {boolean} record */
@@ -859,6 +1418,212 @@ export class Simulation {
         player.id,
         BODY_ROCK,
         pool.id[index],
+        contact,
+      );
+    }
+  }
+
+  /** @param {number} enemyIndex @param {number} rockIndex @param {boolean} record */
+  #resolveEnemyRock(enemyIndex, rockIndex, record) {
+    const enemies = this.enemies;
+    const rocks = this.rocks;
+    if (
+      !circleCircleContact(
+        enemies.x[enemyIndex],
+        enemies.z[enemyIndex],
+        enemies.radius[enemyIndex],
+        rocks.x[rockIndex],
+        rocks.z[rockIndex],
+        rocks.radius[rockIndex],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = enemies.inverseMass[enemyIndex] + rocks.inverseMass[rockIndex];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    enemies.x[enemyIndex] -= contact.nx * correction * enemies.inverseMass[enemyIndex];
+    enemies.z[enemyIndex] -= contact.nz * correction * enemies.inverseMass[enemyIndex];
+    rocks.x[rockIndex] += contact.nx * correction * rocks.inverseMass[rockIndex];
+    rocks.z[rockIndex] += contact.nz * correction * rocks.inverseMass[rockIndex];
+
+    const actor = this._enemyBodyVelocity;
+    actor.vx = enemies.vx[enemyIndex];
+    actor.vz = enemies.vz[enemyIndex];
+    actor.desiredVx = enemies.desiredVx[enemyIndex];
+    actor.desiredVz = enemies.desiredVz[enemyIndex];
+    actor.locomotionVx = enemies.locomotionVx[enemyIndex];
+    actor.locomotionVz = enemies.locomotionVz[enemyIndex];
+    actor.externalVx = enemies.externalVx[enemyIndex];
+    actor.externalVz = enemies.externalVz[enemyIndex];
+    actor.inverseMass = enemies.inverseMass[enemyIndex];
+    const body = this._dynamicBodyVelocity;
+    body.vx = rocks.vx[rockIndex];
+    body.vz = rocks.vz[rockIndex];
+    body.inverseMass = rocks.inverseMass[rockIndex];
+    resolvePlayerDynamicBodyVelocity(
+      actor,
+      body,
+      contact.nx,
+      contact.nz,
+      DYNAMIC_PHYSICS.bodyRestitution,
+      DYNAMIC_PHYSICS.bodyFriction,
+    );
+    enemies.locomotionVx[enemyIndex] = actor.locomotionVx;
+    enemies.locomotionVz[enemyIndex] = actor.locomotionVz;
+    enemies.externalVx[enemyIndex] = actor.externalVx;
+    enemies.externalVz[enemyIndex] = actor.externalVz;
+    enemies.vx[enemyIndex] = actor.vx;
+    enemies.vz[enemyIndex] = actor.vz;
+    rocks.vx[rockIndex] = body.vx;
+    rocks.vz[rockIndex] = body.vz;
+    if (record) {
+      this.#recordBodyContact(
+        BODY_ENEMY_WIZARD,
+        enemies.id[enemyIndex],
+        BODY_ROCK,
+        rocks.id[rockIndex],
+        contact,
+      );
+    }
+  }
+
+  /** @param {number} enemyIndex @param {boolean} record */
+  #resolvePlayerEnemy(enemyIndex, record) {
+    const player = this.player;
+    const enemies = this.enemies;
+    if (
+      !circleCircleContact(
+        player.x,
+        player.z,
+        player.radius,
+        enemies.x[enemyIndex],
+        enemies.z[enemyIndex],
+        enemies.radius[enemyIndex],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = player.inverseMass + enemies.inverseMass[enemyIndex];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    player.x -= contact.nx * correction * player.inverseMass;
+    player.z -= contact.nz * correction * player.inverseMass;
+    enemies.x[enemyIndex] += contact.nx * correction * enemies.inverseMass[enemyIndex];
+    enemies.z[enemyIndex] += contact.nz * correction * enemies.inverseMass[enemyIndex];
+
+    this.#syncPlayerVelocity();
+    this.#syncEnemyVelocity(enemyIndex);
+    let relativeVx = enemies.vx[enemyIndex] - player.vx;
+    let relativeVz = enemies.vz[enemyIndex] - player.vz;
+    const normalSpeed = relativeVx * contact.nx + relativeVz * contact.nz;
+    if (normalSpeed < 0) {
+      const impulse =
+        (-(1 + DYNAMIC_PHYSICS.bodyRestitution) * normalSpeed) / inverseMassSum;
+      const impulseX = impulse * contact.nx;
+      const impulseZ = impulse * contact.nz;
+      player.externalVx -= impulseX * player.inverseMass;
+      player.externalVz -= impulseZ * player.inverseMass;
+      enemies.externalVx[enemyIndex] += impulseX * enemies.inverseMass[enemyIndex];
+      enemies.externalVz[enemyIndex] += impulseZ * enemies.inverseMass[enemyIndex];
+      this.#syncPlayerVelocity();
+      this.#syncEnemyVelocity(enemyIndex);
+      relativeVx = enemies.vx[enemyIndex] - player.vx;
+      relativeVz = enemies.vz[enemyIndex] - player.vz;
+      const tangentSpeed = relativeVx * -contact.nz + relativeVz * contact.nx;
+      const tangentImpulse = clampMagnitude(
+        -tangentSpeed / inverseMassSum,
+        impulse * DYNAMIC_PHYSICS.bodyFriction,
+      );
+      const frictionX = -contact.nz * tangentImpulse;
+      const frictionZ = contact.nx * tangentImpulse;
+      player.externalVx -= frictionX * player.inverseMass;
+      player.externalVz -= frictionZ * player.inverseMass;
+      enemies.externalVx[enemyIndex] += frictionX * enemies.inverseMass[enemyIndex];
+      enemies.externalVz[enemyIndex] += frictionZ * enemies.inverseMass[enemyIndex];
+      this.#syncPlayerVelocity();
+      this.#syncEnemyVelocity(enemyIndex);
+    }
+    if (record) {
+      this.#recordBodyContact(
+        BODY_PLAYER,
+        player.id,
+        BODY_ENEMY_WIZARD,
+        enemies.id[enemyIndex],
+        contact,
+      );
+    }
+  }
+
+  /** @param {number} left @param {number} right @param {boolean} record */
+  #resolveEnemyEnemy(left, right, record) {
+    const pool = this.enemies;
+    if (
+      !circleCircleContact(
+        pool.x[left],
+        pool.z[left],
+        pool.radius[left],
+        pool.x[right],
+        pool.z[right],
+        pool.radius[right],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = pool.inverseMass[left] + pool.inverseMass[right];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    pool.x[left] -= contact.nx * correction * pool.inverseMass[left];
+    pool.z[left] -= contact.nz * correction * pool.inverseMass[left];
+    pool.x[right] += contact.nx * correction * pool.inverseMass[right];
+    pool.z[right] += contact.nz * correction * pool.inverseMass[right];
+    this.#syncEnemyVelocity(left);
+    this.#syncEnemyVelocity(right);
+    let relativeVx = pool.vx[right] - pool.vx[left];
+    let relativeVz = pool.vz[right] - pool.vz[left];
+    const normalSpeed = relativeVx * contact.nx + relativeVz * contact.nz;
+    if (normalSpeed < 0) {
+      const impulse =
+        (-(1 + DYNAMIC_PHYSICS.bodyRestitution) * normalSpeed) / inverseMassSum;
+      const impulseX = impulse * contact.nx;
+      const impulseZ = impulse * contact.nz;
+      pool.externalVx[left] -= impulseX * pool.inverseMass[left];
+      pool.externalVz[left] -= impulseZ * pool.inverseMass[left];
+      pool.externalVx[right] += impulseX * pool.inverseMass[right];
+      pool.externalVz[right] += impulseZ * pool.inverseMass[right];
+      this.#syncEnemyVelocity(left);
+      this.#syncEnemyVelocity(right);
+      relativeVx = pool.vx[right] - pool.vx[left];
+      relativeVz = pool.vz[right] - pool.vz[left];
+      const tangentSpeed = relativeVx * -contact.nz + relativeVz * contact.nx;
+      const tangentImpulse = clampMagnitude(
+        -tangentSpeed / inverseMassSum,
+        impulse * DYNAMIC_PHYSICS.bodyFriction,
+      );
+      const frictionX = -contact.nz * tangentImpulse;
+      const frictionZ = contact.nx * tangentImpulse;
+      pool.externalVx[left] -= frictionX * pool.inverseMass[left];
+      pool.externalVz[left] -= frictionZ * pool.inverseMass[left];
+      pool.externalVx[right] += frictionX * pool.inverseMass[right];
+      pool.externalVz[right] += frictionZ * pool.inverseMass[right];
+      this.#syncEnemyVelocity(left);
+      this.#syncEnemyVelocity(right);
+    }
+    if (record) {
+      this.#recordBodyContact(
+        BODY_ENEMY_WIZARD,
+        pool.id[left],
+        BODY_ENEMY_WIZARD,
+        pool.id[right],
         contact,
       );
     }
@@ -1017,6 +1782,8 @@ export class Simulation {
       lifetime: Number(definition.projectile.lifetime),
       radius: Number(definition.projectile.radius),
       ownerId: player.id,
+      ownerKind: PROJECTILE_OWNER_KIND.player,
+      ownerTeam: ACTOR_TEAM.player,
       spellCode: spell.code,
       definitionRevision: spell.currentRevision,
       effectId,
@@ -1027,7 +1794,7 @@ export class Simulation {
       this.player.cooldown = this.spellCooldowns[FIREBALL_SPELL_CODE];
       this.castSequences[spell.code] = (this.castSequences[spell.code] + 1) >>> 0;
       this.nextEffectId = (this.nextEffectId + 1) >>> 0 || 1;
-      // Successful automatic casts are made explicit in schema-v5 command
+      // Successful automatic casts are made explicit in schema-v5-and-newer command
       // history. Rejected casts never advance or record the preview seed.
       target.variationSeed = effectSeed;
     }
@@ -1052,6 +1819,8 @@ export class Simulation {
       lifetime: PROJECTILE.lifetime,
       radius: PROJECTILE.radius,
       ownerId: player.id,
+      ownerKind: PROJECTILE_OWNER_KIND.player,
+      ownerTeam: ACTOR_TEAM.player,
     });
     if (id !== 0) player.cooldown = PROJECTILE.cooldown;
   }
@@ -1090,6 +1859,7 @@ export class Simulation {
       const steps = Math.max(1, Math.ceil(distance / stepLength));
       let hitKind = "";
       let hitRockIndex = -1;
+      let hitActorIndex = -1;
       let hitX = startX;
       let hitZ = startZ;
       for (let step = 0; step <= steps; step += 1) {
@@ -1118,10 +1888,47 @@ export class Simulation {
           }
         }
         if (hitKind) break;
+        if (pool.ownerTeam[index] === ACTOR_TEAM.enemy) {
+          if (
+            Math.hypot(testX - this.player.x, testZ - this.player.z)
+            <= pool.radius[index] + this.player.radius
+          ) {
+            hitKind = "player";
+            hitX = testX;
+            hitZ = testZ;
+          }
+        } else if (pool.ownerTeam[index] === ACTOR_TEAM.player) {
+          for (
+            let enemyIndex = 0;
+            enemyIndex < this.enemies.activeCount;
+            enemyIndex += 1
+          ) {
+            if (
+              Math.hypot(
+                testX - this.enemies.x[enemyIndex],
+                testZ - this.enemies.z[enemyIndex],
+              ) <= pool.radius[index] + this.enemies.radius[enemyIndex]
+            ) {
+              hitKind = "enemyWizard";
+              hitActorIndex = enemyIndex;
+              hitX = testX;
+              hitZ = testZ;
+              break;
+            }
+          }
+        }
+        if (hitKind) break;
       }
 
       if (hitKind) {
-        const event = this.#createExplosionEvent(index, hitKind, hitRockIndex, hitX, hitZ);
+        const event = this.#createExplosionEvent(
+          index,
+          hitKind,
+          hitRockIndex,
+          hitActorIndex,
+          hitX,
+          hitZ,
+        );
         this.#applyExplosion(event);
         this.impactEvents.push(event);
         this.#emitParticles(event);
@@ -1139,10 +1946,11 @@ export class Simulation {
    * @param {number} projectileIndex
    * @param {string} hitKind
    * @param {number} rockIndex
+   * @param {number} actorIndex
    * @param {number} hitX
    * @param {number} hitZ
    */
-  #createExplosionEvent(projectileIndex, hitKind, rockIndex, hitX, hitZ) {
+  #createExplosionEvent(projectileIndex, hitKind, rockIndex, actorIndex, hitX, hitZ) {
     const pool = this.projectiles;
     const spellCode = pool.spellCode[projectileIndex];
     const definitionRevision = pool.definitionRevision[projectileIndex];
@@ -1172,9 +1980,35 @@ export class Simulation {
       contactX = this.rocks.x[rockIndex] + nx * this.rocks.radius[rockIndex];
       contactZ = this.rocks.z[rockIndex] + nz * this.rocks.radius[rockIndex];
       hit = { kind: "rock", id: this.rocks.id[rockIndex] };
+    } else if (hitKind === "player" || hitKind === "enemyWizard") {
+      const body = hitKind === "player"
+        ? this.player
+        : {
+          id: this.enemies.id[actorIndex],
+          x: this.enemies.x[actorIndex],
+          z: this.enemies.z[actorIndex],
+          radius: this.enemies.radius[actorIndex],
+        };
+      const dx = hitX - body.x;
+      const dz = hitZ - body.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance > 1e-9) {
+        nx = dx / distance;
+        nz = dz / distance;
+      } else {
+        const velocityLength = Math.hypot(pool.vx[projectileIndex], pool.vz[projectileIndex]);
+        nx = velocityLength > 0 ? -pool.vx[projectileIndex] / velocityLength : 1;
+        nz = velocityLength > 0 ? -pool.vz[projectileIndex] / velocityLength : 0;
+      }
+      contactX = body.x + nx * body.radius;
+      contactZ = body.z + nz * body.radius;
+      hit = { kind: hitKind, id: body.id };
     } else {
       cell = { cx: this._gridContact.cx, cz: this._gridContact.cz };
-      hit = { kind: "cell", cx: cell.cx, cz: cell.cz };
+      const obelisk = this.scenario.obeliskAtCell(cell.cx, cell.cz);
+      hit = obelisk
+        ? { kind: "obelisk", id: obelisk.spawnId, cx: cell.cx, cz: cell.cz }
+        : { kind: "cell", cx: cell.cx, cz: cell.cz };
     }
     const originX = contactX + nx * EXPLOSION.originEpsilon;
     const originZ = contactZ + nz * EXPLOSION.originEpsilon;
@@ -1191,7 +2025,11 @@ export class Simulation {
       definitionRevision,
       effectId: pool.effectId[projectileIndex],
       effectSeed: pool.effectSeed[projectileIndex],
-      owner: { kind: "player", id: pool.ownerId[projectileIndex] },
+      owner: {
+        kind: ownerKindName(pool.ownerKind[projectileIndex]),
+        id: pool.ownerId[projectileIndex],
+        team: teamName(pool.ownerTeam[projectileIndex]),
+      },
       hit,
       x: originX,
       y: spawnHeight,
@@ -1218,15 +2056,21 @@ export class Simulation {
   /** @param {Record<string, any>} event */
   #applyExplosion(event) {
     this.#applyExplosionToPlayer(event);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#applyExplosionToEnemy(event, index);
+    }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       this.#applyExplosionToRock(event, index);
     }
     this.#syncPlayerVelocity();
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#syncEnemyVelocity(index);
+    }
   }
 
   /** @param {Record<string, any>} event */
   #applyExplosionToPlayer(event) {
-    const response = computeExplosionResponse({
+    let response = computeExplosionResponse({
       originX: event.originX,
       originZ: event.originZ,
       bodyX: this.player.x,
@@ -1238,18 +2082,40 @@ export class Simulation {
       fallbackNx: -event.nx,
       fallbackNz: -event.nz,
     });
-    if (!response) return;
-    const blocked = gridRayBlocked(
-      this.map,
-      event.originX,
-      event.originZ,
+    const directHit = event.hit?.kind === "player"
+      && Number(event.hit.id) === this.player.id;
+    if (!response && !directHit) return;
+    const hasBlastResponse = Boolean(response);
+    response ??= zeroImpulseResponse(
+      event,
       this.player.x,
       this.player.z,
+      this.player.radius,
     );
-    if (!blocked) {
+    const blocked = hasBlastResponse
+      ? gridRayBlocked(
+        this.map,
+        event.originX,
+        event.originZ,
+        this.player.x,
+        this.player.z,
+      )
+      : false;
+    if (hasBlastResponse && !blocked) {
       this.player.externalVx += response.deltaVx;
       this.player.externalVz += response.deltaVz;
     }
+    const damage = this.#combatDamageFor(
+      event,
+      "player",
+      this.player.id,
+      "player",
+      response.surfaceDistance,
+      blocked,
+    );
+    const healthAfter = damage.amount > 0
+      ? this.#damagePlayer(damage.amount, event, damage.kind)
+      : this.player.health;
     event.responses.push(
       this.#describeExplosionResponse(
         "player",
@@ -1258,8 +2124,176 @@ export class Simulation {
         this.player.z,
         blocked,
         response,
+        damage.amount,
+        healthAfter,
       ),
     );
+  }
+
+  /** @param {Record<string, any>} event @param {number} index */
+  #applyExplosionToEnemy(event, index) {
+    const pool = this.enemies;
+    let response = computeExplosionResponse({
+      originX: event.originX,
+      originZ: event.originZ,
+      bodyX: pool.x[index],
+      bodyZ: pool.z[index],
+      bodyRadius: pool.radius[index],
+      massKg: pool.massKg[index],
+      blastRadius: event.radius,
+      pressureImpulse: event.pressureImpulse,
+      fallbackNx: -event.nx,
+      fallbackNz: -event.nz,
+    });
+    const directHit = event.hit?.kind === "enemyWizard"
+      && Number(event.hit.id) === pool.id[index];
+    if (!response && !directHit) return;
+    const hasBlastResponse = Boolean(response);
+    response ??= zeroImpulseResponse(
+      event,
+      pool.x[index],
+      pool.z[index],
+      pool.radius[index],
+    );
+    const blocked = hasBlastResponse
+      ? gridRayBlocked(
+        this.map,
+        event.originX,
+        event.originZ,
+        pool.x[index],
+        pool.z[index],
+      )
+      : false;
+    if (hasBlastResponse && !blocked) {
+      pool.externalVx[index] += response.deltaVx;
+      pool.externalVz[index] += response.deltaVz;
+    }
+    const damage = this.#combatDamageFor(
+      event,
+      "enemyWizard",
+      pool.id[index],
+      "enemy",
+      response.surfaceDistance,
+      blocked,
+    );
+    const healthAfter = damage.amount > 0
+      ? this.#damageEnemy(index, damage.amount, event, damage.kind)
+      : pool.health[index];
+    event.responses.push(
+      this.#describeExplosionResponse(
+        "enemyWizard",
+        pool.id[index],
+        pool.x[index],
+        pool.z[index],
+        blocked,
+        response,
+        damage.amount,
+        healthAfter,
+      ),
+    );
+  }
+
+  /**
+   * @param {Record<string, any>} event
+   * @param {string} targetKind
+   * @param {number} targetId
+   * @param {string} targetTeam
+   * @param {number} surfaceDistance
+   * @param {boolean} blocked
+   */
+  #combatDamageFor(event, targetKind, targetId, targetTeam, surfaceDistance, blocked) {
+    if (event.owner?.team === targetTeam) return { amount: 0, kind: "immune" };
+    if (event.hit?.kind === targetKind && Number(event.hit.id) === targetId) {
+      return { amount: COMBAT.directDamage, kind: "direct" };
+    }
+    if (blocked) return { amount: 0, kind: "blocked" };
+    if (!(event.radius > 0)) {
+      return {
+        amount: surfaceDistance <= 0 ? COMBAT.directDamage : 0,
+        kind: "splash",
+      };
+    }
+    return {
+      amount: COMBAT.directDamage * clamp(1 - surfaceDistance / event.radius, 0, 1),
+      kind: "splash",
+    };
+  }
+
+  /** @param {number} amount @param {Record<string, any>} source @param {string} kind */
+  #damagePlayer(amount, source, kind) {
+    if (!(amount > 0) || this.player.health <= 0) return this.player.health;
+    const before = this.player.health;
+    this.player.health = Math.max(0, before - amount);
+    this.player.damageFreeTicks = 0;
+    this.player.lastDamageTick = this.tickCount + 1;
+    this.#recordCombatEvent({
+      type: "damage",
+      tick: this.tickCount + 1,
+      damageKind: kind,
+      amount: Math.min(amount, before),
+      requestedAmount: amount,
+      healthBefore: before,
+      healthAfter: this.player.health,
+      target: { kind: "player", id: this.player.id, team: "player" },
+      owner: source.owner ? { ...source.owner } : null,
+      projectileId: source.projectileId ?? null,
+      effectId: source.effectId ?? null,
+    });
+    if (this.player.health === 0) {
+      this.#recordCombatEvent({
+        type: "death",
+        tick: this.tickCount + 1,
+        target: { kind: "player", id: this.player.id, team: "player" },
+        owner: source.owner ? { ...source.owner } : null,
+      });
+      this.levelState = "defeated";
+      this.defeatedTicksRemaining = COMBAT.defeatedTicks;
+      this.#recordCombatEvent({
+        type: "defeat",
+        tick: this.tickCount + 1,
+        restartTicks: COMBAT.defeatedTicks,
+        restartSeconds: COMBAT.defeatedTicks / SIMULATION.tickHz,
+      });
+    }
+    return this.player.health;
+  }
+
+  /** @param {number} index @param {number} amount @param {Record<string, any>} source @param {string} kind */
+  #damageEnemy(index, amount, source, kind) {
+    const pool = this.enemies;
+    if (!(amount > 0) || pool.health[index] <= 0) return pool.health[index];
+    const before = pool.health[index];
+    pool.health[index] = Math.max(0, before - amount);
+    pool.damageFreeTicks[index] = 0;
+    pool.lastDamageTick[index] = this.tickCount + 1;
+    const target = {
+      kind: "enemyWizard",
+      id: pool.id[index],
+      team: "enemy",
+      spawnSequence: pool.spawnSequence[index],
+    };
+    this.#recordCombatEvent({
+      type: "damage",
+      tick: this.tickCount + 1,
+      damageKind: kind,
+      amount: Math.min(amount, before),
+      requestedAmount: amount,
+      healthBefore: before,
+      healthAfter: pool.health[index],
+      target,
+      owner: source.owner ? { ...source.owner } : null,
+      projectileId: source.projectileId ?? null,
+      effectId: source.effectId ?? null,
+    });
+    if (pool.health[index] === 0) {
+      this.#recordCombatEvent({
+        type: "death",
+        tick: this.tickCount + 1,
+        target,
+        owner: source.owner ? { ...source.owner } : null,
+      });
+    }
+    return pool.health[index];
   }
 
   /** @param {Record<string, any>} event @param {number} index */
@@ -1314,8 +2348,10 @@ export class Simulation {
    * @param {number} z
    * @param {boolean} blocked
    * @param {ReturnType<typeof computeExplosionResponse>} response
+   * @param {number} [damage]
+   * @param {number|null} [healthAfter]
    */
-  #describeExplosionResponse(kind, id, x, z, blocked, response) {
+  #describeExplosionResponse(kind, id, x, z, blocked, response, damage = 0, healthAfter = null) {
     if (!response) return null;
     return {
       kind,
@@ -1328,6 +2364,8 @@ export class Simulation {
       projectedArea: response.projectedArea,
       potentialImpulse: response.impulse,
       impulse: blocked ? 0 : response.impulse,
+      damage,
+      healthAfter,
       deltaVelocity: {
         x: blocked ? 0 : response.deltaVx,
         y: 0,
@@ -1930,6 +2968,42 @@ export class Simulation {
     };
   }
 
+  encounterDiagnostics() {
+    const snapshot = this.snapshot();
+    return {
+      schemaVersion: snapshot.schemaVersion,
+      gameplayProfile: snapshot.gameplayProfile,
+      enemyAiProfile: snapshot.enemyAiProfile,
+      tick: snapshot.tick,
+      level: cloneUnknown(snapshot.level),
+      encounter: cloneUnknown(snapshot.encounter),
+      player: {
+        id: snapshot.player.id,
+        health: snapshot.player.health,
+        maximumHealth: snapshot.player.maximumHealth,
+        regeneration: cloneUnknown(snapshot.player.regeneration),
+      },
+      enemies: snapshot.enemies.map((enemy) => ({
+        id: enemy.id,
+        spawnSequence: enemy.spawnSequence,
+        spawnTick: enemy.spawnTick,
+        position: { x: enemy.x, z: enemy.z },
+        velocity: { x: enemy.vx, z: enemy.vz },
+        health: enemy.health,
+        maximumHealth: enemy.maximumHealth,
+        regeneration: cloneUnknown(enemy.regeneration),
+        cooldowns: { ...enemy.cooldowns },
+        castSequence: enemy.castSequence,
+        shotReadyTick: enemy.shotReadyTick,
+        ticksUntilShot: enemy.ticksUntilShot,
+        aiState: enemy.aiState,
+        lineOfSight: enemy.lineOfSight,
+      })),
+      recentCombatEvents: snapshot.recentCombatEvents.map(cloneUnknown),
+      combatEventMetrics: { ...snapshot.combatEventMetrics },
+    };
+  }
+
   snapshot() {
     const rocks = new Array(this.rocks.activeCount);
     for (let index = 0; index < rocks.length; index += 1) {
@@ -1950,12 +3024,82 @@ export class Simulation {
       };
     }
 
+    const obelisks = this.scenario.entities
+      .filter((entity) => entity.kind === "obelisk")
+      .map((entity) => ({
+        kind: "obelisk",
+        id: entity.spawnId,
+        spawnId: entity.spawnId,
+        x: entity.x,
+        z: entity.z,
+        cell: { cx: Math.floor(entity.x), cz: Math.floor(entity.z) },
+        solid: true,
+        invulnerable: true,
+      }));
+
+    const enemies = new Array(this.enemies.activeCount);
+    for (let index = 0; index < enemies.length; index += 1) {
+      const health = this.enemies.health[index];
+      const maximumHealth = this.enemies.maximumHealth[index];
+      const damageFreeTicks = this.enemies.damageFreeTicks[index];
+      enemies[index] = {
+        kind: "enemyWizard",
+        id: this.enemies.id[index],
+        index,
+        spawnSequence: this.enemies.spawnSequence[index],
+        spawnTick: this.enemies.spawnTick[index],
+        x: this.enemies.x[index],
+        z: this.enemies.z[index],
+        previousX: this.enemies.previousX[index],
+        previousZ: this.enemies.previousZ[index],
+        vx: this.enemies.vx[index],
+        vz: this.enemies.vz[index],
+        desiredVx: this.enemies.desiredVx[index],
+        desiredVz: this.enemies.desiredVz[index],
+        locomotionVx: this.enemies.locomotionVx[index],
+        locomotionVz: this.enemies.locomotionVz[index],
+        externalVx: this.enemies.externalVx[index],
+        externalVz: this.enemies.externalVz[index],
+        radius: this.enemies.radius[index],
+        massKg: this.enemies.massKg[index],
+        team: "enemy",
+        health,
+        maximumHealth,
+        damageFreeTicks,
+        lastDamageTick: this.enemies.lastDamageTick[index],
+        regeneration: {
+          delayTicks: COMBAT.regenerationDelayTicks,
+          damageFreeTicks,
+          ratePerSecond: COMBAT.regenerationPerSecond,
+          active: health > 0
+            && health < maximumHealth
+            && damageFreeTicks >= COMBAT.regenerationDelayTicks,
+        },
+        cooldowns: { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
+        castSequence: this.enemies.castSequence[index],
+        shotReadyTick: this.enemies.shotReadyTick[index],
+        ticksUntilShot: Math.max(
+          0,
+          this.enemies.shotReadyTick[index] - this.tickCount,
+        ),
+        aiState: ENEMY_AI_STATE_NAMES[this.enemies.aiState[index]] ?? "hold",
+        lineOfSight: Boolean(this.enemies.lineOfSight[index]),
+      };
+    }
+
     const projectiles = new Array(this.projectiles.activeCount);
     for (let index = 0; index < projectiles.length; index += 1) {
       projectiles[index] = {
         kind: "projectile",
         id: this.projectiles.id[index],
         ownerId: this.projectiles.ownerId[index],
+        ownerKind: ownerKindName(this.projectiles.ownerKind[index]),
+        ownerTeam: teamName(this.projectiles.ownerTeam[index]),
+        owner: {
+          kind: ownerKindName(this.projectiles.ownerKind[index]),
+          id: this.projectiles.ownerId[index],
+          team: teamName(this.projectiles.ownerTeam[index]),
+        },
         spellId: this.spells.getByCode(this.projectiles.spellCode[index])?.id
           ?? FIREBALL_SPELL_ID,
         spellCode: this.projectiles.spellCode[index],
@@ -2036,11 +3180,40 @@ export class Simulation {
     }
 
     const recentEvents = this.impactEvents.toArray(32).map(cloneEvent);
+    const recentCombatEvents = this.combatEvents
+      .toArray(COMBAT.snapshotEventCount)
+      .map(cloneUnknown);
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
       rngState: this.rng.state,
       tick: this.tickCount,
+      gameplayProfile: this.gameplayProfile,
+      enemyAiProfile: this.enemyAiProfile,
+      level: {
+        state: this.levelState,
+        defeatedTicksRemaining: this.defeatedTicksRemaining,
+        defeatedSecondsRemaining: this.defeatedTicksRemaining / SIMULATION.tickHz,
+      },
+      encounter: {
+        enabled: this.encounter.enabled,
+        spawnIntervalTicks: ENEMY_WIZARD.spawnIntervalTicks,
+        nextSpawnTick: this.encounter.nextSpawnTick,
+        ticksUntilSpawn: this.encounter.enabled
+          ? Math.max(0, this.encounter.nextSpawnTick - this.tickCount)
+          : null,
+        spawnCursor: this.encounter.spawnCursor,
+        nextDirection: SPAWN_OFFSETS[this.encounter.spawnCursor].name,
+        attempts: this.encounter.attempts,
+        successfulSpawns: this.encounter.successfulSpawns,
+        skippedAttempts: {
+          blocked: this.encounter.skippedBlocked,
+          capped: this.encounter.skippedCapped,
+        },
+        nextSpawnSequence: this.encounter.nextSpawnSequence,
+        alive: this.enemies.activeCount,
+        capacity: this.enemies.capacity,
+      },
       particleProfile: this.particleProfile,
       scenarioVersion: SCENARIO_VERSION,
       map: {
@@ -2054,10 +3227,24 @@ export class Simulation {
         kind: "player",
         index: 0,
         ...this.player,
+        regeneration: {
+          delayTicks: COMBAT.regenerationDelayTicks,
+          damageFreeTicks: this.player.damageFreeTicks,
+          ratePerSecond: COMBAT.regenerationPerSecond,
+          active: this.player.health > 0
+            && this.player.health < this.player.maximumHealth
+            && this.player.damageFreeTicks >= COMBAT.regenerationDelayTicks,
+        },
         cooldowns: Object.fromEntries(
           this.spells.list().map((spell) => [
             spell.id,
             this.spellCooldowns[spell.code],
+          ]),
+        ),
+        castSequences: Object.fromEntries(
+          this.spells.list().map((spell) => [
+            spell.id,
+            this.castSequences[spell.code],
           ]),
         ),
       },
@@ -2065,6 +3252,8 @@ export class Simulation {
         this.#spellRevisionReferences(recentEvents),
       ),
       rocks,
+      obelisks,
+      enemies,
       projectiles,
       particles,
       contacts,
@@ -2072,12 +3261,23 @@ export class Simulation {
         dropped: this.contacts.dropped,
       },
       recentEvents,
+      recentCombatEvents,
+      combatEventMetrics: {
+        retained: this.combatEvents.length,
+        capacity: this.combatEvents.capacity,
+        dropped: this.combatEventDropped,
+      },
       pools: {
         rocks: {
           active: this.rocks.activeCount,
           capacity: this.rocks.capacity,
           dropped: this.rocks.dropped,
           speedClamped: this.rocks.speedClamped,
+        },
+        enemies: {
+          active: this.enemies.activeCount,
+          capacity: this.enemies.capacity,
+          dropped: this.enemies.dropped,
         },
         projectiles: {
           active: this.projectiles.activeCount,
@@ -2113,6 +3313,13 @@ export class Simulation {
       best = this.#describePlayer();
       bestDistance = playerDistance;
     }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      const distance = Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index]);
+      if (distance <= this.enemies.radius[index] + 0.08 && distance < bestDistance) {
+        best = this.#describeEnemy(index);
+        bestDistance = distance;
+      }
+    }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       const distance = Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index]);
       if (distance <= this.rocks.radius[index] + 0.08 && distance < bestDistance) {
@@ -2137,6 +3344,8 @@ export class Simulation {
     if (best) return best;
     const cx = Math.floor(x);
     const cz = Math.floor(z);
+    const obelisk = this.scenario.obeliskAtCell(cx, cz);
+    if (obelisk) return this.#describeObelisk(obelisk);
     return {
       kind: "cell",
       id: `${cx}:${cz}`,
@@ -2161,6 +3370,16 @@ export class Simulation {
     if (selection.kind === "rock") {
       const index = this.rocks.findIndexById(Number(selection.id));
       return index < 0 ? null : this.#describeRock(index);
+    }
+    if (selection.kind === "enemyWizard") {
+      const index = this.enemies.findIndexById(Number(selection.id));
+      return index < 0 ? null : this.#describeEnemy(index);
+    }
+    if (selection.kind === "obelisk") {
+      const obelisk = this.scenario.entities.find(
+        (entity) => entity.kind === "obelisk" && entity.spawnId === Number(selection.id),
+      );
+      return obelisk ? this.#describeObelisk(obelisk) : null;
     }
     if (selection.kind === "projectile") {
       const index = this.projectiles.findIndexById(Number(selection.id));
@@ -2197,11 +3416,104 @@ export class Simulation {
       },
       radius: this.player.radius,
       massKg: this.player.massKg,
+      team: "player",
+      health: this.player.health,
+      maximumHealth: this.player.maximumHealth,
+      regeneration: {
+        delayTicks: COMBAT.regenerationDelayTicks,
+        damageFreeTicks: this.player.damageFreeTicks,
+        ratePerSecond: COMBAT.regenerationPerSecond,
+        active: this.player.health > 0
+          && this.player.health < this.player.maximumHealth
+          && this.player.damageFreeTicks >= COMBAT.regenerationDelayTicks,
+      },
+      cooldowns: Object.fromEntries(
+        this.spells.list().map((spell) => [spell.id, this.spellCooldowns[spell.code]]),
+      ),
+      castSequences: Object.fromEntries(
+        this.spells.list().map((spell) => [spell.id, this.castSequences[spell.code]]),
+      ),
       cell: null,
       age: null,
       lifetime: null,
       flags: { coolingDown: this.player.cooldown > 0 },
       raw: { ...this.player },
+    };
+  }
+
+  /** @param {number} index */
+  #describeEnemy(index) {
+    const health = this.enemies.health[index];
+    const maximumHealth = this.enemies.maximumHealth[index];
+    const damageFreeTicks = this.enemies.damageFreeTicks[index];
+    return {
+      kind: "enemyWizard",
+      id: this.enemies.id[index],
+      index,
+      spawnSequence: this.enemies.spawnSequence[index],
+      spawnTick: this.enemies.spawnTick[index],
+      position: { x: this.enemies.x[index], y: 0, z: this.enemies.z[index] },
+      velocity: { x: this.enemies.vx[index], y: 0, z: this.enemies.vz[index] },
+      desiredVelocity: {
+        x: this.enemies.desiredVx[index],
+        y: 0,
+        z: this.enemies.desiredVz[index],
+      },
+      locomotionVelocity: {
+        x: this.enemies.locomotionVx[index],
+        y: 0,
+        z: this.enemies.locomotionVz[index],
+      },
+      externalVelocity: {
+        x: this.enemies.externalVx[index],
+        y: 0,
+        z: this.enemies.externalVz[index],
+      },
+      radius: this.enemies.radius[index],
+      massKg: this.enemies.massKg[index],
+      health,
+      maximumHealth,
+      team: "enemy",
+      cooldowns: { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
+      castSequence: this.enemies.castSequence[index],
+      shotReadyTick: this.enemies.shotReadyTick[index],
+      aiState: ENEMY_AI_STATE_NAMES[this.enemies.aiState[index]] ?? "hold",
+      lineOfSight: Boolean(this.enemies.lineOfSight[index]),
+      regeneration: {
+        delayTicks: COMBAT.regenerationDelayTicks,
+        damageFreeTicks,
+        ratePerSecond: COMBAT.regenerationPerSecond,
+        active: health > 0
+          && health < maximumHealth
+          && damageFreeTicks >= COMBAT.regenerationDelayTicks,
+      },
+      cell: null,
+      age: null,
+      lifetime: null,
+      flags: {
+        coolingDown: this.enemies.cooldown[index] > 0,
+        lineOfSight: Boolean(this.enemies.lineOfSight[index]),
+      },
+    };
+  }
+
+  /** @param {{spawnId:number,x:number,z:number}} obelisk */
+  #describeObelisk(obelisk) {
+    const cx = Math.floor(obelisk.x);
+    const cz = Math.floor(obelisk.z);
+    return {
+      kind: "obelisk",
+      id: obelisk.spawnId,
+      index: this.scenario.entities.findIndex((entity) => entity === obelisk),
+      spawnId: obelisk.spawnId,
+      position: { x: obelisk.x, y: 0, z: obelisk.z },
+      velocity: null,
+      radius: Math.SQRT1_2,
+      massKg: null,
+      cell: { cx, cz, tile: 1, inBounds: true },
+      age: null,
+      lifetime: null,
+      flags: { authored: true, solid: true, protected: true, invulnerable: true },
     };
   }
 
@@ -2231,6 +3543,13 @@ export class Simulation {
       kind: "projectile",
       id: this.projectiles.id[index],
       ownerId: this.projectiles.ownerId[index],
+      ownerKind: ownerKindName(this.projectiles.ownerKind[index]),
+      ownerTeam: teamName(this.projectiles.ownerTeam[index]),
+      owner: {
+        kind: ownerKindName(this.projectiles.ownerKind[index]),
+        id: this.projectiles.ownerId[index],
+        team: teamName(this.projectiles.ownerTeam[index]),
+      },
       spell: this.spells.getByCode(spellCode)?.id ?? FIREBALL_SPELL_ID,
       spellCode,
       definitionRevision: this.projectiles.definitionRevision[index],
@@ -2323,6 +3642,14 @@ export class Simulation {
         return false;
       }
     }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (
+        Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index]) <
+        definition.radius + this.enemies.radius[index]
+      ) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -2358,6 +3685,8 @@ export class Simulation {
         particleBounce: this.commandLogParticleBounce,
         particleWallCollision: this.commandLogParticleWallCollision,
         spells: cloneUnknown(this.commandLogSpellBaseline),
+        gameplayProfile: this.commandLogGameplayProfile,
+        enemyAiProfile: this.commandLogEnemyAiProfile,
       },
       truncated: this.commandLogDropped > 0,
       commands: this.commandLog.toArray().map((entry) => ({
@@ -2369,8 +3698,11 @@ export class Simulation {
 
   /** @param {Record<string, any>} recording */
   static replay(recording) {
-    const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
     const recordingSchema = Number(recording.schemaVersion);
+    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 6) {
+      throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
+    }
+    const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
     const particleProfile = recordingSchema >= 4
       ? recording.configuration?.particleProfile ?? DEFAULT_PARTICLE_PROFILE
       : PARTICLE_PROFILE_M02;
@@ -2384,7 +3716,23 @@ export class Simulation {
       ? recording.configuration?.spells
       : undefined;
     if (recordingSchema >= 5 && !Array.isArray(spellBaseline)) {
-      throw new TypeError("Schema-v5 recording is missing its spell baseline");
+      throw new TypeError(`Schema-v${recordingSchema} recording is missing its spell baseline`);
+    }
+    let gameplayProfile = GAMEPLAY_PROFILE_PRE_COMBAT;
+    let enemyAiProfile = ENEMY_AI_PROFILE_NONE;
+    if (recordingSchema >= 6) {
+      gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
+      enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
+      const validProfiles = (
+        gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && enemyAiProfile === ENEMY_AI_PROFILE_BASIC
+      ) || (
+        gameplayProfile === GAMEPLAY_PROFILE_PRE_COMBAT
+        && enemyAiProfile === ENEMY_AI_PROFILE_NONE
+      );
+      if (!validProfiles) {
+        throw new TypeError("Schema-v6 recording has invalid or missing gameplay profiles");
+      }
     }
     const simulation = new Simulation({
       seed: recording.seed,
@@ -2398,6 +3746,8 @@ export class Simulation {
       particleWallCollision,
       spellBaseline,
       legacyFireballMode: recordingSchema < 5,
+      gameplayProfile,
+      enemyAiProfile,
     });
     for (const entry of recording.commands) simulation.tick(entry.command);
     return simulation;

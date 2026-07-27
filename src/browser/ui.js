@@ -29,6 +29,8 @@ export class ArenaUi {
     this.canvas = /** @type {HTMLCanvasElement} */ (required("arena"));
     this.viewport = required("arena-viewport");
     this.statusPill = required("run-status");
+    this.defeatOverlay = required("defeat-overlay");
+    this.defeatCountdown = required("defeat-countdown");
     this.tickValue = required("tick-value");
     this.seedValue = required("seed-value");
     this.pointerValue = required("pointer-value");
@@ -36,9 +38,11 @@ export class ArenaUi {
     this.inspector = required("inspector-output");
     this.events = required("events-output");
     this.rockPool = required("rock-pool");
+    this.enemyPool = required("enemy-pool");
     this.projectilePool = required("projectile-pool");
     this.particlePool = required("particle-pool");
     this.rockBar = /** @type {HTMLElement} */ (required("rock-bar"));
+    this.enemyBar = /** @type {HTMLElement} */ (required("enemy-bar"));
     this.projectileBar = /** @type {HTMLElement} */ (required("projectile-bar"));
     this.particleBar = /** @type {HTMLElement} */ (required("particle-bar"));
     this.error = required("error-output");
@@ -127,9 +131,20 @@ export class ArenaUi {
     const now = performance.now();
     if (now - this.lastUiUpdate < 80) return;
     this.lastUiUpdate = now;
+    const defeated = snapshot.level?.state === "defeated";
+    const remainingSeconds = Number(snapshot.level?.defeatedSecondsRemaining ?? 0);
     this.pauseButton.textContent = metrics.paused ? "Resume" : "Pause";
-    this.statusPill.textContent = metrics.paused ? "PAUSED" : "RUNNING";
-    this.statusPill.classList.toggle("is-paused", metrics.paused);
+    this.pauseButton.disabled = defeated;
+    this.modeButton.disabled = defeated;
+    this.statusPill.textContent = defeated
+      ? `DEFEATED · ${number(remainingSeconds, 1)}s`
+      : metrics.paused
+        ? "PAUSED"
+        : "RUNNING";
+    this.statusPill.classList.toggle("is-paused", metrics.paused && !defeated);
+    this.statusPill.classList.toggle("is-defeated", defeated);
+    this.defeatOverlay.hidden = !defeated;
+    this.defeatCountdown.textContent = `Restarting this seed in ${number(remainingSeconds, 1)}s`;
     this.tickValue.textContent = String(snapshot.tick);
     this.seedValue.textContent = `0x${snapshot.seed.toString(16).padStart(8, "0")}`;
     const cx = Math.floor(view.mouseWorld.x);
@@ -157,8 +172,10 @@ export class ArenaUi {
       `queue     ${metrics.queuedCommands}  dropped ${metrics.droppedCommands}`,
       `log       ${snapshot.commandLog.retained}/${snapshot.commandLog.capacity}  dropped ${snapshot.commandLog.dropped}`,
       `contacts  ${snapshot.contacts.length}  dropped ${snapshot.contactMetrics.dropped}`,
+      `combat    ${snapshot.combatEventMetrics.retained}/${snapshot.combatEventMetrics.capacity}  dropped ${snapshot.combatEventMetrics.dropped}`,
     ].join("\n");
     this.rockPool.textContent = `${snapshot.pools.rocks.active} / ${snapshot.pools.rocks.capacity}  ·  dropped ${snapshot.pools.rocks.dropped}  ·  caps ${snapshot.pools.rocks.speedClamped}`;
+    this.enemyPool.textContent = `${snapshot.pools.enemies.active} / ${snapshot.pools.enemies.capacity}  ·  dropped ${snapshot.pools.enemies.dropped}`;
     this.projectilePool.textContent = `${snapshot.pools.projectiles.active} / ${snapshot.pools.projectiles.capacity}  ·  dropped ${snapshot.pools.projectiles.dropped}`;
     this.particlePool.textContent = [
       `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}`,
@@ -168,6 +185,7 @@ export class ArenaUi {
       `collision discards ${snapshot.pools.particles.collisionDiscards}`,
     ].join("  ·  ");
     this.rockBar.style.width = `${(snapshot.pools.rocks.active / snapshot.pools.rocks.capacity) * 100}%`;
+    this.enemyBar.style.width = `${(snapshot.pools.enemies.active / snapshot.pools.enemies.capacity) * 100}%`;
     this.projectileBar.style.width = `${(snapshot.pools.projectiles.active / snapshot.pools.projectiles.capacity) * 100}%`;
     this.particleBar.style.width = `${(snapshot.pools.particles.active / snapshot.pools.particles.capacity) * 100}%`;
     const inspected = view.pinnedHidden ? null : view.inspected ?? view.hover;
@@ -180,7 +198,9 @@ export class ArenaUi {
     this.events.textContent = events.length
       ? events.map((event) => {
         const blocked = event.responses.filter((response) => response.blocked).length;
-        const hit = event.hit.kind === "rock" ? `rock ${event.hit.id}` : `cell ${event.hit.cx},${event.hit.cz}`;
+        const hit = event.hit.kind === "cell"
+          ? `cell ${event.hit.cx},${event.hit.cz}`
+          : `${event.hit.kind} ${event.hit.id}`;
         return `#${event.tick} blast p${event.projectileId} -> ${hit}\n  ${event.responses.length} in radius · ${blocked} wall-blocked`;
       }).join("\n")
       : "No explosions recorded.";

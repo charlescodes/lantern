@@ -15,6 +15,8 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
     lifetime: 500,
     radius: 0.3,
     ownerId: 77,
+    ownerKind: 2,
+    ownerTeam: 2,
   });
   pool.previousX[2] = 91;
   pool.previousZ[2] = 92;
@@ -25,7 +27,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
     {
       id: pool.id[0], x: pool.x[0], z: pool.z[0], previousX: pool.previousX[0], previousZ: pool.previousZ[0],
       vx: pool.vx[0], vz: pool.vz[0], age: pool.age[0], lifetime: pool.lifetime[0], radius: pool.radius[0],
-      ownerId: pool.ownerId[0],
+      ownerId: pool.ownerId[0], ownerKind: pool.ownerKind[0], ownerTeam: pool.ownerTeam[0],
     },
     {
       id: lastId,
@@ -39,6 +41,8 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
       lifetime: 500,
       radius: Math.fround(0.3),
       ownerId: 77,
+      ownerKind: 2,
+      ownerTeam: 2,
     },
   );
 });

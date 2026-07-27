@@ -1,6 +1,6 @@
-# Lantern 0.5.0 / Spell Lab
+# Lantern 0.6.0 / Obelisk Combat
 
-A browser-first fixed-step X/Z simulation for authoring replay-safe Fireball revisions while inspecting collision, explosions, physical knockback, ember lifecycles, current line of sight, and bounded runtime state. Canvas2D remains the default regression presentation; an opt-in Three.js 3D and dynamic-lighting vertical consumes the same read-only snapshots, spell table, and TrueSight frame.
+A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and a bounded enemy-wizard encounter. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, and TrueSight frame.
 
 ## Run
 
@@ -37,22 +37,24 @@ npm run check
 npm run test:soak
 npm run test:soak:sight
 npm run test:soak:spell
+npm run test:soak:combat
 ```
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.5.0` adds the [Spell Lab and versioned Fireball definition contract](./docs/milestones/0.5.0-spell-lab.md), advances runtime/snapshot/recording schema to v5, and leaves scenario v2, map v1, performance-report v2, and the frozen legacy particle profiles unchanged.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.6.0` adds the [Obelisk Combat Foundation](./docs/milestones/0.6.0-obelisk-combat.md), advances runtime/snapshot/recording schema to v6 and scenario JSON to v3, and leaves map v1, Fireball definition v1, performance-report v2, and frozen legacy replay profiles unchanged.
 
 ## Play controls
 
 - Hold RMB to accelerate toward the pointer; release it to brake.
-- Press LMB to cast the selected spell; Fireball is the only 0.5.0 handler. Fireballs explode on the first wall or rock they hit.
+- Press LMB to cast the selected spell; Fireball is the only handler. Fireballs explode on the first opposing actor, wall, rock, or obelisk they hit and pass through same-team actors.
 - Keep Spell Lab open while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed.
 - Press `Space` to pause, `.` to pause and advance one tick, `R` to reset the current seed, and `Shift+R` to choose a new seed.
 - Press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state.
 - Press `F` to focus the player. Use the wheel to zoom and MMB drag to pan.
 - Hover to inspect transiently. Click to pin or unpin an entity by stable ID.
 - Use **Spark walls** to bypass or enable particle/map sweeps. **Ground bounce** defaults on and independently controls the single ground rebound.
+- At zero health, movement and casting freeze for 90 fixed ticks (1.5 seconds), then the same seed restarts automatically. Reset and Spell Lab actions remain available during defeat.
 
 ## Spatial units and resolution
 
@@ -64,33 +66,37 @@ There is no component-mask or ECS dispatch layer yet. Systems explicitly process
 
 ## Scenario editor
 
-Choose Wall, Rock .1m, Rock .3m, Rock .9m, or Erase from the authoring palette. LMB applies the selected tool and RMB erases. Invalid placements over a wall, the player, or another authored/active body are rejected.
+Choose Wall, Rock .1m, Rock .3m, Rock .9m, or Erase from the authoring palette. LMB applies the selected tool and RMB erases. Invalid placements over a wall, the player, an enemy, or another authored/active body are rejected.
 
-Scenario JSON v2 stores the grid, player spawn, and authored rocks. Legacy map v1 JSON still loads as a scenario with no rocks. Save exports authored positions, while **Restore positions** reconstructs the player and rocks and clears transient projectiles, particles, and motion.
+Scenario JSON v3 stores the grid, player spawn, authored rocks, and at most one cell-centered obelisk on a solid cell. The default obelisk occupies cell `(20, 18)` at `(20.5, 18.5)`; its cell and entity are protected from editor erasure. Legacy map v1 and scenario v2 JSON still load without an obelisk or encounter. Save exports authored positions, while **Restore positions** reconstructs authored state and clears enemies, effects, health changes, and encounter cadence.
 
 ## Spell Lab
 
 Spell Lab is a collapsible, non-modal arena overlay and a bottom drawer on narrow screens. It edits a validated complete Fireball definition v1 draft. Numeric fields pair a range control with an exact numeric input; collapsible sections cover essentials, projectile motion, distribution, lifecycle, collision, palette, emissive response, and lighting. The visible formulas explain the size-linked lifetime and lower-biased vertical sample.
 
-Its primary purpose is developer-side effect tuning. Revision numbers are runtime bookkeeping that keeps an effect stable when settings change mid-flight, not a player-facing version-management feature. A future cosmetic-customization system could reuse the validated catalog and presentation fields, but 0.5.0 adds no player persistence, ownership, or loadout rules.
+Its primary purpose is developer-side effect tuning. Player and enemy wizards cast from the same applied Fireball registry and current definition; Apply affects future casts from either side, while every existing effect retains its captured revision. Revision numbers remain runtime bookkeeping, not a player-facing version-management feature. Combat damage is a fixed shared rule and is intentionally not authorable in Fireball definition v1.
 
 **Apply** creates a monotonically numbered immutable revision for future casts only. Existing projectiles, impacts, particles, colors, collision responses, and light leases continue resolving through the revision captured when that cast spawned. **Revert to applied** discards draft edits; **Reset draft to defaults** changes only the draft. Import replaces the draft and never applies it. Apply, Copy, and Download remain unavailable until the complete document validates. A reset preserves the applied definition and the panel draft, while a browser reload returns to built-in defaults because no Spell Lab state is written to the URL or local storage.
 
-Automatic variation seeds are stable 32-bit hashes of simulation seed, spell code, and successful-cast sequence. Locked seeds reproduce the same semantic angle, speed, bias, vertical, lifetime, size, hue, saturation, and brightness samples. Rejected casts do not advance the sequence. **Clear active effects** removes Fireball projectiles, sparks, retained impact visuals, and their presentation light leases; physical impulses already applied to bodies are not reversed.
+Player automatic variation seeds remain stable 32-bit hashes of simulation seed, spell code, and the player's successful-cast sequence. Enemy seeds use a separate domain containing stable spawn sequence and that enemy's successful-cast sequence, so enemy activity cannot perturb player fixtures or Spell Lab preview seeds. Rejected casts do not advance a sequence. **Clear active effects** removes Fireball projectiles, sparks, retained impact visuals, and their presentation light leases; physical impulses already applied to bodies are not reversed.
 
 The authoritative definition format, limits, replay boundary, and extension seam are in the [0.5.0 Spell Lab milestone](./docs/milestones/0.5.0-spell-lab.md).
 
 ## TrueSight
 
-TrueSight derives a player-centered, 360-degree visibility polygon from the current interpolated X/Z position and the loaded grid map. Solid wall cells block sight; the camera, rocks, particles, and fireballs do not. Visibility has no range cutoff and no remembered exploration. Edit mode reveals the complete map immediately.
+TrueSight derives a player-centered, 360-degree visibility polygon from the current interpolated X/Z position and the loaded grid map. Solid wall cells, including the obelisk cell, block sight; the camera, rocks, particles, and fireballs do not. Visibility has no range cutoff and no remembered exploration. Edit mode reveals the complete map immediately.
 
-The hard logical mask gates hover, pin presentation, and inspector details. Raw `queryAt`, casting, projectiles, explosions, damage, recoil, collision, AI, recordings, and replay remain unrestricted. A hidden pinned entity keeps its stable pin and reappears when visible. The display mask reveals over 100 ms and conceals over 150 ms, with immediate snaps for resets, map changes, timeline rollback, movement jumps over two meters, and edit-mode transitions.
+The hard logical mask gates hover, pin presentation, inspector details, enemy meshes and health bars, and every hostile Fireball mesh, particle, emissive response, and light. Raw `queryAt`, casting, projectiles, explosions, damage, recoil, collision, AI knowledge, recordings, and replay remain unrestricted. A hidden pinned entity keeps its stable pin and reappears when visible. The display mask reveals over 100 ms and conceals over 150 ms, with immediate snaps for resets, map changes, timeline rollback, movement jumps over two meters, and edit-mode transitions.
 
 Canvas2D draws the shared byte mask as a world-space void overlay. Three.js uploads the same mask as a resident red `DataTexture` and applies it to world node materials, shadow masks, emissive geometry before bloom, and dynamic-light intensity. The 24m arena uses a `192×192` mask; larger maps uniformly reduce resolution to stay within `256×256`. See the [0.4.0 TrueSight contract](./docs/notes/0.4.0-true-sight.md).
 
 ## Physics model
 
-The player is 75 kg. Rock mass is derived from a 2,600 kg/m3 stone density and spherical volume: about 10.9 kg at 0.1m radius, 294 kg at 0.3m, and 7,940 kg at 0.9m. Rocks collide with walls, the player, and one another.
+Player and enemy wizards each have a `0.3m` radius, `75kg` mass, the same movement fundamentals, and `100` maximum health. Health regenerates at `1 HP/s` after five damage-free seconds. Direct opposing Fireball hits deal `25`; splash deals `25 × clamp(1 - surfaceDistance / capturedBlastRadius, 0, 1)`. Walls and the obelisk block splash. Casters and allies are immune to health damage, while the existing blast impulse remains team-neutral.
+
+The default encounter spawns one enemy on fixed tick 1, attempts another every 1,800 ticks (30 seconds), caps at four alive, and never queues capped or blocked attempts. It rotates deterministically through north, east, south, west, northeast, southeast, southwest, and northwest cells around the obelisk. The basic wizard approaches beyond `9m`, withdraws inside `6m`, holds between `6-9m`, and attempts a direct line-of-sight shot every 75 ticks while also respecting the applied Fireball cooldown. It intentionally wall-slides without pathfinding, strafing, leading, dodging, or healing retreat.
+
+Rock mass is derived from a 2,600 kg/m3 stone density and spherical volume: about 10.9 kg at 0.1m radius, 294 kg at 0.3m, and 7,940 kg at 0.9m. Rocks collide with walls, actors, and one another.
 
 Player velocity remains split between control-driven locomotion and damped external momentum. Player/rock contact now resolves genuine body or external momentum through the external channel, while controller-driven closure reacts through locomotion with zero restitution. This prevents held movement against a heavy rock from storing delayed recoil without suppressing real impact knockback. See the [dynamic-contact velocity-channel regression contract](./docs/notes/dynamic-contact-velocity-channels.md).
 
@@ -104,7 +110,7 @@ See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the forc
 
 ## 3D presentation vertical
 
-The opt-in 3D route renders a floor, 2.5m instanced wall cells, a 1.6m player block, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. Its default pool contains 16 resident, shadowless point lights: two atomic eight-slot effect groups. Within a group, slot zero follows one projectile and becomes that projectile's explosion pulse; slots one through seven remain leased to the seven largest newly observed sparks associated with that impact. A disappearing carrier leaves its slot dark, a retired tail never relights, and admitting a newer effect retires an older group as a unit.
+The opt-in 3D route renders a floor, 2.5m instanced wall cells, a procedural obelisk, preallocated player/enemy silhouettes and health tracks, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. All four enemy instances and five `0.10m × 0.90m` health tracks/fills exist before renderer warmup. Its default pool still contains 16 resident, shadowless point lights: two atomic eight-slot effect groups. Combat adds no lights and does not alter that topology.
 
 Particles associate presentation-side with their captured effect identity; legacy/direct fixtures retain the nearest-impact and deterministic orphan fallbacks. Projectile, spark, impact, and light colors use one allocation-free palette sampler. The `lightColorVariation` compatibility switch is the global A/B master for per-cast and per-particle variation across both renderers and light assignments.
 
@@ -118,9 +124,9 @@ The panel reports backend, CSS/backing resolution, effective DPR, active/residen
 
 ## Snapshots and recordings
 
-Snapshots, runtime metrics, and command recordings use schema v5. Scenario JSON remains v2. Snapshots carry a compact `spells` table of only current and referenced immutable revisions; projectiles, particles, and retained impact events store spell code, definition revision, effect ID, and effect seed. Particle entries additionally retain their sample ordinal and seed.
+Snapshots, runtime metrics, and command recordings use schema v6. Scenario JSON uses v3. Snapshots add level/defeat state, encounter cadence, obelisks, enemies, health/regeneration, bounded combat events, enemy-pool telemetry, and projectile owner kind/team. The compact `spells` table still includes only current and referenced immutable revisions; effects retain spell code, definition revision, effect ID, and effect seed.
 
-A v5 recording stores initial spell definitions and revision counters, deep-cloned complete apply documents, and explicit successful-cast seeds. Replay reconstructs revision application and effect-local randomness exactly. Schema-v4 recordings stay on their frozen profile and global-RNG Fireball path; schema-v3 uses the exact M0.2 particle profile; schema-v2 additionally disables spark wall collision. Legacy recordings never pass through the versioned Fireball handler.
+A v6 recording stores `gameplayProfile: "obelisk-duel-v1"` and `enemyAiProfile: "basic-wizard-v1"` alongside the spell baseline. Replay reconstructs authored encounter decisions and autonomous enemy casts exactly; enemy decisions are not synthetic input commands. Schema-v5 keeps versioned Fireballs but is forced to frozen pre-combat behavior, while schema-v2 through v4 retain their existing legacy Fireball and particle profiles.
 
 Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspector output uses the current radius and reports its maximum separately. Pool telemetry exposes cumulative wall bounces, ground bounces, and collision-safety discards without copying particle impacts into the main contact history.
 
@@ -128,7 +134,7 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 `src/sim` has no DOM, Canvas, or Three.js dependencies. Browser input and probe mutations become commands consumed at fixed-tick boundaries. Canvas2D, Three.js, and DOM panels consume copied JSON-safe snapshots and do not mutate simulation state.
 
-The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. Spell probes are `listSpells()`, `getSpellDefinition(id)`, `applySpellDefinition(id, definition, expectedRevision?)`, `castSpell(id, x, z, options?)`, `clearSpellEffects(id)`, and `spellDiagnostics(id)`. Invalid definitions and probe arguments return structured errors rather than being clamped. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
+The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. `encounterDiagnostics()` reports level state, spawn timing/skips, enemy identities, health, cooldowns, and recent combat events. Spell probes are `listSpells()`, `getSpellDefinition(id)`, `applySpellDefinition(id, definition, expectedRevision?)`, `castSpell(id, x, z, options?)`, `clearSpellEffects(id)`, and `spellDiagnostics(id)`. Invalid definitions and probe arguments return structured errors rather than being clamped. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
 
 `window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation and TrueSight timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears runtime, presentation, and TrueSight timing histories. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts the lighting flags plus `trueSight`, `sightFade`, and `sightDebug` without adding simulation commands.
 

@@ -1,6 +1,7 @@
 // @ts-check
 
 import { percentile } from "../core/ring_buffer.js";
+import { APPLICATION_VERSION } from "../config.js";
 
 export const PERFORMANCE_CAPTURE_DURATION_MS = 10_000;
 export const PERFORMANCE_REPORT_VERSION = 2;
@@ -75,7 +76,7 @@ export class PerformanceCapture {
    * }} options
    */
   constructor(options) {
-    this.applicationVersion = options.applicationVersion ?? "0.5.0";
+    this.applicationVersion = options.applicationVersion ?? APPLICATION_VERSION;
     this.durationMs = Math.max(
       1,
       Math.trunc(options.durationMs ?? PERFORMANCE_CAPTURE_DURATION_MS),

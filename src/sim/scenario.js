@@ -21,18 +21,28 @@ export function getRockArchetype(archetype) {
   return Object.hasOwn(ROCK_ARCHETYPES, archetype) ? ROCK_ARCHETYPES[archetype] : null;
 }
 
-/** @param {{kind:"rock",archetype:string,x:number,z:number,spawnId:number}} entity */
+/** @param {{kind:"rock"|"obelisk",archetype?:string,x:number,z:number,spawnId:number}} entity */
 function cloneEntity(entity) {
   return { ...entity };
+}
+
+/** @param {{kind:string}} entity */
+function isRock(entity) {
+  return entity.kind === "rock";
+}
+
+/** @param {number} value */
+function isCellCenter(value) {
+  return Number.isFinite(value) && value === Math.floor(value) + 0.5;
 }
 
 export class ArenaScenario {
   /**
    * @param {GridMap} map
-   * @param {Array<{kind:"rock",archetype:string,x:number,z:number,spawnId?:number}>} [entities]
+   * @param {Array<{kind:"rock"|"obelisk",archetype?:string,x:number,z:number,spawnId?:number}>} [entities]
    */
   constructor(map, entities = []) {
-    if (entities.length > ROCK.capacity) {
+    if (entities.filter(isRock).length > ROCK.capacity) {
       throw new RangeError(`Scenario entity count exceeds the ${ROCK.capacity}-rock limit`);
     }
     this.map = map.clone();
@@ -43,8 +53,8 @@ export class ArenaScenario {
         ? entity.spawnId
         : this.nextSpawnId;
       this.entities.push({
-        kind: "rock",
-        archetype: entity.archetype,
+        kind: entity.kind,
+        ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
         x: entity.x,
         z: entity.z,
         spawnId,
@@ -67,7 +77,7 @@ export class ArenaScenario {
       playerSpawn: { ...this.map.playerSpawn },
       entities: this.entities.map((entity) => ({
         kind: entity.kind,
-        archetype: entity.archetype,
+        ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
         x: entity.x,
         z: entity.z,
       })),
@@ -77,6 +87,7 @@ export class ArenaScenario {
   /** @param {number} cx @param {number} cz @param {number} tile */
   setTile(cx, cz, tile) {
     if (!this.map.inBounds(cx, cz)) return false;
+    if (tile !== 1 && this.obeliskAtCell(cx, cz)) return false;
     const previous = this.map.get(cx, cz);
     this.map.set(cx, cz, tile);
     if (tile === 1 && !this.#placementsAreValid()) {
@@ -95,6 +106,7 @@ export class ArenaScenario {
       return false;
     }
     for (const entity of this.entities) {
+      if (entity.kind !== "rock") continue;
       const other = getRockArchetype(entity.archetype);
       if (other && Math.hypot(x - entity.x, z - entity.z) < definition.radius + other.radius) {
         return false;
@@ -114,7 +126,9 @@ export class ArenaScenario {
 
   /** @param {number} spawnId */
   removeRock(spawnId) {
-    const index = this.entities.findIndex((entity) => entity.spawnId === spawnId);
+    const index = this.entities.findIndex(
+      (entity) => entity.kind === "rock" && entity.spawnId === spawnId,
+    );
     if (index < 0) return false;
     this.entities.splice(index, 1);
     return true;
@@ -125,6 +139,7 @@ export class ArenaScenario {
       return false;
     }
     for (const entity of this.entities) {
+      if (entity.kind !== "rock") continue;
       const definition = getRockArchetype(entity.archetype);
       if (!definition || this.#circleTouchesSolid(entity.x, entity.z, definition.radius)) return false;
     }
@@ -138,13 +153,33 @@ export class ArenaScenario {
   }
 
   #validateAll() {
+    for (const entity of this.entities) {
+      if (entity.kind !== "rock" && entity.kind !== "obelisk") {
+        throw new RangeError(`Unknown scenario entity kind: ${entity.kind}`);
+      }
+    }
     if (!this.#placementsAreValid()) throw new RangeError("Scenario contains a body inside solid geometry");
+    const obelisks = this.entities.filter((entity) => entity.kind === "obelisk");
+    if (obelisks.length > 1) throw new RangeError("Scenario may contain at most one obelisk");
+    if (obelisks.length === 1) {
+      const obelisk = obelisks[0];
+      const cx = Math.floor(obelisk.x);
+      const cz = Math.floor(obelisk.z);
+      if (!isCellCenter(obelisk.x) || !isCellCenter(obelisk.z)) {
+        throw new RangeError("Obelisk position must be cell-centered");
+      }
+      if (!this.map.inBounds(cx, cz) || this.map.get(cx, cz) !== 1) {
+        throw new RangeError("Obelisk must occupy a solid in-bounds cell");
+      }
+    }
     for (let left = 0; left < this.entities.length; left += 1) {
       const a = this.entities[left];
+      if (a.kind !== "rock") continue;
       const aDefinition = getRockArchetype(a.archetype);
       if (!aDefinition) throw new RangeError(`Unknown rock archetype: ${a.archetype}`);
       for (let right = left + 1; right < this.entities.length; right += 1) {
         const b = this.entities[right];
+        if (b.kind !== "rock") continue;
         const bDefinition = getRockArchetype(b.archetype);
         if (
           bDefinition &&
@@ -162,6 +197,19 @@ export class ArenaScenario {
     }
   }
 
+  /** @param {number} cx @param {number} cz */
+  obeliskAtCell(cx, cz) {
+    return this.entities.find(
+      (entity) => entity.kind === "obelisk"
+        && Math.floor(entity.x) === cx
+        && Math.floor(entity.z) === cz,
+    ) ?? null;
+  }
+
+  get obelisk() {
+    return this.entities.find((entity) => entity.kind === "obelisk") ?? null;
+  }
+
   /** @param {string | Record<string, unknown>} input */
   static fromJSON(input) {
     const data = typeof input === "string" ? JSON.parse(input) : input;
@@ -170,7 +218,7 @@ export class ArenaScenario {
     if (version === MAP_VERSION) {
       return new ArenaScenario(GridMap.fromJSON(data));
     }
-    if (version !== SCENARIO_VERSION) {
+    if (version !== 2 && version !== SCENARIO_VERSION) {
       throw new RangeError(`Unsupported scenario version: ${version}`);
     }
 
@@ -187,23 +235,35 @@ export class ArenaScenario {
         throw new RangeError(`Invalid scenario entity at index ${index}`);
       }
       const entity = /** @type {Record<string, unknown>} */ (value);
-      const archetype = String(entity.archetype);
       const x = finite(entity.x);
       const z = finite(entity.z);
-      if (entity.kind !== "rock" || !getRockArchetype(archetype) || x === null || z === null) {
+      if (x === null || z === null) {
         throw new RangeError(`Invalid scenario entity at index ${index}`);
       }
-      return { kind: /** @type {"rock"} */ ("rock"), archetype, x, z };
+      if (entity.kind === "rock") {
+        const archetype = String(entity.archetype);
+        if (!getRockArchetype(archetype)) {
+          throw new RangeError(`Invalid scenario entity at index ${index}`);
+        }
+        return { kind: /** @type {const} */ ("rock"), archetype, x, z };
+      }
+      if (version === SCENARIO_VERSION && entity.kind === "obelisk") {
+        return { kind: /** @type {const} */ ("obelisk"), x, z };
+      }
+      throw new RangeError(`Invalid scenario entity at index ${index}`);
     });
     return new ArenaScenario(map, entities);
   }
 }
 
 export function createDebugArenaScenario() {
-  return new ArenaScenario(createDebugArenaMap(), [
+  const map = createDebugArenaMap();
+  map.set(20, 18, 1);
+  return new ArenaScenario(map, [
     { kind: "rock", archetype: "small", x: 5, z: 18.5 },
     { kind: "rock", archetype: "medium", x: 6.5, z: 18.5 },
     { kind: "rock", archetype: "large", x: 4.5, z: 21 },
     { kind: "rock", archetype: "small", x: 9.5, z: 12.5 },
+    { kind: "obelisk", x: 20.5, z: 18.5 },
   ]);
 }

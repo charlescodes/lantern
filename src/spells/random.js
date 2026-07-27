@@ -34,6 +34,28 @@ export function deriveCastSeed(simulationSeed, spellCode, castSequence) {
   return mixUint32(hash ^ Math.imul(Number(castSequence) >>> 0, 0xc2b2ae35));
 }
 
+/**
+ * Enemy casts have a separate domain and a caster-local sequence. Adding or
+ * removing another enemy therefore cannot perturb either player variation or
+ * an existing enemy's future casts.
+ *
+ * @param {number} simulationSeed
+ * @param {number} spawnSequence
+ * @param {number} spellCode
+ * @param {number} castSequence
+ */
+export function deriveEnemyCastSeed(
+  simulationSeed,
+  spawnSequence,
+  spellCode,
+  castSequence,
+) {
+  let hash = mixUint32((Number(simulationSeed) >>> 0) ^ 0xe11e_6d79);
+  hash = mixUint32(hash ^ Math.imul(Number(spawnSequence) >>> 0, 0x27d4_eb2d));
+  hash = mixUint32(hash ^ Math.imul(Number(spellCode) >>> 0, 0x1656_67b1));
+  return mixUint32(hash ^ Math.imul(Number(castSequence) >>> 0, 0xd3a2_646c));
+}
+
 /** @param {number} effectSeed @param {number} ordinal */
 export function deriveSampleSeed(effectSeed, ordinal) {
   return mixUint32(

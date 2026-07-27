@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#101511">
-    <title>Lantern 0.5.0 · Spell Lab</title>
+    <title>Lantern 0.6.0 · Obelisk Combat</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="importmap">
       {
@@ -22,8 +22,8 @@
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="eyebrow">Project Lantern / 0.5.0</p>
-          <h1>Spell Lab</h1>
+          <p class="eyebrow">Project Lantern / 0.6.0</p>
+          <h1>Obelisk Combat</h1>
         </div>
       </div>
       <div class="run-summary" aria-label="Simulation status">
@@ -45,6 +45,10 @@
     <main class="workspace">
       <section id="arena-viewport" class="arena-shell" aria-label="Lantern simulation viewport">
         <canvas id="arena" tabindex="0"></canvas>
+        <div id="defeat-overlay" class="defeat-overlay" role="status" hidden>
+          <strong>DEFEATED</strong>
+          <span id="defeat-countdown">Restarting this seed in 1.5s</span>
+        </div>
         <aside
           id="spell-lab"
           class="spell-lab"
@@ -163,6 +167,10 @@
           <div class="pool-readout">
             <div><span>Solid rocks</span><output id="rock-pool">0 / 64</output></div>
             <div class="meter rock-meter"><i id="rock-bar"></i></div>
+          </div>
+          <div class="pool-readout">
+            <div><span>Enemy wizards</span><output id="enemy-pool">0 / 4</output></div>
+            <div class="meter enemy-meter"><i id="enemy-bar"></i></div>
           </div>
           <div class="pool-readout">
             <div><span>Projectiles</span><output id="projectile-pool">0 / 128</output></div>

@@ -204,6 +204,12 @@ h1 {
   background: rgba(141, 111, 54, 0.12);
 }
 
+.status-pill.is-defeated {
+  border-color: #9a4145;
+  color: #ff999d;
+  background: rgba(154, 65, 69, 0.18);
+}
+
 .toolbar {
   display: flex;
   justify-content: flex-end;
@@ -232,6 +238,35 @@ h1 {
   height: 100%;
   cursor: crosshair;
   touch-action: none;
+}
+
+.defeat-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  background: radial-gradient(circle, rgba(72, 15, 20, 0.42), rgba(6, 8, 7, 0.7));
+  color: #ffb0b3;
+  letter-spacing: 0.09em;
+  pointer-events: none;
+}
+
+.defeat-overlay[hidden] {
+  display: none;
+}
+
+.defeat-overlay strong {
+  font: 600 34px var(--display);
+  letter-spacing: 0.14em;
+}
+
+.defeat-overlay span {
+  color: #e8c8c9;
+  font-size: 11px;
 }
 
 body[data-mode="edit"] #arena {
@@ -695,6 +730,11 @@ pre {
 .rock-meter i {
   background: #b5b58f;
   box-shadow: 0 0 8px rgba(181, 181, 143, 0.35);
+}
+
+.enemy-meter i {
+  background: #d05b63;
+  box-shadow: 0 0 8px rgba(208, 91, 99, 0.4);
 }
 
 .inspector-section pre {

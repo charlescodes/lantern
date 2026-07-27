@@ -18,6 +18,8 @@ export class ProjectilePool {
     this.lifetime = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
     this.ownerId = new Uint32Array(capacity);
+    this.ownerKind = new Uint8Array(capacity);
+    this.ownerTeam = new Uint8Array(capacity);
     this.spellCode = new Uint8Array(capacity);
     this.definitionRevision = new Uint32Array(capacity);
     this.effectId = new Uint32Array(capacity);
@@ -30,7 +32,7 @@ export class ProjectilePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number}} value */
+  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -50,6 +52,8 @@ export class ProjectilePool {
     this.lifetime[index] = value.lifetime;
     this.radius[index] = value.radius;
     this.ownerId[index] = value.ownerId ?? 0;
+    this.ownerKind[index] = value.ownerKind ?? 1;
+    this.ownerTeam[index] = value.ownerTeam ?? 1;
     this.spellCode[index] = value.spellCode ?? 0;
     this.definitionRevision[index] = value.definitionRevision ?? 0;
     this.effectId[index] = value.effectId ?? 0;
@@ -74,10 +78,144 @@ export class ProjectilePool {
       this.lifetime[index] = this.lifetime[last];
       this.radius[index] = this.radius[last];
       this.ownerId[index] = this.ownerId[last];
+      this.ownerKind[index] = this.ownerKind[last];
+      this.ownerTeam[index] = this.ownerTeam[last];
       this.spellCode[index] = this.spellCode[last];
       this.definitionRevision[index] = this.definitionRevision[last];
       this.effectId[index] = this.effectId[last];
       this.effectSeed[index] = this.effectSeed[last];
+    }
+    this.activeCount = last;
+    return true;
+  }
+
+  /** @param {number} id */
+  findIndexById(id) {
+    for (let index = 0; index < this.activeCount; index += 1) {
+      if (this.id[index] === id) return index;
+    }
+    return -1;
+  }
+}
+
+export class EnemyWizardPool {
+  /** @param {number} capacity */
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.activeCount = 0;
+    this.dropped = 0;
+    this.nextId = 1;
+    this.id = new Uint32Array(capacity);
+    this.spawnSequence = new Uint32Array(capacity);
+    this.spawnTick = new Uint32Array(capacity);
+    this.x = new Float32Array(capacity);
+    this.z = new Float32Array(capacity);
+    this.previousX = new Float32Array(capacity);
+    this.previousZ = new Float32Array(capacity);
+    this.vx = new Float32Array(capacity);
+    this.vz = new Float32Array(capacity);
+    this.desiredVx = new Float32Array(capacity);
+    this.desiredVz = new Float32Array(capacity);
+    this.locomotionVx = new Float32Array(capacity);
+    this.locomotionVz = new Float32Array(capacity);
+    this.externalVx = new Float32Array(capacity);
+    this.externalVz = new Float32Array(capacity);
+    this.radius = new Float32Array(capacity);
+    this.massKg = new Float32Array(capacity);
+    this.inverseMass = new Float32Array(capacity);
+    this.health = new Float32Array(capacity);
+    this.maximumHealth = new Float32Array(capacity);
+    this.damageFreeTicks = new Uint32Array(capacity);
+    this.lastDamageTick = new Uint32Array(capacity);
+    this.cooldown = new Float32Array(capacity);
+    this.castSequence = new Uint32Array(capacity);
+    this.shotReadyTick = new Uint32Array(capacity);
+    this.aiState = new Uint8Array(capacity);
+    this.lineOfSight = new Uint8Array(capacity);
+  }
+
+  reset() {
+    this.activeCount = 0;
+    this.dropped = 0;
+    this.nextId = 1;
+  }
+
+  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number}} value */
+  spawn(value) {
+    if (this.activeCount >= this.capacity) {
+      this.dropped += 1;
+      return 0;
+    }
+    const index = this.activeCount;
+    const id = this.nextId;
+    this.nextId = (this.nextId + 1) >>> 0 || 1;
+    this.id[index] = id;
+    this.spawnSequence[index] = value.spawnSequence;
+    this.spawnTick[index] = value.spawnTick;
+    this.x[index] = value.x;
+    this.z[index] = value.z;
+    this.previousX[index] = value.x;
+    this.previousZ[index] = value.z;
+    this.vx[index] = 0;
+    this.vz[index] = 0;
+    this.desiredVx[index] = 0;
+    this.desiredVz[index] = 0;
+    this.locomotionVx[index] = 0;
+    this.locomotionVz[index] = 0;
+    this.externalVx[index] = 0;
+    this.externalVz[index] = 0;
+    this.radius[index] = value.radius;
+    this.massKg[index] = value.massKg;
+    this.inverseMass[index] = 1 / value.massKg;
+    this.health[index] = value.maximumHealth;
+    this.maximumHealth[index] = value.maximumHealth;
+    this.damageFreeTicks[index] = 0;
+    this.lastDamageTick[index] = 0;
+    this.cooldown[index] = 0;
+    this.castSequence[index] = 0;
+    this.shotReadyTick[index] = value.shotReadyTick;
+    this.aiState[index] = 0;
+    this.lineOfSight[index] = 0;
+    this.activeCount += 1;
+    return id;
+  }
+
+  /** @param {number} index */
+  removeSwap(index) {
+    if (index < 0 || index >= this.activeCount) return false;
+    const last = this.activeCount - 1;
+    if (index !== last) {
+      for (const component of [
+        this.id,
+        this.spawnSequence,
+        this.spawnTick,
+        this.x,
+        this.z,
+        this.previousX,
+        this.previousZ,
+        this.vx,
+        this.vz,
+        this.desiredVx,
+        this.desiredVz,
+        this.locomotionVx,
+        this.locomotionVz,
+        this.externalVx,
+        this.externalVz,
+        this.radius,
+        this.massKg,
+        this.inverseMass,
+        this.health,
+        this.maximumHealth,
+        this.damageFreeTicks,
+        this.lastDamageTick,
+        this.cooldown,
+        this.castSequence,
+        this.shotReadyTick,
+        this.aiState,
+        this.lineOfSight,
+      ]) {
+        component[index] = component[last];
+      }
     }
     this.activeCount = last;
     return true;

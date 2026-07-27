@@ -2,6 +2,12 @@
 
 import { EXPLOSION, ROCK_ARCHETYPES, SIMULATION } from "../config.js";
 import {
+  colorHexCss,
+  HEALTH_BAR,
+  healthBarColor,
+  healthBarRatio,
+} from "../presentation/combat_visuals.js";
+import {
   FIREBALL_COLOR_CORE,
   FIREBALL_COLOR_IMPACT_LIGHT,
   FIREBALL_COLOR_PARTICLE,
@@ -21,6 +27,11 @@ const COLORS = Object.freeze({
   wallTop: "#455547",
   player: "#f3c969",
   playerEdge: "#fff2bd",
+  enemy: "#b94852",
+  enemyEdge: "#ff9b9e",
+  obeliskBase: "#232a33",
+  obelisk: "#7669a8",
+  obeliskEdge: "#c8baff",
   desired: "#68d6b5",
   velocity: "#f29d49",
   externalVelocity: "#8fdcf2",
@@ -139,7 +150,9 @@ export class DebugRenderer {
     this.#drawParticles(snapshot, colorVariation);
     this.#drawRocks(snapshot, alpha);
     this.#drawProjectiles(snapshot, colorVariation);
+    this.#drawEnemies(snapshot, alpha);
     this.#drawPlayer(snapshot, alpha);
+    this.#drawHealthBars(snapshot, alpha);
     if (snapshot.debugFlags.contacts) this.#drawContacts(snapshot.contacts);
     this.#drawInspection(view.hover, view.selected);
     if (view.mouseInside) {
@@ -262,7 +275,10 @@ export class DebugRenderer {
     for (let cz = minZ; cz <= maxZ; cz += 1) {
       for (let cx = minX; cx <= maxX; cx += 1) {
         const tile = map.cells[cz * map.width + cx];
-        if (tile === 0) {
+        const obeliskCell = snapshot.obelisks?.some(
+          (obelisk) => obelisk.cell.cx === cx && obelisk.cell.cz === cz,
+        );
+        if (tile === 0 || obeliskCell) {
           context.fillStyle = (cx + cz) % 2 === 0 ? COLORS.floorA : COLORS.floorB;
           context.fillRect(cx, cz, 1, 1);
         } else {
@@ -293,6 +309,8 @@ export class DebugRenderer {
     context.lineWidth = line * 2;
     context.strokeRect(0, 0, map.width, map.height);
 
+    this.#drawObelisks(snapshot.obelisks ?? []);
+
     if (
       snapshot.debugFlags.gridCoordinates
       && this.camera.worldLengthToViewport(1) >= GRID_LABEL_MINIMUM_VIEWPORT_SIZE
@@ -312,6 +330,42 @@ export class DebugRenderer {
       context.strokeStyle = entity === view.selected ? COLORS.selected : COLORS.hover;
       context.lineWidth = (entity === view.selected ? 3 : 2) * line;
       context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
+    }
+  }
+
+  /** @param {Array<{x:number,z:number}>} obelisks */
+  #drawObelisks(obelisks) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1);
+    for (const obelisk of obelisks) {
+      const x = obelisk.x;
+      const z = obelisk.z;
+      context.save();
+      context.translate(x, z);
+      context.rotate(Math.PI / 4);
+      context.fillStyle = COLORS.obeliskBase;
+      context.fillRect(-0.38, -0.38, 0.76, 0.76);
+      context.strokeStyle = COLORS.obeliskEdge;
+      context.lineWidth = line * 1.4;
+      context.strokeRect(-0.38, -0.38, 0.76, 0.76);
+      context.rotate(-Math.PI / 4);
+      context.beginPath();
+      context.moveTo(0, -0.38);
+      context.lineTo(0.25, 0);
+      context.lineTo(0, 0.38);
+      context.lineTo(-0.25, 0);
+      context.closePath();
+      context.fillStyle = COLORS.obelisk;
+      context.fill();
+      context.strokeStyle = COLORS.obeliskEdge;
+      context.stroke();
+      context.beginPath();
+      context.moveTo(0, -0.24);
+      context.lineTo(0, 0.24);
+      context.strokeStyle = "rgba(232, 224, 255, 0.7)";
+      context.lineWidth = line;
+      context.stroke();
+      context.restore();
     }
   }
 
@@ -534,6 +588,83 @@ export class DebugRenderer {
         player.externalVx * 0.3,
         player.externalVz * 0.3,
         COLORS.externalVelocity,
+      );
+    }
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #drawEnemies(snapshot, alpha) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1);
+    for (const enemy of snapshot.enemies ?? []) {
+      if (!(enemy.health > 0)) continue;
+      const x = enemy.previousX + (enemy.x - enemy.previousX) * alpha;
+      const z = enemy.previousZ + (enemy.z - enemy.previousZ) * alpha;
+      context.beginPath();
+      context.arc(x, z, enemy.radius, 0, Math.PI * 2);
+      context.fillStyle = COLORS.enemy;
+      context.fill();
+      context.strokeStyle = COLORS.enemyEdge;
+      context.lineWidth = line * 2;
+      context.stroke();
+      context.beginPath();
+      context.arc(x, z, line * 2.2, 0, Math.PI * 2);
+      context.fillStyle = "#351318";
+      context.fill();
+      if (snapshot.debugFlags.velocityVectors) {
+        this.#drawArrow(x, z, enemy.vx * 0.25, enemy.vz * 0.25, COLORS.velocity);
+        this.#drawArrow(
+          x,
+          z,
+          enemy.desiredVx * 0.25,
+          enemy.desiredVz * 0.25,
+          COLORS.desired,
+        );
+        this.#drawArrow(
+          x,
+          z,
+          enemy.externalVx * 0.3,
+          enemy.externalVz * 0.3,
+          COLORS.externalVelocity,
+        );
+      }
+    }
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #drawHealthBars(snapshot, alpha) {
+    const actors = [snapshot.player, ...(snapshot.enemies ?? [])];
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1);
+    for (const actor of actors) {
+      if (!(actor.health > 0)) continue;
+      const x = actor.previousX + (actor.x - actor.previousX) * alpha;
+      const z = actor.previousZ + (actor.z - actor.previousZ) * alpha;
+      const ratio = healthBarRatio(actor.health, actor.maximumHealth);
+      const left = x + actor.radius + HEALTH_BAR.actorGapMeters;
+      const top = z - HEALTH_BAR.heightMeters / 2;
+      const fillHeight = HEALTH_BAR.heightMeters * ratio;
+      context.fillStyle = colorHexCss(HEALTH_BAR.trackColor);
+      context.fillRect(
+        left,
+        top,
+        HEALTH_BAR.widthMeters,
+        HEALTH_BAR.heightMeters,
+      );
+      context.strokeStyle = colorHexCss(HEALTH_BAR.trackEdgeColor);
+      context.lineWidth = line;
+      context.strokeRect(
+        left,
+        top,
+        HEALTH_BAR.widthMeters,
+        HEALTH_BAR.heightMeters,
+      );
+      context.fillStyle = colorHexCss(healthBarColor(ratio));
+      context.fillRect(
+        left,
+        top + HEALTH_BAR.heightMeters - fillHeight,
+        HEALTH_BAR.widthMeters,
+        fillHeight,
       );
     }
   }

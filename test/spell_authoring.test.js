@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SCHEMA_VERSION, SIMULATION } from "../src/config.js";
+import {
+  ENEMY_AI_PROFILE_NONE,
+  GAMEPLAY_PROFILE_PRE_COMBAT,
+  SCHEMA_VERSION,
+  SIMULATION,
+} from "../src/config.js";
 import {
   cloneFireballDefinition,
   DEFAULT_FIREBALL_DEFINITION,
@@ -522,7 +527,7 @@ test("revision pruning waits for live effects, then preserves monotonic counters
   assert.equal(third.revision, 3);
 });
 
-test("reset preserves the applied revision and makes it the schema-v5 recording baseline", () => {
+test("reset preserves the applied revision and makes it the schema-v6 recording baseline", () => {
   const simulation = new Simulation();
   const changed = definition((value) => {
     value.projectile.speed = 14;
@@ -542,13 +547,13 @@ test("reset preserves the applied revision and makes it the schema-v5 recording 
   assert.equal(simulation.projectiles.activeCount, 0);
   assert.deepEqual(simulation.spells.diagnostics()[0].revisions, [2]);
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 5);
+  assert.equal(recording.schemaVersion, 6);
   assert.equal(recording.configuration.spells[0].currentRevision, 2);
   assert.equal(recording.configuration.spells[0].revisionCounter, 2);
   assert.equal(recording.configuration.spells[0].definition.projectile.speed, 14);
 });
 
-test("schema-v5 recording replays definitions, revisions, effects, and explicit seeds exactly", () => {
+test("schema-v6 recording replays definitions, revisions, effects, and explicit seeds exactly", () => {
   const authored = definition((value) => {
     value.cast.cooldown = 0;
     value.emission.burstCount = 8;
@@ -571,8 +576,8 @@ test("schema-v5 recording replays definitions, revisions, effects, and explicit 
   simulation.tick({ cast: { x: 8, z: 3.5, variationSeed: 20 } });
   for (let tick = 0; tick < 80; tick += 1) simulation.tick(null);
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 5);
-  assert.equal(recording.schemaVersion, 5);
+  assert.equal(SCHEMA_VERSION, 6);
+  assert.equal(recording.schemaVersion, 6);
   assert.equal(recording.commands[0].command.cast.variationSeed, 10);
   assert.equal(recording.commands[2].command.cast.variationSeed, 20);
   const replayed = Simulation.replay(recording);
@@ -585,6 +590,44 @@ test("schema-v5 recording replays definitions, revisions, effects, and explicit 
     () => Simulation.replay(missingBaseline),
     /missing its spell baseline/,
   );
+});
+
+test("a genuine schema-v5 recording retains exact versioned-spell behavior without combat", () => {
+  const authored = definition((value) => {
+    value.cast.cooldown = 0;
+    value.emission.burstCount = 8;
+  });
+  const simulation = new Simulation({
+    map: impactMap(),
+    seed: 0x0505_0505,
+    initialFireballDefinition: authored,
+    gameplayProfile: GAMEPLAY_PROFILE_PRE_COMBAT,
+    enemyAiProfile: ENEMY_AI_PROFILE_NONE,
+  });
+  simulation.tick({ cast: { x: 8, z: 3.5, variationSeed: 0x501 } });
+  const changed = cloneFireballDefinition(authored);
+  changed.projectile.speed = 13;
+  changed.emission.gravity = -5;
+  simulation.tick({
+    type: "applySpellDefinition",
+    spellId: "fireball",
+    expectedRevision: 1,
+    definition: changed,
+  });
+  simulation.tick({ cast: { x: 8, z: 3.5, variationSeed: 0x502 } });
+  for (let tick = 0; tick < 80; tick += 1) simulation.tick(null);
+
+  const recording = simulation.exportCommandLog();
+  recording.schemaVersion = 5;
+  recording.initialScenario.version = 2;
+  delete recording.configuration.gameplayProfile;
+  delete recording.configuration.enemyAiProfile;
+  const replayed = Simulation.replay(recording);
+
+  assert.equal(replayed.gameplayProfile, GAMEPLAY_PROFILE_PRE_COMBAT);
+  assert.equal(replayed.enemyAiProfile, ENEMY_AI_PROFILE_NONE);
+  assert.deepEqual(replayed.snapshot(), simulation.snapshot());
+  assert.deepEqual(replayed.spells.diagnostics(), simulation.spells.diagnostics());
 });
 
 test("apply commands deep-clone complete documents before history or registry storage", () => {

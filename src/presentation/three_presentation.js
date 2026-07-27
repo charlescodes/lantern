@@ -4,7 +4,12 @@ import * as THREE from "three/webgpu";
 import { instancedDynamicBufferAttribute, pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
-import { ROCK_ARCHETYPES } from "../config.js";
+import { ENEMY_WIZARD, ROCK_ARCHETYPES } from "../config.js";
+import {
+  HEALTH_BAR,
+  healthBarColor,
+  healthBarRatio,
+} from "./combat_visuals.js";
 import {
   completeInstancedPoolSubmission,
   createDynamicInstancedPool,
@@ -35,12 +40,16 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-/** @param {{width:number,height:number,cells:number[]}} map */
-function hashMap(map) {
+/** @param {{width:number,height:number,cells:number[]}} map @param {Array<{cell:{cx:number,cz:number}}>} [obelisks] */
+function hashMap(map, obelisks = []) {
   let hash = 2_166_136_261;
   hash = Math.imul(hash ^ map.width, 16_777_619);
   hash = Math.imul(hash ^ map.height, 16_777_619);
   for (const cell of map.cells) hash = Math.imul(hash ^ cell, 16_777_619);
+  for (const obelisk of obelisks) {
+    hash = Math.imul(hash ^ obelisk.cell.cx, 16_777_619);
+    hash = Math.imul(hash ^ obelisk.cell.cz, 16_777_619);
+  }
   return hash >>> 0;
 }
 
@@ -216,6 +225,89 @@ export class ThreePresentation {
     this.player.receiveShadow = true;
     this.scene.add(this.player);
 
+    this.enemyMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0xb94852,
+      emissive: 0x27080c,
+      emissiveIntensity: 0.42,
+      roughness: 0.68,
+      metalness: 0.03,
+    }));
+    this.enemyMesh = createDynamicInstancedPool(
+      this.player.geometry,
+      this.enemyMaterial,
+      ENEMY_WIZARD.capacity,
+      "enemy-wizards",
+    );
+    this.enemyMesh.castShadow = true;
+    this.enemyMesh.receiveShadow = true;
+    this.scene.add(this.enemyMesh);
+
+    this.healthTrackMaterial = this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
+      color: HEALTH_BAR.trackColor,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }));
+    this.healthFillMaterial = this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }));
+    this.healthBarGeometry = new THREE.PlaneGeometry(1, 1);
+    this.healthTrackMesh = createDynamicInstancedPool(
+      this.healthBarGeometry,
+      this.healthTrackMaterial,
+      ENEMY_WIZARD.capacity + 1,
+      "actor-health-tracks",
+    );
+    this.healthFillMesh = createDynamicInstancedPool(
+      this.healthBarGeometry,
+      this.healthFillMaterial,
+      ENEMY_WIZARD.capacity + 1,
+      "actor-health-fills",
+      { instanceColors: true },
+    );
+    this.healthTrackMesh.renderOrder = 30;
+    this.healthFillMesh.renderOrder = 31;
+    this.scene.add(this.healthTrackMesh, this.healthFillMesh);
+
+    this.obeliskMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x7568a8,
+      emissive: 0x171027,
+      emissiveIntensity: 0.38,
+      roughness: 0.52,
+      metalness: 0.18,
+    }));
+    this.obeliskBaseMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x252d37,
+      roughness: 0.8,
+      metalness: 0.08,
+    }));
+    this.obeliskGroup = new THREE.Group();
+    this.obeliskGroup.name = "authored-obelisk";
+    const obeliskBase = new THREE.Mesh(
+      new THREE.BoxGeometry(0.82, 0.28, 0.82),
+      this.obeliskBaseMaterial,
+    );
+    obeliskBase.position.y = 0.14;
+    const obeliskShaft = new THREE.Mesh(
+      new THREE.ConeGeometry(0.38, 2.05, 4),
+      this.obeliskMaterial,
+    );
+    obeliskShaft.position.y = 1.18;
+    obeliskShaft.rotation.y = Math.PI / 4;
+    obeliskBase.castShadow = true;
+    obeliskBase.receiveShadow = true;
+    obeliskShaft.castShadow = true;
+    obeliskShaft.receiveShadow = true;
+    this.obeliskGroup.add(obeliskBase, obeliskShaft);
+    this.obeliskGroup.visible = false;
+    this.scene.add(this.obeliskGroup);
+
     this.spawnMarker = this.#createGroundRing(0x69d4b3, 0.085, 0.12, 0.82);
     this.spawnMarker.visible = true;
     this.cursorMarker = this.#createGroundRing(0x69d4b3, 0.07, 0.095, 0.88);
@@ -315,10 +407,14 @@ export class ThreePresentation {
     this._matrix = new THREE.Matrix4();
     this._position = new THREE.Vector3();
     this._quaternion = new THREE.Quaternion();
+    this._billboardQuaternion = new THREE.Quaternion();
     this._scale = new THREE.Vector3();
     this._color = new THREE.Color();
     this._emissiveColor = new THREE.Color();
     this._cameraTarget = new THREE.Vector3();
+    this._cameraRight = new THREE.Vector3();
+    this._cameraUp = new THREE.Vector3();
+    this._healthCenter = new THREE.Vector3();
     this._bloomEnabled = false;
     this.renderPipeline = null;
     this.bloomOutput = null;
@@ -392,8 +488,11 @@ export class ThreePresentation {
     this.resize();
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
-    this.#updateMap(snapshot.map);
+    this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, alpha);
+    this.#updateEnemies(snapshot, alpha);
+    this.#updateHealthBars(snapshot, alpha);
     this.#updateRocks(snapshot, alpha);
     this.#updateProjectiles(snapshot, alpha);
     this.#updateParticles(snapshot);
@@ -498,6 +597,21 @@ export class ThreePresentation {
         dpr: this.pixelDensityCap,
         aa: this.options.aa,
       },
+      combatInstances: {
+        enemies: {
+          active: this.enemyMesh.count,
+          capacity: this.enemyMesh.userData.capacity,
+        },
+        healthTracks: {
+          active: this.healthTrackMesh.count,
+          capacity: this.healthTrackMesh.userData.capacity,
+        },
+        healthFills: {
+          active: this.healthFillMesh.count,
+          capacity: this.healthFillMesh.userData.capacity,
+        },
+        obeliskVisible: this.obeliskGroup.visible,
+      },
       lightGroups: this.lightBudget.diagnostics(),
       trueSightTransport: this.sightTransport.diagnostics(),
       trueSightCpuMs: this.currentSightFrame?.timing.totalMs ?? null,
@@ -529,8 +643,11 @@ export class ThreePresentation {
       placementValid: true,
     };
     this.#syncCamera();
-    this.#updateMap(snapshot.map);
+    this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, 0);
+    this.#updateEnemies(snapshot, 0);
+    this.#updateHealthBars(snapshot, 0);
     this.#updateRocks(snapshot, 0);
     this.#updateProjectiles(snapshot, 0);
     this.#updateParticles(snapshot);
@@ -551,6 +668,10 @@ export class ThreePresentation {
       this.selectedMarker,
       this.editCellPreview,
       this.editRockPreview,
+      this.enemyMesh,
+      this.healthTrackMesh,
+      this.healthFillMesh,
+      this.obeliskGroup,
       this.projectileMesh,
       this.particleMesh,
       this.sightRayLines,
@@ -678,9 +799,9 @@ export class ThreePresentation {
     this.threeCamera.updateMatrixWorld();
   }
 
-  /** @param {{width:number,height:number,cells:number[],playerSpawn:{x:number,z:number}}} map */
-  #updateMap(map) {
-    const nextHash = hashMap(map);
+  /** @param {{width:number,height:number,cells:number[],playerSpawn:{x:number,z:number}}} map @param {Array<{cell:{cx:number,cz:number}}>} obelisks */
+  #updateMap(map, obelisks) {
+    const nextHash = hashMap(map, obelisks);
     const dimensionsChanged = map.width !== this.mapWidth || map.height !== this.mapHeight;
     if (nextHash === this.mapHash && !dimensionsChanged) return;
     this.mapHash = nextHash;
@@ -720,10 +841,14 @@ export class ThreePresentation {
     }
 
     if (!this.wallMesh) this.#replaceWallMesh(map.width * map.height);
+    const obeliskCells = new Set(
+      obelisks.map((obelisk) => `${obelisk.cell.cx}:${obelisk.cell.cz}`),
+    );
     let wallCount = 0;
     for (let cz = 0; cz < map.height; cz += 1) {
       for (let cx = 0; cx < map.width; cx += 1) {
         if (map.cells[cz * map.width + cx] !== 1) continue;
+        if (obeliskCells.has(`${cx}:${cz}`)) continue;
         this._position.set(cx + 0.5, WALL_HEIGHT_METERS / 2, cz + 0.5);
         this._scale.set(1, 1, 1);
         this._matrix.compose(this._position, this._quaternion, this._scale);
@@ -732,6 +857,13 @@ export class ThreePresentation {
       }
     }
     publishInstancedPool(this.wallMesh, wallCount);
+  }
+
+  /** @param {Array<{x:number,z:number}>} obelisks */
+  #updateObelisk(obelisks) {
+    const obelisk = obelisks[0] ?? null;
+    this.obeliskGroup.visible = Boolean(obelisk);
+    if (obelisk) this.obeliskGroup.position.set(obelisk.x, 0, obelisk.z);
   }
 
   /** @param {number} capacity */
@@ -754,6 +886,76 @@ export class ThreePresentation {
     const z = player.previousZ + (player.z - player.previousZ) * alpha;
     this.player.position.set(x, PLAYER_HEIGHT_METERS / 2, z);
     this.player.scale.set(player.radius * 2, PLAYER_HEIGHT_METERS, player.radius * 2);
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #updateEnemies(snapshot, alpha) {
+    const enemies = snapshot.enemies ?? [];
+    for (let index = 0; index < enemies.length; index += 1) {
+      const enemy = enemies[index];
+      const x = enemy.previousX + (enemy.x - enemy.previousX) * alpha;
+      const z = enemy.previousZ + (enemy.z - enemy.previousZ) * alpha;
+      this._position.set(x, PLAYER_HEIGHT_METERS / 2, z);
+      this._scale.set(enemy.radius * 2, PLAYER_HEIGHT_METERS, enemy.radius * 2);
+      this._matrix.compose(this._position, this._quaternion, this._scale);
+      this.enemyMesh.setMatrixAt(index, this._matrix);
+    }
+    publishInstancedPool(this.enemyMesh, enemies.length);
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #updateHealthBars(snapshot, alpha) {
+    const actors = [snapshot.player, ...(snapshot.enemies ?? [])];
+    this._billboardQuaternion.copy(this.threeCamera.quaternion);
+    this._cameraRight
+      .set(1, 0, 0)
+      .applyQuaternion(this._billboardQuaternion)
+      .normalize();
+    this._cameraUp
+      .set(0, 1, 0)
+      .applyQuaternion(this._billboardQuaternion)
+      .normalize();
+    let count = 0;
+    for (const actor of actors) {
+      if (!(actor.health > 0) || count >= ENEMY_WIZARD.capacity + 1) continue;
+      const x = actor.previousX + (actor.x - actor.previousX) * alpha;
+      const z = actor.previousZ + (actor.z - actor.previousZ) * alpha;
+      const ratio = healthBarRatio(actor.health, actor.maximumHealth);
+      const rightOffset = actor.radius
+        + HEALTH_BAR.actorGapMeters
+        + HEALTH_BAR.widthMeters / 2;
+      this._healthCenter
+        .set(x, PLAYER_HEIGHT_METERS * 0.57, z)
+        .addScaledVector(this._cameraRight, rightOffset);
+
+      this._scale.set(HEALTH_BAR.widthMeters, HEALTH_BAR.heightMeters, 1);
+      this._matrix.compose(
+        this._healthCenter,
+        this._billboardQuaternion,
+        this._scale,
+      );
+      this.healthTrackMesh.setMatrixAt(count, this._matrix);
+
+      const fillHeight = Math.max(0.001, HEALTH_BAR.heightMeters * ratio);
+      this._position
+        .copy(this._healthCenter)
+        .addScaledVector(
+          this._cameraUp,
+          (ratio - 1) * HEALTH_BAR.heightMeters / 2,
+        );
+      this._scale.set(HEALTH_BAR.widthMeters * 0.78, fillHeight, 1);
+      this._matrix.compose(
+        this._position,
+        this._billboardQuaternion,
+        this._scale,
+      );
+      this.healthFillMesh.setMatrixAt(count, this._matrix);
+      this._color.setHex(healthBarColor(ratio));
+      this.healthFillMesh.setColorAt(count, this._color);
+      count += 1;
+    }
+    publishInstancedPool(this.healthTrackMesh, count);
+    publishInstancedPool(this.healthFillMesh, count, { instanceColors: true });
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */

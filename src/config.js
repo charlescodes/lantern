@@ -1,9 +1,24 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 export const MAP_VERSION = 1;
-export const SCENARIO_VERSION = 2;
-export const APPLICATION_VERSION = "0.5.0";
+export const SCENARIO_VERSION = 3;
+export const APPLICATION_VERSION = "0.6.0";
+
+export const GAMEPLAY_PROFILE_OBELISK_DUEL = "obelisk-duel-v1";
+export const GAMEPLAY_PROFILE_PRE_COMBAT = "pre-combat-v1";
+export const ENEMY_AI_PROFILE_BASIC = "basic-wizard-v1";
+export const ENEMY_AI_PROFILE_NONE = "none";
+
+export const ACTOR_TEAM = Object.freeze({
+  player: 1,
+  enemy: 2,
+});
+
+export const PROJECTILE_OWNER_KIND = Object.freeze({
+  player: 1,
+  enemyWizard: 2,
+});
 
 export const SIMULATION = Object.freeze({
   tickHz: 60,
@@ -23,6 +38,30 @@ export const PLAYER = Object.freeze({
   acceleration: 22,
   braking: 28,
   externalDamping: 2,
+});
+
+export const COMBAT = Object.freeze({
+  maximumHealth: 100,
+  directDamage: 25,
+  regenerationDelayTicks: 300,
+  regenerationPerSecond: 1,
+  defeatedTicks: 90,
+  eventCapacity: 256,
+  snapshotEventCount: 32,
+});
+
+export const ENEMY_WIZARD = Object.freeze({
+  capacity: 4,
+  radius: PLAYER.radius,
+  massKg: PLAYER.massKg,
+  desiredSpeed: PLAYER.desiredSpeed,
+  acceleration: PLAYER.acceleration,
+  braking: PLAYER.braking,
+  externalDamping: PLAYER.externalDamping,
+  approachBeyondMeters: 9,
+  withdrawInsideMeters: 6,
+  shotIntervalTicks: 75,
+  spawnIntervalTicks: 1_800,
 });
 
 export const PROJECTILE = Object.freeze({

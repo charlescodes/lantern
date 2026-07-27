@@ -86,6 +86,9 @@ const runtime = new FixedStepRuntime({
   simulation,
   commandProvider: () => input.sampleCommand(),
   render: (snapshot, alpha, metrics) => {
+    if (snapshot.level.state === "defeated" && runtime.paused && mode === "play") {
+      runtime.resume();
+    }
     sightFrame = trueSight.update(snapshot, alpha, { mode });
     const cursorVisible = mode === "edit"
       || sightFrame.isPointVisible(input.mouseWorld.x, input.mouseWorld.z);
@@ -148,11 +151,21 @@ function injectMutation(command) {
 }
 
 function singleStep() {
+  if (simulation.levelState === "defeated") {
+    runtime.resume();
+    ui.announce("Defeat countdown continues automatically");
+    return;
+  }
   runtime.pause();
   runtime.step(1);
 }
 
 function togglePause() {
+  if (simulation.levelState === "defeated") {
+    runtime.resume();
+    ui.announce("Defeat countdown cannot be paused");
+    return false;
+  }
   if (mode === "edit") {
     ui.announce("Edit mode stays paused");
     return true;
@@ -175,6 +188,11 @@ function reset(newSeed) {
 }
 
 function toggleMode() {
+  if (simulation.levelState === "defeated") {
+    runtime.resume();
+    ui.announce("Editing resumes after the arena restarts");
+    return;
+  }
   if (mode === "play") {
     resumeAfterEdit = !runtime.paused;
     runtime.pause();
@@ -337,6 +355,7 @@ mapFileInput.addEventListener("change", async () => {
 
 const probe = Object.freeze({
   pause() {
+    if (simulation.levelState === "defeated") return false;
     runtime.pause();
     return true;
   },
@@ -346,6 +365,10 @@ const probe = Object.freeze({
     return true;
   },
   step(count = 1) {
+    if (simulation.levelState === "defeated") {
+      runtime.resume();
+      return simulation.snapshot();
+    }
     runtime.pause();
     return runtime.step(count);
   },
@@ -370,6 +393,9 @@ const probe = Object.freeze({
   },
   trueSight() {
     return sightFrame.diagnostics();
+  },
+  encounterDiagnostics() {
+    return simulation.encounterDiagnostics();
   },
   isVisible(x, z, radius = 0) {
     return sightFrame.isCircleVisible(

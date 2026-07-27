@@ -7,6 +7,7 @@ function clamp(value, min, max) {
 
 /** @param {number} surfaceDistance @param {number} radius */
 export function explosionFalloff(surfaceDistance, radius) {
+  if (!(radius > 0)) return surfaceDistance <= 0 ? 1 : 0;
   const t = clamp(surfaceDistance / radius, 0, 1);
   const smoothstep = t * t * (3 - 2 * t);
   return 1 - smoothstep;

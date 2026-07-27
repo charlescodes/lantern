@@ -3,13 +3,21 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 import os from "node:os";
 
+import {
+  ENEMY_AI_PROFILE_NONE,
+  GAMEPLAY_PROFILE_PRE_COMBAT,
+} from "../src/config.js";
 import { GridMap } from "../src/sim/grid_map.js";
 import { Simulation } from "../src/sim/simulation.js";
 
 test("10 simulated minutes of move/cast stress stay bounded with sim p99 below 8 ms", () => {
   const totalTicks = 10 * 60 * 60;
   const samples = new Float64Array(totalTicks);
-  const simulation = new Simulation({ seed: 0x51a7e });
+  const simulation = new Simulation({
+    seed: 0x51a7e,
+    gameplayProfile: GAMEPLAY_PROFILE_PRE_COMBAT,
+    enemyAiProfile: ENEMY_AI_PROFILE_NONE,
+  });
   const heapBefore = process.memoryUsage().heapUsed;
   for (let tick = 0; tick < totalTicks; tick += 1) {
     const started = performance.now();
