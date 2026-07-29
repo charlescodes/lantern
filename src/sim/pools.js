@@ -154,6 +154,53 @@ export class EnemyWizardPool {
     this.dodgeDirectionZ = new Float32Array(capacity);
     this.dodgeSide = new Int8Array(capacity);
     this.retreating = new Uint8Array(capacity);
+    this.perceptionState = new Uint8Array(capacity);
+    this.knowledgeSource = new Uint8Array(capacity);
+    this.perceptionLane = new Uint8Array(capacity);
+    this.currentVisibility = new Uint8Array(capacity);
+    this.visibilitySampleTick = new Uint32Array(capacity);
+    this.exposureStartTick = new Uint32Array(capacity);
+    this.exposureProgress = new Uint16Array(capacity);
+    this.noticingResumeState = new Uint8Array(capacity);
+    this.candidateTargetKind = new Uint8Array(capacity);
+    this.candidateTargetId = new Uint32Array(capacity);
+    this.candidateTargetTeam = new Uint8Array(capacity);
+    this.confirmedTargetKind = new Uint8Array(capacity);
+    this.confirmedTargetId = new Uint32Array(capacity);
+    this.confirmedTargetTeam = new Uint8Array(capacity);
+    this.facingX = new Float32Array(capacity);
+    this.facingZ = new Float32Array(capacity);
+    this.guardX = new Float32Array(capacity);
+    this.guardZ = new Float32Array(capacity);
+    this.guardBaseFacingX = new Float32Array(capacity);
+    this.guardBaseFacingZ = new Float32Array(capacity);
+    this.guardSweepPhase = new Uint16Array(capacity);
+    this.guardReturnStartTick = new Uint32Array(capacity);
+    this.guardUnreachableStartTick = new Uint32Array(capacity);
+    this.hasLastSeen = new Uint8Array(capacity);
+    this.lastSeenX = new Float32Array(capacity);
+    this.lastSeenZ = new Float32Array(capacity);
+    this.lastSeenVx = new Float32Array(capacity);
+    this.lastSeenVz = new Float32Array(capacity);
+    this.lastSeenTick = new Uint32Array(capacity);
+    this.huntPhase = new Uint8Array(capacity);
+    this.huntAnchorX = new Float32Array(capacity);
+    this.huntAnchorZ = new Float32Array(capacity);
+    this.huntTravelStartTick = new Uint32Array(capacity);
+    this.searchStartTick = new Uint32Array(capacity);
+    this.searchEndTick = new Uint32Array(capacity);
+    this.hasSearchGoal = new Uint8Array(capacity);
+    this.searchGoalX = new Float32Array(capacity);
+    this.searchGoalZ = new Float32Array(capacity);
+    this.searchGoalCx = new Int16Array(capacity);
+    this.searchGoalCz = new Int16Array(capacity);
+    this.searchGoalStartTick = new Uint32Array(capacity);
+    this.searchSequence = new Uint16Array(capacity);
+    this.hasStimulus = new Uint8Array(capacity);
+    this.stimulusX = new Float32Array(capacity);
+    this.stimulusZ = new Float32Array(capacity);
+    this.stimulusTick = new Uint32Array(capacity);
+    this.navigationSlot = new Int16Array(capacity);
   }
 
   reset() {
@@ -162,7 +209,7 @@ export class EnemyWizardPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number}} value */
+  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -220,6 +267,62 @@ export class EnemyWizardPool {
     this.dodgeDirectionZ[index] = 0;
     this.dodgeSide[index] = 0;
     this.retreating[index] = 0;
+    this.perceptionState[index] = 0;
+    this.knowledgeSource[index] = 0;
+    this.perceptionLane[index] = value.perceptionLane ?? 0;
+    this.currentVisibility[index] = 0;
+    this.visibilitySampleTick[index] = 0;
+    this.exposureStartTick[index] = 0;
+    this.exposureProgress[index] = 0;
+    this.noticingResumeState[index] = 0;
+    this.candidateTargetKind[index] = 0;
+    this.candidateTargetId[index] = 0;
+    this.candidateTargetTeam[index] = 0;
+    this.confirmedTargetKind[index] = 0;
+    this.confirmedTargetId[index] = 0;
+    this.confirmedTargetTeam[index] = 0;
+    const facingLength = Math.hypot(value.facingX ?? 1, value.facingZ ?? 0);
+    this.facingX[index] = facingLength > 1e-9 ? (value.facingX ?? 1) / facingLength : 1;
+    this.facingZ[index] = facingLength > 1e-9 ? (value.facingZ ?? 0) / facingLength : 0;
+    this.guardX[index] = value.guardX ?? value.x;
+    this.guardZ[index] = value.guardZ ?? value.z;
+    const guardFacingLength = Math.hypot(
+      value.guardBaseFacingX ?? this.facingX[index],
+      value.guardBaseFacingZ ?? this.facingZ[index],
+    );
+    this.guardBaseFacingX[index] = guardFacingLength > 1e-9
+      ? (value.guardBaseFacingX ?? this.facingX[index]) / guardFacingLength
+      : 1;
+    this.guardBaseFacingZ[index] = guardFacingLength > 1e-9
+      ? (value.guardBaseFacingZ ?? this.facingZ[index]) / guardFacingLength
+      : 0;
+    this.guardSweepPhase[index] = value.guardSweepPhase ?? 0;
+    this.guardReturnStartTick[index] = 0;
+    this.guardUnreachableStartTick[index] = 0;
+    this.hasLastSeen[index] = 0;
+    this.lastSeenX[index] = Number.NaN;
+    this.lastSeenZ[index] = Number.NaN;
+    this.lastSeenVx[index] = 0;
+    this.lastSeenVz[index] = 0;
+    this.lastSeenTick[index] = 0;
+    this.huntPhase[index] = 0;
+    this.huntAnchorX[index] = Number.NaN;
+    this.huntAnchorZ[index] = Number.NaN;
+    this.huntTravelStartTick[index] = 0;
+    this.searchStartTick[index] = 0;
+    this.searchEndTick[index] = 0;
+    this.hasSearchGoal[index] = 0;
+    this.searchGoalX[index] = Number.NaN;
+    this.searchGoalZ[index] = Number.NaN;
+    this.searchGoalCx[index] = -1;
+    this.searchGoalCz[index] = -1;
+    this.searchGoalStartTick[index] = 0;
+    this.searchSequence[index] = 0;
+    this.hasStimulus[index] = 0;
+    this.stimulusX[index] = Number.NaN;
+    this.stimulusZ[index] = Number.NaN;
+    this.stimulusTick[index] = 0;
+    this.navigationSlot[index] = -1;
     this.activeCount += 1;
     return id;
   }
@@ -279,6 +382,53 @@ export class EnemyWizardPool {
         this.dodgeDirectionZ,
         this.dodgeSide,
         this.retreating,
+        this.perceptionState,
+        this.knowledgeSource,
+        this.perceptionLane,
+        this.currentVisibility,
+        this.visibilitySampleTick,
+        this.exposureStartTick,
+        this.exposureProgress,
+        this.noticingResumeState,
+        this.candidateTargetKind,
+        this.candidateTargetId,
+        this.candidateTargetTeam,
+        this.confirmedTargetKind,
+        this.confirmedTargetId,
+        this.confirmedTargetTeam,
+        this.facingX,
+        this.facingZ,
+        this.guardX,
+        this.guardZ,
+        this.guardBaseFacingX,
+        this.guardBaseFacingZ,
+        this.guardSweepPhase,
+        this.guardReturnStartTick,
+        this.guardUnreachableStartTick,
+        this.hasLastSeen,
+        this.lastSeenX,
+        this.lastSeenZ,
+        this.lastSeenVx,
+        this.lastSeenVz,
+        this.lastSeenTick,
+        this.huntPhase,
+        this.huntAnchorX,
+        this.huntAnchorZ,
+        this.huntTravelStartTick,
+        this.searchStartTick,
+        this.searchEndTick,
+        this.hasSearchGoal,
+        this.searchGoalX,
+        this.searchGoalZ,
+        this.searchGoalCx,
+        this.searchGoalCz,
+        this.searchGoalStartTick,
+        this.searchSequence,
+        this.hasStimulus,
+        this.stimulusX,
+        this.stimulusZ,
+        this.stimulusTick,
+        this.navigationSlot,
       ]) {
         component[index] = component[last];
       }

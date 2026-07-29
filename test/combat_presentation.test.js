@@ -11,6 +11,7 @@ import {
   healthBarRatio,
 } from "../src/presentation/combat_visuals.js";
 import { Camera3D } from "../src/presentation/camera_3d.js";
+import { enemyFacingTriangle } from "../src/presentation/enemy_facing.js";
 import {
   parsePresentationOptions,
   PresentationFlags,
@@ -177,7 +178,7 @@ test("Canvas2D draws 0.10m by 0.90m tracks and bottom-up health fills", () => {
   ) < 1e-12);
 });
 
-test("Three preallocates four enemies and five resident health track/fill instances", () => {
+test("Three preallocates 64 enemies and facing markers plus 65 health instances", () => {
   const simulation = new Simulation({ particleBurstCount: 0 });
   simulation.tick(null);
   const snapshot = simulation.snapshot();
@@ -186,6 +187,7 @@ test("Three preallocates four enemies and five resident health track/fill instan
   const { presentation, sightFrame } = threePresentation(snapshot);
   const identities = {
     enemies: presentation.enemyMesh,
+    facing: presentation.enemyFacingMesh,
     tracks: presentation.healthTrackMesh,
     fills: presentation.healthFillMesh,
     obelisk: presentation.obeliskGroup,
@@ -193,11 +195,13 @@ test("Three preallocates four enemies and five resident health track/fill instan
   };
   presentation.render(snapshot, 0, view(snapshot, sightFrame));
 
-  assert.equal(presentation.enemyMesh.instanceMatrix.count, 4);
-  assert.equal(presentation.healthTrackMesh.instanceMatrix.count, 5);
-  assert.equal(presentation.healthFillMesh.instanceMatrix.count, 5);
-  assert.equal(presentation.healthFillMesh.instanceColor.count, 5);
+  assert.equal(presentation.enemyMesh.instanceMatrix.count, 64);
+  assert.equal(presentation.enemyFacingMesh.instanceMatrix.count, 64);
+  assert.equal(presentation.healthTrackMesh.instanceMatrix.count, 65);
+  assert.equal(presentation.healthFillMesh.instanceMatrix.count, 65);
+  assert.equal(presentation.healthFillMesh.instanceColor.count, 65);
   assert.equal(presentation.enemyMesh.count, 1);
+  assert.equal(presentation.enemyFacingMesh.count, 1);
   assert.equal(presentation.healthTrackMesh.count, 2);
   assert.equal(presentation.healthFillMesh.count, 2);
   assert.equal(presentation.obeliskGroup.visible, true);
@@ -237,6 +241,7 @@ test("Three preallocates four enemies and five resident health track/fill instan
   const solidCells = snapshot.map.cells.filter((cell) => cell === 1).length;
   assert.equal(presentation.wallMesh.count, solidCells - 1);
   assert.equal(presentation.enemyMesh, identities.enemies);
+  assert.equal(presentation.enemyFacingMesh, identities.facing);
   assert.equal(presentation.healthTrackMesh, identities.tracks);
   assert.equal(presentation.healthFillMesh, identities.fills);
   assert.equal(presentation.obeliskGroup, identities.obelisk);
@@ -251,6 +256,7 @@ test("enemy, obelisk, health, hostile effects, and emissive materials share True
   presentation.render(snapshot, 0, view(snapshot, sightFrame));
   const maskedMaterials = [
     presentation.enemyMaterial,
+    presentation.enemyFacingMaterial,
     presentation.healthTrackMaterial,
     presentation.healthFillMaterial,
     presentation.obeliskMaterial,
@@ -266,4 +272,26 @@ test("enemy, obelisk, health, hostile effects, and emissive materials share True
   assert.equal(presentation.projectileMaterial.emissiveNode !== null, true);
   assert.equal(presentation.particleMaterial.emissiveNode !== null, true);
   assert.equal(presentation.dynamicLights.length, 8);
+});
+
+test("Canvas2D and Three.js facing markers derive the same normalized snapshot direction", () => {
+  const simulation = new Simulation({ particleBurstCount: 0 });
+  simulation.tick(null);
+  const snapshot = simulation.snapshot();
+  snapshot.enemies[0].facing = { x: 3, z: 4 };
+  const enemy = snapshot.enemies[0];
+  const footprint = enemyFacingTriangle(enemy, enemy.x, enemy.z);
+  assert.deepEqual(footprint.facing, { x: 0.6, z: 0.8 });
+
+  const { presentation, sightFrame } = threePresentation(snapshot);
+  presentation.render(snapshot, 1, view(snapshot, sightFrame));
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  presentation.enemyFacingMesh.getMatrixAt(0, matrix);
+  matrix.decompose(position, quaternion, scale);
+  const direction = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion).normalize();
+  assert.ok(Math.abs(direction.x - footprint.facing.x) < 1e-6);
+  assert.ok(Math.abs(direction.z - footprint.facing.z) < 1e-6);
 });

@@ -133,17 +133,70 @@ test("AI View prints tactical truth without mutating the snapshot", () => {
   const mob = value.enemies[0];
   const text = formatAiMobDetails(value, mob, false);
   assert.match(text, /profile\s+tactical-wizard-v1/);
-  assert.match(text, /visibility\s+hidden \(AI View still shown\)/);
+  assert.match(text, /player sight hidden \(AI View still shown\)/);
   assert.match(text, /goal\s+strafe 12\.0,9\.0/);
   assert.match(text, /navigation\s+cost 84 · v3/);
   assert.match(text, /aim\s+4\.5,6\.5 · lead 0\.375s/);
   assert.match(text, /threat\s+effect #77 · projectile #9 · dodge 12t/);
-  assert.match(text, /field\s+v3 · building · stale/);
+  assert.match(text, /field\s+slot — · none · v3 · building · stale/);
   buildAiViewFrame(value, 0.25, {
     mode: AI_VIEW_MODE.all,
     selectedKey: aiMobKey(mob),
   });
   assert.deepEqual(value, before);
+});
+
+test("AI View exposes perception geometry, personal memory, and bounded navigation state", () => {
+  const value = snapshot();
+  value.enemyAiProfile = "perceptive-wizard-v1";
+  value.enemies = [enemy(7, {
+    aiProfile: "perceptive-wizard-v1",
+    perceptionState: "hunting",
+    knowledgeSource: "visual-memory",
+    currentVisibility: false,
+    visibilitySampleTick: 125,
+    perceptionLane: 2,
+    exposure: { progressTicks: 15, thresholdTicks: 15 },
+    facing: { x: 3, z: 4 },
+    candidateTarget: null,
+    confirmedTarget: { kind: "player", id: 1, team: "player" },
+    guard: { point: { x: 15.5, z: 15.5 }, returnStartTick: null },
+    lastSeen: { position: { x: 6.5, z: 7.5 }, velocity: { x: 1, z: 0 }, tick: 120 },
+    stimulus: null,
+    hunt: {
+      phase: "search",
+      anchor: { x: 6.5, z: 7.5 },
+      travelTimeoutTick: 900,
+      searchTicksRemaining: 240,
+      searchGoal: { x: 7.5, z: 7.5, timeoutTick: 420 },
+      sequence: 3,
+    },
+    navigationField: {
+      slot: 9,
+      key: "goal:7,7",
+      cost: 28,
+      version: 4,
+      stale: true,
+      building: true,
+    },
+  })];
+  const frame = buildAiViewFrame(value, 1, {
+    mode: AI_VIEW_MODE.all,
+    selectedKey: aiMobKey(value.enemies[0]),
+    isVisible: () => false,
+  });
+  const mob = frame.mobs[0];
+  assert.deepEqual(mob.perceptionCone.facing, { x: 0.6, z: 0.8 });
+  assert.equal(mob.perceptionCone.radius, 12);
+  assert.equal(mob.perceptionCone.closeRadius, 1.5);
+  assert.deepEqual(mob.lastSeenPoint, { x: 6.5, z: 7.5 });
+  assert.deepEqual(mob.searchPoint, { x: 7.5, z: 7.5 });
+  assert.deepEqual(mob.guardPoint, { x: 15.5, z: 15.5 });
+  assert.equal(mob.navigationState.slot, 9);
+  assert.match(mob.labelLines.join("\n"), /mob vision\s+target not visible/);
+  assert.match(mob.labelLines.join("\n"), /last seen\s+6\.5,7\.5/);
+  assert.match(mob.labelLines.join("\n"), /sequence 3 · travel timeout 900t/);
+  assert.match(mob.labelLines.join("\n"), /search left 240t · goal timeout 420t/);
 });
 
 test("AI View panel wording cannot be mistaken for an AI behavior toggle", async () => {

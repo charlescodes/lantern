@@ -41,7 +41,7 @@ function fillEnemyPool(simulation) {
   ];
   assert.equal(simulation.enemies.activeCount, 1);
   placeEnemy(simulation, 0, positions[0].x, positions[0].z);
-  for (let index = 1; index < ENEMY_WIZARD.capacity; index += 1) {
+  for (let index = 1; index < simulation.enemies.capacity; index += 1) {
     const id = simulation.enemies.spawn({
       spawnSequence: index + 1,
       spawnTick: simulation.tickCount,
@@ -81,6 +81,7 @@ test("four tactical wizards withstand dense threats, map edits, and retreat cycl
   const simulation = new Simulation({
     seed: 0x0700_a170,
     particleBurstCount: 0,
+    enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
   });
   simulation.tick(null);
   fillEnemyPool(simulation);
@@ -132,7 +133,7 @@ test("four tactical wizards withstand dense threats, map edits, and retreat cycl
       maximumNavigationExpansions,
       simulation.navigationField.expansionsThisTick,
     );
-    assert.equal(simulation.enemies.activeCount, ENEMY_WIZARD.capacity);
+    assert.equal(simulation.enemies.activeCount, simulation.enemies.capacity);
     assert.ok(simulation.projectiles.activeCount <= simulation.projectiles.capacity);
     for (let index = 0; index < simulation.enemies.activeCount; index += 1) {
       if (simulation.enemies.retreating[index]) retreatTicks += 1;

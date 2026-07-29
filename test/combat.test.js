@@ -5,6 +5,7 @@ import {
   ACTOR_TEAM,
   COMBAT,
   ENEMY_AI_PROFILE_NONE,
+  ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_WIZARD,
   GAMEPLAY_PROFILE_PRE_COMBAT,
   PROJECTILE_OWNER_KIND,
@@ -804,7 +805,7 @@ test("player defeat freezes autonomy for 90 ticks then restarts the same seed an
   assert.equal(recording.seed, 0xfeed_0600);
   assert.equal(recording.configuration.spells[0].currentRevision, 3);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
-  assert.equal(recording.configuration.enemyAiProfile, "tactical-wizard-v1");
+  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
 });
 
 test("manual reset during defeat ignores movement and casting and leaves a clean tick-zero baseline", () => {
@@ -837,7 +838,7 @@ test("manual reset during defeat ignores movement and casting and leaves a clean
   assert.equal(simulation.commandLog.length, 0);
 });
 
-test("snapshots, queries, diagnostics, ownership, and combat history expose bounded schema-v7 state", () => {
+test("snapshots, queries, diagnostics, ownership, and combat history expose bounded schema-v8 state", () => {
   const simulation = sandboxSimulation();
   const enemyId = spawnEnemy(simulation, 5.5, 4.5, { spawnSequence: 9 });
   for (let tick = 0; tick < 300; tick += 1) {
@@ -855,7 +856,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
     simulation.enemies.health[current] = 100;
   }
   const snapshot = simulation.snapshot();
-  assert.equal(snapshot.schemaVersion, 7);
+  assert.equal(snapshot.schemaVersion, 8);
   assert.equal(snapshot.player.maximumHealth, 100);
   assert.equal(snapshot.enemies[0].maximumHealth, 100);
   assert.equal(snapshot.pools.enemies.capacity, 4);
@@ -882,7 +883,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
   assert.equal(diagnostics.encounter.nextSpawnTick, 1);
 });
 
-test("schema-v7 replay is exact and schema-v2 through v5 force frozen pre-combat behavior", () => {
+test("schema-v8 replay is exact and schema-v2 through v5 force frozen pre-combat behavior", () => {
   const live = new Simulation({ seed: 0x7000_0007, particleBurstCount: 0 });
   for (let tick = 0; tick < 180; tick += 1) {
     live.tick({
@@ -891,9 +892,9 @@ test("schema-v7 replay is exact and schema-v2 through v5 force frozen pre-combat
     });
   }
   const recording = live.exportCommandLog();
-  assert.equal(recording.schemaVersion, 7);
+  assert.equal(recording.schemaVersion, 8);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
-  assert.equal(recording.configuration.enemyAiProfile, "tactical-wizard-v1");
+  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());
   assert.throws(
     () => Simulation.replay({

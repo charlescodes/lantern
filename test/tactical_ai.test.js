@@ -7,6 +7,7 @@ import {
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
+  PROJECTILE,
   PROJECTILE_OWNER_KIND,
   SCHEMA_VERSION,
   TACTICAL_WIZARD,
@@ -38,6 +39,8 @@ function tacticalSimulation(map, options = {}) {
     scenario: new ArenaScenario(map),
     seed: options.seed ?? 0x7000_0007,
     particleBurstCount: 0,
+    projectileCapacity: PROJECTILE.legacyCapacity,
+    enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
   });
 }
 
@@ -379,7 +382,12 @@ test("another enemy, particle traffic, palette edits, and harmless player casts 
 });
 
 test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic direct aim", () => {
-  const live = new Simulation({ seed: 0x7000_0700, particleBurstCount: 0 });
+  const live = new Simulation({
+    seed: 0x7000_0700,
+    particleBurstCount: 0,
+    projectileCapacity: PROJECTILE.legacyCapacity,
+    enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
+  });
   for (let tick = 0; tick < 180; tick += 1) {
     live.tick({
       move: { x: 10.5, z: 10.5 },
@@ -387,6 +395,9 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
     });
   }
   const recording = live.exportCommandLog();
+  recording.schemaVersion = 7;
+  delete recording.configuration.enemyCapacity;
+  delete recording.configuration.encounterMaximumAlive;
   assert.equal(recording.schemaVersion, 7);
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_TACTICAL);
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());
@@ -410,5 +421,5 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
   const castEvent = replayed.combatEvents.toArray().find((event) => event.type === "cast");
   assert.ok(castEvent);
   assert.equal(Object.hasOwn(castEvent, "aim"), false);
-  assert.equal(SCHEMA_VERSION, 7);
+  assert.equal(SCHEMA_VERSION, 8);
 });

@@ -7,6 +7,7 @@ import {
   healthBarColor,
   healthBarRatio,
 } from "../presentation/combat_visuals.js";
+import { enemyFacingTriangle } from "../presentation/enemy_facing.js";
 import {
   FIREBALL_COLOR_CORE,
   FIREBALL_COLOR_IMPACT_LIGHT,
@@ -611,6 +612,17 @@ export class DebugRenderer {
       context.arc(x, z, line * 2.2, 0, Math.PI * 2);
       context.fillStyle = "#351318";
       context.fill();
+      const marker = enemyFacingTriangle(enemy, x, z);
+      context.beginPath();
+      context.moveTo(marker.tip.x, marker.tip.z);
+      context.lineTo(marker.left.x, marker.left.z);
+      context.lineTo(marker.right.x, marker.right.z);
+      context.closePath();
+      context.fillStyle = COLORS.enemyEdge;
+      context.fill();
+      context.strokeStyle = "#5b1b22";
+      context.lineWidth = line;
+      context.stroke();
       if (snapshot.debugFlags.velocityVectors) {
         this.#drawArrow(x, z, enemy.vx * 0.25, enemy.vz * 0.25, COLORS.velocity);
         this.#drawArrow(

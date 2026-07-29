@@ -6,6 +6,7 @@ import os from "node:os";
 import {
   ACTOR_TEAM,
   COMBAT,
+  ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
   PROJECTILE_OWNER_KIND,
 } from "../src/config.js";
@@ -95,7 +96,7 @@ function fillEnemyPool(simulation) {
   ];
   assert.equal(simulation.enemies.activeCount, 1);
   placeEnemy(simulation, 0, positions[0].x, positions[0].z);
-  for (let index = 1; index < ENEMY_WIZARD.capacity; index += 1) {
+  for (let index = 1; index < simulation.enemies.capacity; index += 1) {
     const id = simulation.enemies.spawn({
       spawnSequence: 100 + index,
       spawnTick: simulation.tickCount,
@@ -109,7 +110,7 @@ function fillEnemyPool(simulation) {
     assert.ok(id > 0);
     placeEnemy(simulation, index, positions[index].x, positions[index].z);
   }
-  assert.equal(simulation.enemies.activeCount, ENEMY_WIZARD.capacity);
+  assert.equal(simulation.enemies.activeCount, simulation.enemies.capacity);
 }
 
 function spawnProjectile(simulation, value) {
@@ -141,6 +142,7 @@ test("four-enemy combat deaths and repeated restarts stay bounded below 8 ms at 
   const simulation = new Simulation({
     seed: 0x0600_c0de,
     initialFireballDefinition: definition,
+    enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
   });
   const timings = [];
   const heapBefore = process.memoryUsage().heapUsed;
@@ -173,7 +175,7 @@ test("four-enemy combat deaths and repeated restarts stay bounded below 8 ms at 
     });
     timedTick();
     assert.equal(simulation.enemies.findIndexById(victimId), -1);
-    assert.equal(simulation.enemies.activeCount, ENEMY_WIZARD.capacity - 1);
+    assert.equal(simulation.enemies.activeCount, simulation.enemies.capacity - 1);
     assert.ok(simulation.particles.activeCount >= definition.emission.burstCount);
     enemyDeaths += 1;
 
@@ -212,7 +214,7 @@ test("four-enemy combat deaths and repeated restarts stay bounded below 8 ms at 
   const measured = timings.slice(12).sort((left, right) => left - right);
   const p99 = measured[Math.ceil(measured.length * 0.99) - 1];
   const heapAfter = process.memoryUsage().heapUsed;
-  assert.equal(maximumEnemies, ENEMY_WIZARD.capacity);
+  assert.equal(maximumEnemies, ENEMY_WIZARD.legacyCapacity);
   assert.equal(enemyDeaths, 3);
   assert.equal(restarts, 3);
   assert.ok(p99 < 8, `combat simulation p99 ${p99.toFixed(3)} ms exceeded 8 ms`);

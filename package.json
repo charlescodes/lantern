@@ -1,6 +1,6 @@
 {
   "name": "lantern-debug-arena",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "test:soak:sight": "node --test test/true_sight_soak.test.js",
     "test:soak:spell": "node --test test/spell_soak.test.js",
     "test:soak:combat": "node --test test/combat_soak.test.js",
-    "test:soak:ai": "node --test test/ai_soak.test.js"
+    "test:soak:ai": "node --test test/ai_soak.test.js",
+    "test:soak:perception": "node --test test/perception_soak.test.js"
   },
   "engines": {
     "node": ">=20"

@@ -1,6 +1,10 @@
 # Lantern Documentation
 
-Lantern `0.7.0` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.8.0` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+
+## Start here
+
+- [Architecture review and owner's guide](./architecture-guide.md) — a current code map, plain-language mental model, strengths and drift assessment, review route, and staged refactoring strategy.
 
 ## Current contracts
 
@@ -15,6 +19,7 @@ Lantern `0.7.0` is the current application release. Documents are separated by p
 - [0.6.0 Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) — singleton obelisk encounter, bounded enemy wizards, symmetric health/damage, schema-v6 replay, defeat/restart, and presentation parity.
 - [0.6.1 health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) — keeps Three.js health fills above their dark tracks through normal visibility and TrueSight fading.
 - [0.7.0 Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) — shared bounded navigation, deterministic strafe/intercept/dodge/retreat behavior, schema-v7 diagnostics, and frozen schema-v6 basic replay.
+- [0.8.0 Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) — geometry-only vision, personal memory/search/guard behavior, bounded 50-mob infrastructure, schema-v8 replay, and frozen schema-v7 tactical replay.
 - [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
 
 ## Open defects
@@ -38,13 +43,14 @@ Lantern `0.7.0` is the current application release. Documents are separated by p
 | 0.6.0 | [Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) | Singleton obelisk, basic enemy encounter, shared Fireball combat, health/defeat flow, and schema v6 |
 | 0.6.1 | [Health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) | Correct Three.js track/fill render-queue ordering without simulation or schema changes |
 | 0.7.0 | [Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) | Shared incremental navigation, strafe/lead/dodge/retreat tactics, diagnostics, and schema v7 |
+| 0.8.0 | [Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) | Vision, personal memory/search/return, destination cache, broadphase scaling, and schema v8 |
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.7.0`.
-- Snapshot and command-recording schema: v7.
+- Application/package release: `0.8.0`.
+- Snapshot and command-recording schema: v8.
 - Scenario JSON schema: v3; legacy scenario v2 and map v1 remain importable.
 - Fireball definition format: v1.
 - Performance-report schema: v2.
@@ -52,4 +58,4 @@ These identifiers evolve independently:
 - Historical replay particle profile: `m0.2`.
 - Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
 
-Release numbering must not rename a frozen profile or increment a serialization schema unless that compatibility contract changes. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the tactical wizard.
+Release numbering must not rename a frozen profile or increment a serialization schema unless that compatibility contract changes. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the live perceptive wizard and records the 64-capacity/four-alive scaling boundary.

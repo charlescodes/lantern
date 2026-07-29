@@ -16,6 +16,11 @@ const COLORS = Object.freeze({
   withdraw: "#efbd5f",
   dodge: "#d58cff",
   retreat: "#ff6f67",
+  unaware: "#8e9a93",
+  noticing: "#f3cf65",
+  engaged: "#6bc8a8",
+  hunting: "#f39b58",
+  returning: "#75a9df",
   unknown: "#d7ddd8",
   goal: "#62d9d0",
   desired: "#e6eee9",
@@ -25,6 +30,11 @@ const COLORS = Object.freeze({
   threat: "#ff72bd",
   dodgeVector: "#cf8cff",
   selected: "#fff0ac",
+  facing: "#fff3c4",
+  memory: "#ff9e6f",
+  impact: "#ff6f9f",
+  search: "#70d7cf",
+  guard: "#84a9ff",
 });
 
 /** @param {string} id */
@@ -282,6 +292,7 @@ export class AiView {
         context.lineWidth = 2;
         context.stroke();
       }
+      this.#drawPerception(mob, anchor);
       if (mob.movementGoal) {
         this.#drawArrow(
           anchor,
@@ -306,6 +317,27 @@ export class AiView {
           COLORS.aim,
           true,
         );
+      }
+      if (mob.targetPoint) {
+        this.#drawLine(
+          anchor,
+          this.options.camera.worldToViewport(mob.targetPoint.x, mob.targetPoint.z),
+          mob.mobTargetVisible ? COLORS.sightClear : COLORS.sightBlocked,
+          !mob.mobTargetVisible,
+          0.9,
+        );
+      }
+      if (mob.lastSeenPoint) {
+        this.#drawWorldMarker(mob.lastSeenPoint, COLORS.memory, "×");
+      }
+      if (mob.stimulusPoint) {
+        this.#drawWorldMarker(mob.stimulusPoint, COLORS.impact, "!");
+      }
+      if (mob.searchPoint) {
+        this.#drawWorldMarker(mob.searchPoint, COLORS.search, "S");
+      }
+      if (mob.guardPoint) {
+        this.#drawWorldMarker(mob.guardPoint, COLORS.guard, "G");
       }
       if (mob.lineOfSightTarget) {
         this.#drawLine(
@@ -338,6 +370,86 @@ export class AiView {
       }
       this.#drawMobLabel(mob, anchor, stateColor, index, boxes, width, height);
     }
+  }
+
+  /** @param {ReturnType<typeof buildAiViewFrame>['mobs'][number]} mob @param {{x:number,y:number}} anchor */
+  #drawPerception(mob, anchor) {
+    const cone = mob.perceptionCone;
+    if (!cone) return;
+    const context = this.context;
+    const centerAngle = Math.atan2(cone.facing.z, cone.facing.x);
+    context.save();
+    context.beginPath();
+    context.moveTo(anchor.x, anchor.y);
+    const segments = 28;
+    for (let index = 0; index <= segments; index += 1) {
+      const angle = centerAngle - cone.halfAngleRadians
+        + index / segments * cone.halfAngleRadians * 2;
+      const point = this.options.camera.worldToViewport(
+        cone.x + Math.cos(angle) * cone.radius,
+        cone.z + Math.sin(angle) * cone.radius,
+      );
+      context.lineTo(point.x, point.y);
+    }
+    context.closePath();
+    context.fillStyle = mob.mobTargetVisible
+      ? "rgba(104, 214, 159, 0.075)"
+      : "rgba(243, 207, 101, 0.05)";
+    context.fill();
+    context.setLineDash([6, 5]);
+    context.strokeStyle = mob.mobTargetVisible
+      ? "rgba(104, 214, 159, 0.72)"
+      : "rgba(243, 207, 101, 0.48)";
+    context.lineWidth = 1;
+    context.stroke();
+    context.setLineDash([]);
+    context.beginPath();
+    for (let index = 0; index <= 40; index += 1) {
+      const angle = index / 40 * Math.PI * 2;
+      const point = this.options.camera.worldToViewport(
+        cone.x + Math.cos(angle) * cone.closeRadius,
+        cone.z + Math.sin(angle) * cone.closeRadius,
+      );
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    }
+    context.strokeStyle = "rgba(213, 140, 255, 0.62)";
+    context.lineWidth = 1.2;
+    context.stroke();
+    context.restore();
+    if (mob.facingEnd) {
+      this.#drawArrow(
+        anchor,
+        this.options.camera.worldToViewport(mob.facingEnd.x, mob.facingEnd.z),
+        COLORS.facing,
+        false,
+      );
+    }
+    const threshold = mob.exposure.thresholdTicks;
+    if (threshold > 0) {
+      const ratio = clamp(mob.exposure.progressTicks / threshold, 0, 1);
+      const width = 34;
+      context.fillStyle = "rgba(4, 8, 6, 0.82)";
+      context.fillRect(anchor.x - width / 2, anchor.y + 14, width, 4);
+      context.fillStyle = ratio >= 1 ? COLORS.sightClear : COLORS.noticing;
+      context.fillRect(anchor.x - width / 2, anchor.y + 14, width * ratio, 4);
+    }
+  }
+
+  /** @param {{x:number,z:number}} point @param {string} color @param {string} label */
+  #drawWorldMarker(point, color, label) {
+    const viewport = this.options.camera.worldToViewport(point.x, point.z);
+    const context = this.context;
+    context.beginPath();
+    context.arc(viewport.x, viewport.y, 6, 0, Math.PI * 2);
+    context.fillStyle = "rgba(5, 9, 7, 0.8)";
+    context.fill();
+    context.strokeStyle = color;
+    context.lineWidth = 1.5;
+    context.stroke();
+    context.fillStyle = color;
+    context.font = "bold 9px ui-monospace, SFMono-Regular, Consolas, monospace";
+    context.fillText(label, viewport.x - 3, viewport.y + 3);
   }
 
   /** @param {Array<{x:number,z:number,radius:number,label:string}>} rings */

@@ -1,14 +1,15 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
-export const APPLICATION_VERSION = "0.7.0";
+export const APPLICATION_VERSION = "0.8.0";
 
 export const GAMEPLAY_PROFILE_OBELISK_DUEL = "obelisk-duel-v1";
 export const GAMEPLAY_PROFILE_PRE_COMBAT = "pre-combat-v1";
 export const ENEMY_AI_PROFILE_BASIC = "basic-wizard-v1";
 export const ENEMY_AI_PROFILE_TACTICAL = "tactical-wizard-v1";
+export const ENEMY_AI_PROFILE_PERCEPTIVE = "perceptive-wizard-v1";
 export const ENEMY_AI_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
@@ -52,7 +53,9 @@ export const COMBAT = Object.freeze({
 });
 
 export const ENEMY_WIZARD = Object.freeze({
-  capacity: 4,
+  capacity: 64,
+  legacyCapacity: 4,
+  encounterMaximumAlive: 4,
   radius: PLAYER.radius,
   massKg: PLAYER.massKg,
   desiredSpeed: PLAYER.desiredSpeed,
@@ -63,6 +66,29 @@ export const ENEMY_WIZARD = Object.freeze({
   withdrawInsideMeters: 6,
   shotIntervalTicks: 75,
   spawnIntervalTicks: 1_800,
+});
+
+export const PERCEPTIVE_WIZARD = Object.freeze({
+  visualRangeMeters: 12,
+  fieldOfViewDegrees: 120,
+  closeAwarenessMeters: 1.5,
+  perceptionLanes: 5,
+  exposureTicks: 15,
+  maximumTurnRadiansPerSecond: Math.PI,
+  guardReturnDistanceMeters: 0.5,
+  guardSweepRadians: Math.PI / 4,
+  guardSweepCycleTicks: 360,
+  lastSeenArrivalMeters: 0.75,
+  travelTimeoutTicks: 720,
+  searchTicks: 480,
+  searchGoalTimeoutTicks: 90,
+  searchMinimumRadiusCells: 1,
+  searchMaximumRadiusCells: 3,
+  perceptionEventCapacity: 128,
+  perceptionSnapshotEventCount: 32,
+  actorTargetSlots: 4,
+  destinationGoalSlots: 64,
+  navigationExpansionsPerTick: 2_048,
 });
 
 export const TACTICAL_WIZARD = Object.freeze({
@@ -86,7 +112,8 @@ export const TACTICAL_WIZARD = Object.freeze({
 });
 
 export const PROJECTILE = Object.freeze({
-  capacity: 128,
+  capacity: 256,
+  legacyCapacity: 128,
   radius: 0.12,
   speed: 9,
   lifetime: 4,

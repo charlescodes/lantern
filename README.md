@@ -1,6 +1,6 @@
-# Lantern 0.7.0 / Tactical Wizard AI
+# Lantern 0.8.0 / Visual Perception and Hunting
 
-A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and four bounded tactical enemy wizards. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, AI diagnostics, and TrueSight frame.
+A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and enemy wizards that see, remember, hunt, search, and return to guard posts. The live pool is sized for 64 enemies while the authored encounter still caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, AI diagnostics, and TrueSight frame.
 
 ## Run
 
@@ -39,11 +39,17 @@ npm run test:soak:sight
 npm run test:soak:spell
 npm run test:soak:combat
 npm run test:soak:ai
+npm run test:soak:perception
 ```
+
+The browser-only 50-mob production-adapter fixture is available at
+<http://127.0.0.1:4173/test/browser/perception_stress.html?renderer=2d> after
+starting the development server. It adds no gameplay command or simulation
+mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.7.0` adds [Tactical Wizard AI](./docs/milestones/0.7.0-tactical-wizard-ai.md) and advances snapshots/recordings to schema v7. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2; schema-v6 recordings retain the frozen basic wizard.
+Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.0` adds [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) and advances snapshots/recordings to schema v8. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
 
 ## Play controls
 
@@ -95,7 +101,7 @@ Canvas2D draws the shared byte mask as a world-space void overlay. Three.js uplo
 
 Open **AI View** for a read-only tactical diagnostics window. **Off** clears only the debug drawing, **Selected mob** follows one stable `kind:id` chosen from the selector or an arena pin, and **All mobs** prints and draws the state of every living AI mob. AI continues running in every mode; the panel never enables, disables, pauses, or otherwise mutates a mob.
 
-The shared overlay shows the 6–9m engagement band, movement goal and desired velocity, predicted aim, line of sight, tracked projectile threat, dodge direction, and a per-mob tactical record. It is drawn over either Canvas2D or Three.js and intentionally remains visible through TrueSight so hidden decisions can be inspected. That visibility is debug-only and supplies no simulation or AI knowledge. `window.__lantern.aiView()` reports the UI state, while `setAiView("off" | "selected" | "all", id?, kind?)` changes only the view. See the [AI View diagnostic contract](./docs/notes/ai-view.md).
+The shared overlay shows the 6–9m engagement band, the selected mob's `120°`/`12m` perception cone and `1.5m` close-awareness circle, facing, exposure progress, target, personal last-seen or damage clue, search goal, guard point, movement, aim, navigation, threat, dodge, and retreat state. It explicitly distinguishes **player sight** through TrueSight from **mob vision** in the simulation. The overlay is drawn over either Canvas2D or Three.js and intentionally remains visible through TrueSight so hidden decisions can be inspected. That visibility is debug-only and supplies no simulation or AI knowledge. `window.__lantern.aiView()` reports the UI state, while `setAiView("off" | "selected" | "all", id?, kind?)` changes only the view. See the [AI View diagnostic contract](./docs/notes/ai-view.md).
 
 ## Physics model
 
@@ -103,7 +109,13 @@ Player and enemy wizards each have a `0.3m` radius, `75kg` mass, the same moveme
 
 The default encounter spawns one enemy on fixed tick 1, attempts another every 1,800 ticks (30 seconds), caps at four alive, and never queues capped or blocked attempts. It rotates deterministically through north, east, south, west, northeast, southeast, southwest, and northwest cells around the obelisk.
 
-`tactical-wizard-v1` shares one bounded navigation field rebuilt when the player changes cells or the map revision changes. It approaches beyond `9m`, withdraws inside `6m`, strafes at `3.5m/s` inside the engagement band, aims with a softened constant-velocity intercept, and dodges genuine hostile Fireballs for 18 ticks at `6m/s` before a 105-tick cooldown. At 30 health or below it stops casting and retreats along increasing navigation cost; at 60 or above it re-engages. Rocks and actors remain local dynamic obstacles handled by the existing collision solver. All choices use stable enemy-local hash lanes rather than global RNG or TrueSight. Schema-v6 replay keeps `basic-wizard-v1`, including its direct aim and intentional lack of pathfinding, strafing, leading, dodging, or healing retreat.
+Live `perceptive-wizard-v1` enemies sample geometry-only vision at `12Hz` across five spawn-sequence lanes. A target must be within `12m`, inside a `120°` facing cone (or the `1.5m` 360-degree close radius), and unobstructed by the grid. Walls and the obelisk occlude; rocks, lighting, darkness, TrueSight, particles, and rendering do not. Fifteen uninterrupted ticks of qualifying samples confirm the player. Facing turns at no more than `180°/s`; an unaware guard sweeps `±45°` around its base heading over six seconds.
+
+Confirmed enemies keep personal last-seen position, velocity, and tick. Lost sight stops casting immediately, sends the mob to that point, then starts an exact eight-second deterministic search across reachable radius-1 through radius-3 cells. Search completion returns the mob to its guard point and clears memory. An unreachable guard must remain proven unreachable for 12 seconds before it is rebased. Unseen damage creates an impact-only search clue without identifying the attacker or revealing the player's location; visual memory takes precedence and knowledge is never shared between mobs. Sound, squad knowledge, co-op target policy, and friendly/critter perception remain deferred.
+
+While engaged, the 0.7 tactics remain intact: approach beyond `9m`, withdraw inside `6m`, strafe at `3.5m/s`, softened intercept aim, visible-projectile dodge, and low-health retreat. Casting requires engaged state, no retreat, and a fresh same-tick perception check; enemies never fire at remembered coordinates. Dodge and retreat are movement overlays, so perception and search clocks continue underneath them. All choices use stable enemy-local named hash lanes rather than global RNG or presentation state.
+
+Schema-v8 navigation uses four pinned future actor-target slots and 64 shared goal-cell fields, one preallocated builder, stable slot order, and a global 2,048-expansion tick budget. A completed field is retained while its replacement builds, but movement uses direct wall-sliding until the requested field is current. A preallocated map-cell broadphase replaces quadratic actor, rock, swept-projectile, and dodge scans while preserving historical body-class and pool-index resolution order. Schema-v7 replay keeps the frozen omniscient `tactical-wizard-v1`; schema-v6 keeps `basic-wizard-v1` and its intentional lack of pathfinding, strafing, leading, dodging, or healing retreat.
 
 Rock mass is derived from a 2,600 kg/m3 stone density and spherical volume: about 10.9 kg at 0.1m radius, 294 kg at 0.3m, and 7,940 kg at 0.9m. Rocks collide with walls, actors, and one another.
 
@@ -119,7 +131,7 @@ See [0.1.0 blast physics](./docs/milestones/0.1.0-blast-physics.md) for the forc
 
 ## 3D presentation vertical
 
-The opt-in 3D route renders a floor, 2.5m instanced wall cells, a procedural obelisk, preallocated player/enemy silhouettes and health tracks, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. All four enemy instances and five `0.10m × 0.90m` health tracks/fills exist before renderer warmup. Its default pool still contains 16 resident, shadowless point lights: two atomic eight-slot effect groups. Combat adds no lights and does not alter that topology.
+The opt-in 3D route renders a floor, 2.5m instanced wall cells, a procedural obelisk, preallocated player/enemy silhouettes and health tracks, low-poly rocks, chest-height fireballs, and one instanced spark mesh using existing particle `x/y/z` and `currentSize` values. All 64 enemy instances, 64 front-facing hood/nose markers, and 65 `0.10m × 0.90m` health tracks/fills exist before renderer warmup. Canvas2D and Three.js derive the ordinary marker from the same normalized facing snapshot; it shares enemy TrueSight concealment and adds no light. The default light pool still contains 16 resident, shadowless point lights: two atomic eight-slot effect groups.
 
 Particles associate presentation-side with their captured effect identity; legacy/direct fixtures retain the nearest-impact and deterministic orphan fallbacks. Projectile, spark, impact, and light colors use one allocation-free palette sampler. The `lightColorVariation` compatibility switch is the global A/B master for per-cast and per-particle variation across both renderers and light assignments.
 
@@ -133,9 +145,9 @@ The panel reports backend, CSS/backing resolution, effective DPR, active/residen
 
 ## Snapshots and recordings
 
-Snapshots, runtime metrics, and command recordings use schema v7. Scenario JSON uses v3. Enemy snapshots add behavior and movement goals, navigation cost/version, strafe schedule, predicted aim, tracked threat, dodge timers, and retreat status to the existing combat state. The compact `spells` table still includes only current and referenced immutable revisions; effects retain spell code, definition revision, effect ID, and effect seed.
+Snapshots, runtime metrics, and command recordings use schema v8. Scenario JSON uses v3. Enemy snapshots include perception state/source, current sampled visibility and exposure, facing, candidate/confirmed target identity, guard heading, personal last-seen data, impact clue, hunt/search timers and goals, destination-field state, plus the existing tactical and combat record. A 128-entry perception-event ring exposes the latest 32 detection, loss, search, return, damage-alert, reacquisition, and awareness-clear events with dropped-event telemetry. The compact `spells` table still includes only current and referenced immutable revisions; effects retain spell code, definition revision, effect ID, and effect seed.
 
-A v7 recording stores `gameplayProfile: "obelisk-duel-v1"` and `enemyAiProfile: "tactical-wizard-v1"` alongside the spell baseline. Replay reconstructs navigation rebuilds and autonomous choices exactly; enemy decisions are not synthetic input commands. Schema-v6 selects frozen `basic-wizard-v1`; schema-v5 keeps versioned Fireballs with frozen pre-combat behavior, while schema-v2 through v4 retain their existing legacy Fireball and particle profiles.
+A live v8 recording stores `gameplayProfile: "obelisk-duel-v1"`, `enemyAiProfile: "perceptive-wizard-v1"`, `enemyCapacity: 64`, and `encounterMaximumAlive: 4` alongside the spell baseline. Replay reconstructs perception, memory, navigation builds, and autonomous choices exactly; enemy decisions are not synthetic input commands. Schema-v7 selects the frozen `tactical-wizard-v1` with its historical four-entry enemy pool, schema-v6 selects frozen `basic-wizard-v1`, schema-v5 keeps versioned Fireballs with frozen pre-combat behavior, and schema-v2 through v4 retain their existing legacy Fireball and particle profiles. The default projectile pool is 256; bounded drops remain valid under excessive authored effects.
 
 Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspector output uses the current radius and reports its maximum separately. Pool telemetry exposes cumulative wall bounces, ground bounces, and collision-safety discards without copying particle impacts into the main contact history.
 
@@ -143,7 +155,7 @@ Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspe
 
 `src/sim` has no DOM, Canvas, or Three.js dependencies. Browser input and probe mutations become commands consumed at fixed-tick boundaries. Canvas2D, Three.js, and DOM panels consume copied JSON-safe snapshots and do not mutate simulation state.
 
-The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. `encounterDiagnostics()` includes global navigation state and summarized tactical state; `enemyDiagnostics(id?)` returns the read-only full tactical record for every enemy or one stable ID. `aiView()` reports the read-only debug-window state, and `setAiView(mode, id?, kind?)` selects only its Off/Selected/All presentation. Spell probes are `listSpells()`, `getSpellDefinition(id)`, `applySpellDefinition(id, definition, expectedRevision?)`, `castSpell(id, x, z, options?)`, `clearSpellEffects(id)`, and `spellDiagnostics(id)`. Invalid definitions and probe arguments return structured errors rather than being clamped. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
+The automation surface at `window.__lantern` supports pause/resume/step/reset, snapshots and metrics, spatial queries, tile edits, scenario save/load, rock archetype queries and placement/removal, authored-state restore, command injection/export, and debug flags including `particleWallCollision`. `encounterDiagnostics()` includes bounded destination-cache/build telemetry and summarized mob state; `enemyDiagnostics(id?)` returns the read-only perception, memory, navigation, tactical, and event record for every enemy or one stable ID. `aiView()` reports the read-only debug-window state, and `setAiView(mode, id?, kind?)` selects only its Off/Selected/All presentation. Spell probes are `listSpells()`, `getSpellDefinition(id)`, `applySpellDefinition(id, definition, expectedRevision?)`, `castSpell(id, x, z, options?)`, `clearSpellEffects(id)`, and `spellDiagnostics(id)`. Invalid definitions and probe arguments return structured errors rather than being clamped. `trueSight()` returns JSON-safe origin, polygon, mask, ray, wall, flag, snap, and timing diagnostics. `isVisible(x, z, radius = 0)` queries the current hard logical mask.
 
 `window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation and TrueSight timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears runtime, presentation, and TrueSight timing histories. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts the lighting flags plus `trueSight`, `sightFade`, and `sightDebug` without adding simulation commands.
 

@@ -1,5 +1,7 @@
 // @ts-check
 
+import { PERCEPTIVE_WIZARD } from "../config.js";
+
 export const AI_VIEW_MODE = Object.freeze({
   off: "off",
   selected: "selected",
@@ -124,6 +126,44 @@ function threatText(mob) {
   return `${identities.join(" · ") || "none"} · dodge ${integer(dodge.ticksRemaining)}t · cooldown ${integer(dodge.cooldownTicks)}t`;
 }
 
+/** @param {Record<string,any>|null|undefined} target */
+function targetText(target) {
+  if (!target) return "none";
+  return `${String(target.kind ?? "actor")} #${integer(target.id)} · ${String(target.team ?? "unknown")}`;
+}
+
+/** @param {Record<string,any>} mob */
+function pointText(point) {
+  if (!point) return "none";
+  const value = point.position ?? point;
+  return `${decimal(value.x, 1)},${decimal(value.z, 1)}`;
+}
+
+/** @param {Record<string,any>} mob */
+function huntText(mob) {
+  const hunt = mob.hunt ?? {};
+  const timers = [];
+  if (finite(hunt.travelTimeoutTick) !== null) {
+    timers.push(`travel timeout ${integer(hunt.travelTimeoutTick)}t`);
+  }
+  if (finite(hunt.searchTicksRemaining) !== null) {
+    timers.push(`search left ${integer(hunt.searchTicksRemaining)}t`);
+  }
+  if (finite(hunt.searchGoal?.timeoutTick) !== null) {
+    timers.push(`goal timeout ${integer(hunt.searchGoal.timeoutTick)}t`);
+  }
+  return `${hunt.phase ?? "none"} · anchor ${pointText(hunt.anchor)} · search ${pointText(hunt.searchGoal)} · sequence ${integer(hunt.sequence)}${timers.length > 0 ? ` · ${timers.join(" · ")}` : ""}`;
+}
+
+/** @param {Record<string,any>} mob */
+function guardText(mob) {
+  const guard = mob.guard ?? {};
+  const unreachable = finite(guard.unreachableStartTick) === null
+    ? ""
+    : ` · unreachable ${integer(guard.unreachableStartTick)}→${integer(guard.unreachableTimeoutTick)}t`;
+  return `${pointText(guard.point)} · return ${integer(guard.returnStartTick)}t${unreachable}`;
+}
+
 /**
  * @param {Record<string,any>} snapshot
  * @param {Record<string,any>} mob
@@ -132,7 +172,7 @@ function threatText(mob) {
 export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
   if (!mob) return "No living AI mob is selected.";
   const state = String(mob.behaviorState ?? mob.aiState ?? "unknown").toUpperCase();
-  const visibility = sightVisible === null
+  const playerVisibility = sightVisible === null
     ? "unknown"
     : sightVisible
       ? "visible"
@@ -142,10 +182,16 @@ export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
       .map(([name, value]) => `${name} ${decimal(value, 3)}s`)
       .join(" · ")
     : "none";
+  const fieldBuilding = mob.navigationField?.building ?? snapshot.navigation?.building;
+  const fieldStale = mob.navigationField?.stale ?? snapshot.navigation?.stale;
   return [
     `identity    ${describeAiMobOption(mob)}`,
     `profile     ${mob.aiProfile ?? snapshot.enemyAiProfile ?? "unknown"}`,
-    `visibility  ${visibility}`,
+    `player sight ${playerVisibility}`,
+    `mob vision  ${mob.currentVisibility ? "target visible" : "target not visible"} · sample ${integer(mob.visibilitySampleTick)}t`,
+    `perception  ${String(mob.perceptionState ?? "legacy").toUpperCase()} · source ${mob.knowledgeSource ?? "none"}`,
+    `exposure    ${integer(mob.exposure?.progressTicks)} / ${integer(mob.exposure?.thresholdTicks)}t · lane ${integer(mob.perceptionLane)}`,
+    `candidate   ${targetText(mob.candidateTarget)} · confirmed ${targetText(mob.confirmedTarget)}`,
     `state       ${state} · retreat ${mob.retreating ? "yes" : "no"}`,
     `health      ${decimal(mob.health, 2)} / ${decimal(mob.maximumHealth, 2)}`,
     `position    ${decimal(mob.x, 2)}, ${decimal(mob.z, 2)}`,
@@ -156,9 +202,12 @@ export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
     `strafe      ${strafeText(mob)}`,
     `aim         ${aimText(mob)}`,
     `line sight  ${mob.lineOfSight ? "clear" : "blocked"}`,
+    `last seen   ${pointText(mob.lastSeen)} · impact ${pointText(mob.stimulus)}`,
+    `hunt        ${huntText(mob)}`,
+    `guard       ${guardText(mob)}`,
     `threat      ${threatText(mob)}`,
     `casting     sequence ${integer(mob.castSequence)} · ${cooldown}`,
-    `field       v${integer(snapshot.navigation?.version)} · ${snapshot.navigation?.building ? "building" : "complete"}${snapshot.navigation?.stale ? " · stale" : ""}`,
+    `field       slot ${mob.navigationField?.slot ?? "—"} · ${mob.navigationField?.key ?? "none"} · v${integer(mob.navigationField?.version)}${fieldBuilding ? " · building" : ""}${fieldStale ? " · stale" : ""}`,
   ].join("\n");
 }
 
@@ -206,6 +255,17 @@ function mobView(snapshot, mob, alpha, sightVisible, selected) {
         && Number(projectile.effectId) === Number(mob.trackedThreatEffectId)
   )) ?? null;
   const state = String(mob.behaviorState ?? mob.aiState ?? "unknown");
+  const facingLength = Math.hypot(Number(mob.facing?.x), Number(mob.facing?.z));
+  const facing = Number.isFinite(facingLength) && facingLength > 1e-9
+    ? {
+      x: Number(mob.facing.x) / facingLength,
+      z: Number(mob.facing.z) / facingLength,
+    }
+    : null;
+  const targetIdentity = mob.confirmedTarget ?? mob.candidateTarget ?? null;
+  const targetPoint = targetIdentity?.kind === "player" && snapshot.player
+    ? { x: Number(snapshot.player.x), z: Number(snapshot.player.z) }
+    : null;
   return {
     key: aiMobKey(mob),
     id: mob.id,
@@ -214,9 +274,41 @@ function mobView(snapshot, mob, alpha, sightVisible, selected) {
     state,
     selected,
     sightVisible,
+    mobTargetVisible: Boolean(mob.currentVisibility),
+    perceptionState: String(mob.perceptionState ?? "legacy"),
+    knowledgeSource: String(mob.knowledgeSource ?? "none"),
+    exposure: {
+      progressTicks: Math.max(0, Number(mob.exposure?.progressTicks) || 0),
+      thresholdTicks: Math.max(0, Number(mob.exposure?.thresholdTicks) || 0),
+    },
     position: { x, z },
     radius: Math.max(0, Number(mob.radius) || 0),
     movementGoal,
+    facingEnd: facing ? { x: x + facing.x * 1.2, z: z + facing.z * 1.2 } : null,
+    perceptionCone: facing
+      ? {
+        x,
+        z,
+        facing,
+        radius: PERCEPTIVE_WIZARD.visualRangeMeters,
+        halfAngleRadians: PERCEPTIVE_WIZARD.fieldOfViewDegrees * Math.PI / 360,
+        closeRadius: PERCEPTIVE_WIZARD.closeAwarenessMeters,
+      }
+      : null,
+    targetPoint,
+    lastSeenPoint: mob.lastSeen?.position
+      ? { x: Number(mob.lastSeen.position.x), z: Number(mob.lastSeen.position.z) }
+      : null,
+    stimulusPoint: mob.stimulus?.position
+      ? { x: Number(mob.stimulus.position.x), z: Number(mob.stimulus.position.z) }
+      : null,
+    searchPoint: mob.hunt?.searchGoal
+      ? { x: Number(mob.hunt.searchGoal.x), z: Number(mob.hunt.searchGoal.z) }
+      : null,
+    guardPoint: mob.guard?.point
+      ? { x: Number(mob.guard.point.x), z: Number(mob.guard.point.z) }
+      : null,
+    navigationState: mob.navigationField ?? null,
     desiredEnd: {
       x: x + Number(mob.desiredVx ?? 0) * 0.35,
       z: z + Number(mob.desiredVz ?? 0) * 0.35,

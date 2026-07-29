@@ -10,6 +10,7 @@ import {
   healthBarColor,
   healthBarRatio,
 } from "./combat_visuals.js";
+import { normalizedEnemyFacing } from "./enemy_facing.js";
 import {
   completeInstancedPoolSubmission,
   createDynamicInstancedPool,
@@ -242,6 +243,24 @@ export class ThreePresentation {
     this.enemyMesh.receiveShadow = true;
     this.scene.add(this.enemyMesh);
 
+    this.enemyFacingMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0xff9b9e,
+      emissive: 0x31090d,
+      emissiveIntensity: 0.32,
+      roughness: 0.62,
+      metalness: 0.02,
+    }));
+    this.enemyFacingGeometry = new THREE.ConeGeometry(0.11, 0.30, 3);
+    this.enemyFacingMesh = createDynamicInstancedPool(
+      this.enemyFacingGeometry,
+      this.enemyFacingMaterial,
+      ENEMY_WIZARD.capacity,
+      "enemy-facing-markers",
+    );
+    this.enemyFacingMesh.castShadow = true;
+    this.enemyFacingMesh.receiveShadow = true;
+    this.scene.add(this.enemyFacingMesh);
+
     this.healthTrackMaterial = this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
       color: HEALTH_BAR.trackColor,
       transparent: true,
@@ -416,6 +435,9 @@ export class ThreePresentation {
     this._cameraRight = new THREE.Vector3();
     this._cameraUp = new THREE.Vector3();
     this._healthCenter = new THREE.Vector3();
+    this._facingDirection = new THREE.Vector3();
+    this._facingOrigin = new THREE.Vector3(0, 1, 0);
+    this._facingQuaternion = new THREE.Quaternion();
     this._bloomEnabled = false;
     this.renderPipeline = null;
     this.bloomOutput = null;
@@ -603,6 +625,10 @@ export class ThreePresentation {
           active: this.enemyMesh.count,
           capacity: this.enemyMesh.userData.capacity,
         },
+        facingMarkers: {
+          active: this.enemyFacingMesh.count,
+          capacity: this.enemyFacingMesh.userData.capacity,
+        },
         healthTracks: {
           active: this.healthTrackMesh.count,
           capacity: this.healthTrackMesh.userData.capacity,
@@ -670,6 +696,7 @@ export class ThreePresentation {
       this.editCellPreview,
       this.editRockPreview,
       this.enemyMesh,
+      this.enemyFacingMesh,
       this.healthTrackMesh,
       this.healthFillMesh,
       this.obeliskGroup,
@@ -900,8 +927,23 @@ export class ThreePresentation {
       this._scale.set(enemy.radius * 2, PLAYER_HEIGHT_METERS, enemy.radius * 2);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.enemyMesh.setMatrixAt(index, this._matrix);
+      const facing = normalizedEnemyFacing(enemy);
+      this._facingDirection.set(facing.x, 0, facing.z).normalize();
+      this._facingQuaternion.setFromUnitVectors(
+        this._facingOrigin,
+        this._facingDirection,
+      );
+      this._position.set(
+        x + facing.x * enemy.radius * 0.78,
+        PLAYER_HEIGHT_METERS * 0.66,
+        z + facing.z * enemy.radius * 0.78,
+      );
+      this._scale.setScalar(Math.max(0.5, enemy.radius / ENEMY_WIZARD.radius));
+      this._matrix.compose(this._position, this._facingQuaternion, this._scale);
+      this.enemyFacingMesh.setMatrixAt(index, this._matrix);
     }
     publishInstancedPool(this.enemyMesh, enemies.length);
+    publishInstancedPool(this.enemyFacingMesh, enemies.length);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */

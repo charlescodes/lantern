@@ -16,7 +16,7 @@ export const NAVIGATION_NEIGHBORS = Object.freeze([
 ]);
 
 /** @param {{get(cx:number,cz:number):number}} map @param {number} cx @param {number} cz @param {{dx:number,dz:number}} neighbor */
-function canTraverse(map, cx, cz, neighbor) {
+export function navigationCanTraverse(map, cx, cz, neighbor) {
   const nextCx = cx + neighbor.dx;
   const nextCz = cz + neighbor.dz;
   if (map.get(nextCx, nextCz) !== 0) return false;
@@ -236,7 +236,7 @@ export class SharedNavigationField {
       this.buildExpansions += 1;
       this.totalExpansions += 1;
       for (const neighbor of NAVIGATION_NEIGHBORS) {
-        if (!canTraverse(map, cx, cz, neighbor)) continue;
+        if (!navigationCanTraverse(map, cx, cz, neighbor)) continue;
         const nextCx = cx + neighbor.dx;
         const nextCz = cz + neighbor.dz;
         const nextIndex = this.#index(nextCx, nextCz);
@@ -276,7 +276,7 @@ export class SharedNavigationField {
     let bestCost = currentCost;
     let best = null;
     for (const neighbor of NAVIGATION_NEIGHBORS) {
-      if (!canTraverse(map, cx, cz, neighbor)) continue;
+      if (!navigationCanTraverse(map, cx, cz, neighbor)) continue;
       const nextCx = cx + neighbor.dx;
       const nextCz = cz + neighbor.dz;
       const cost = this.rawCostAt(nextCx, nextCz);

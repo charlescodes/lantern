@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_AI_PROFILE_NONE,
+  ENEMY_WIZARD,
   GAMEPLAY_PROFILE_PRE_COMBAT,
   PARTICLE_PROFILE_M02,
   PARTICLE_PROFILE_M0_2_5,
@@ -78,7 +80,7 @@ test("contact-heavy command recording replays to identical current-build state",
 
   const recording = simulation.exportCommandLog();
   const replayed = Simulation.replay(recording);
-  assert.equal(recording.schemaVersion, 7);
+  assert.equal(recording.schemaVersion, 8);
   assert.ok(contactTicks >= 120, `expected sustained contact, received ${contactTicks} ticks`);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
@@ -127,7 +129,7 @@ test("snapshots and exported recordings cannot mutate simulation history", () =>
   assert.equal(simulation.commandLog.toArray()[0].command.move.x, 5);
 });
 
-test("snapshot, runtime, and recording schema are v7 while scenarios are v3", () => {
+test("snapshot, runtime, and recording schema are v8 while scenarios remain v3", () => {
   const simulation = new Simulation({
     particleBounce: false,
     particleWallCollision: false,
@@ -135,12 +137,12 @@ test("snapshot, runtime, and recording schema are v7 while scenarios are v3", ()
   const runtime = new FixedStepRuntime({ simulation });
   const snapshot = simulation.snapshot();
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 7);
-  assert.equal(snapshot.schemaVersion, 7);
-  assert.equal(runtime.metrics().schemaVersion, 7);
+  assert.equal(SCHEMA_VERSION, 8);
+  assert.equal(snapshot.schemaVersion, 8);
+  assert.equal(runtime.metrics().schemaVersion, 8);
   assert.deepEqual(Object.keys(runtime.metrics().snapshotMs), ["p50", "p95", "p99"]);
   assert.ok(runtime.metrics().snapshotMs.p99 >= 0);
-  assert.equal(recording.schemaVersion, 7);
+  assert.equal(recording.schemaVersion, 8);
   assert.equal(recording.configuration.spells.length, 1);
   assert.equal(recording.configuration.spells[0].id, "fireball");
   assert.equal(recording.configuration.spells[0].currentRevision, 1);
@@ -148,7 +150,9 @@ test("snapshot, runtime, and recording schema are v7 while scenarios are v3", ()
   assert.equal(snapshot.scenarioVersion, 3);
   assert.equal(recording.initialScenario.version, 3);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
-  assert.equal(recording.configuration.enemyAiProfile, "tactical-wizard-v1");
+  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
+  assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
+  assert.equal(recording.configuration.encounterMaximumAlive, ENEMY_WIZARD.encounterMaximumAlive);
   assert.equal(recording.configuration.particleProfile, PARTICLE_PROFILE_M0_2_5);
   assert.equal(recording.configuration.particleBounce, false);
   assert.equal(recording.configuration.particleWallCollision, false);
@@ -213,6 +217,8 @@ test("schema-3 recordings select the exact legacy M0.2 particle profile", () => 
     particleBurstCount: 8,
     particleProfile: PARTICLE_PROFILE_M02,
     particleBounce: false,
+    gameplayProfile: GAMEPLAY_PROFILE_PRE_COMBAT,
+    enemyAiProfile: ENEMY_AI_PROFILE_NONE,
   });
   for (let tick = 0; tick < 20; tick += 1) {
     simulation.tick(tick === 0 ? { cast: { x: 4.5, z: 2.5 } } : null);
@@ -239,6 +245,8 @@ test("schema-2 recordings replay with legacy non-colliding particles", () => {
     particleBurstCount: 64,
     particleProfile: PARTICLE_PROFILE_M02,
     particleBounce: false,
+    gameplayProfile: GAMEPLAY_PROFILE_PRE_COMBAT,
+    enemyAiProfile: ENEMY_AI_PROFILE_NONE,
   });
   const commands = [];
   for (let tick = 0; tick < 60; tick += 1) {
@@ -268,6 +276,8 @@ test("schema-2 recordings replay with legacy non-colliding particles", () => {
     particleProfile: PARTICLE_PROFILE_M02,
     particleBounce: false,
     particleWallCollision: false,
+    gameplayProfile: GAMEPLAY_PROFILE_PRE_COMBAT,
+    enemyAiProfile: ENEMY_AI_PROFILE_NONE,
   });
   for (const command of commands) expected.tick(command);
   assert.deepEqual(comparable(replayed), comparable(expected));

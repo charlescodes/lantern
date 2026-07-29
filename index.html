@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#101511">
-    <title>Lantern 0.7.0 · Tactical Wizard AI</title>
+    <title>Lantern 0.8.0 · Visual Perception and Hunting</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="importmap">
       {
@@ -22,8 +22,8 @@
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="eyebrow">Project Lantern / 0.7.0</p>
-          <h1>Tactical Wizard AI</h1>
+          <p class="eyebrow">Project Lantern / 0.8.0</p>
+          <h1>Visual Perception and Hunting</h1>
         </div>
       </div>
       <div class="run-summary" aria-label="Simulation status">
@@ -172,14 +172,14 @@
             <section class="ai-view-diagnostics">
               <div class="section-heading">
                 <h2>Selected mob</h2>
-                <span>schema-v7 truth</span>
+                <span>schema-v8 truth</span>
               </div>
               <pre id="ai-view-details">Waiting for a living AI mob. Selection is read-only.</pre>
             </section>
             <section class="ai-view-legend">
               <div class="section-heading"><h2>Overlay</h2><span>world-space vectors</span></div>
-              <p><i data-ai-color="goal"></i>movement goal <i data-ai-color="aim"></i>predicted aim</p>
-              <p><i data-ai-color="sight"></i>line of sight <i data-ai-color="threat"></i>tracked threat / dodge</p>
+              <p><i data-ai-color="goal"></i>movement / search / guard <i data-ai-color="aim"></i>target / predicted aim</p>
+              <p><i data-ai-color="sight"></i>mob sight cone / memory <i data-ai-color="threat"></i>tracked threat / dodge</p>
             </section>
           </div>
         </aside>
@@ -218,11 +218,11 @@
             <div class="meter rock-meter"><i id="rock-bar"></i></div>
           </div>
           <div class="pool-readout">
-            <div><span>Enemy wizards</span><output id="enemy-pool">0 / 4</output></div>
+            <div><span>Enemy wizards</span><output id="enemy-pool">0 / 64</output></div>
             <div class="meter enemy-meter"><i id="enemy-bar"></i></div>
           </div>
           <div class="pool-readout">
-            <div><span>Projectiles</span><output id="projectile-pool">0 / 128</output></div>
+            <div><span>Projectiles</span><output id="projectile-pool">0 / 256</output></div>
             <div class="meter"><i id="projectile-bar"></i></div>
           </div>
           <div class="pool-readout">
