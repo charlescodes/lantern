@@ -2,6 +2,7 @@
 
 import { InputController } from "./browser/input.js";
 import { AiView } from "./browser/ai_view.js";
+import { DeveloperToolbox } from "./browser/developer_toolbox.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
@@ -39,6 +40,13 @@ let sightFrame = trueSight.update(initialSnapshot, 0, {
   deltaMs: 0,
 });
 const renderLab = new RenderLab(presentationOptions);
+const developerToolbox = new DeveloperToolbox({
+  focusTarget: canvas,
+  onClose: () => {
+    renderLab.close();
+    if (mode === "edit") toggleMode();
+  },
+});
 document.body.dataset.renderer = presentationOptions.renderer;
 ui.beginPresentationWarmup(presentationOptions.renderer);
 let presentationBundle = null;
@@ -53,6 +61,7 @@ try {
 } catch (error) {
   ui.failPresentationWarmup();
   ui.showError(error);
+  developerToolbox.setOpen(true);
   renderLab.showFailure(error);
 }
 if (presentationBundle) {
@@ -92,9 +101,10 @@ const runtime = new FixedStepRuntime({
       runtime.resume();
     }
     sightFrame = trueSight.update(snapshot, alpha, { mode });
+    const developerToolsOpen = developerToolbox.isOpen;
     const cursorVisible = mode === "edit"
       || sightFrame.isPointVisible(input.mouseWorld.x, input.mouseWorld.z);
-    const hover = input.mouseInside
+    const hover = developerToolsOpen && input.mouseInside
       ? queryVisibleAt(
         simulation,
         sightFrame,
@@ -103,7 +113,9 @@ const runtime = new FixedStepRuntime({
         mode,
       )
       : null;
-    const selection = resolveVisibleSelection(simulation, sightFrame, pinned);
+    const selection = developerToolsOpen
+      ? resolveVisibleSelection(simulation, sightFrame, pinned)
+      : { entity: null, hidden: false };
     const selected = selection.entity;
     const pinnedHidden = selection.hidden;
     presentation.render(snapshot, alpha, {
@@ -121,8 +133,9 @@ const runtime = new FixedStepRuntime({
         )
         : true,
       sightFrame,
+      developerToolsOpen,
     });
-    aiView?.update(snapshot, alpha, sightFrame);
+    aiView?.update(snapshot, alpha, sightFrame, developerToolsOpen);
     const currentPresentationDiagnostics = presentationDiagnostics();
     ui.update(snapshot, metrics, {
       mouseWorld: input.mouseWorld,
@@ -130,9 +143,12 @@ const runtime = new FixedStepRuntime({
       inspected: selected,
       pinnedHidden,
       mode,
+      developerToolsOpen,
     }, currentPresentationDiagnostics);
-    spellLab?.update(snapshot);
-    renderLab.update(currentPresentationDiagnostics, metrics);
+    if (developerToolsOpen) {
+      spellLab?.update(snapshot);
+      renderLab.update(currentPresentationDiagnostics, metrics);
+    }
     performanceCapture?.observe(
       snapshot,
       metrics,
@@ -216,6 +232,7 @@ function toggleMode() {
 
 /** @param {number} x @param {number} z */
 function pinAt(x, z) {
+  if (!developerToolbox.isOpen) return;
   if (mode !== "edit" && !sightFrame.isPointVisible(x, z)) {
     ui.announce("Hidden locations cannot be pinned");
     return;
@@ -276,6 +293,7 @@ input = new InputController(canvas, camera, {
   step: singleStep,
   reset,
   toggleMode,
+  developerToolsOpen: () => developerToolbox.isOpen,
   focusPlayer: () => camera.focus(simulation.player.x, simulation.player.z),
   pinAt,
   editAt,
@@ -409,6 +427,15 @@ const probe = Object.freeze({
   },
   enemyDiagnostics(id) {
     return simulation.enemyDiagnostics(id === undefined ? undefined : Number(id));
+  },
+  developerTools() {
+    return {
+      open: developerToolbox.isOpen,
+      shortcut: ";",
+    };
+  },
+  setDeveloperTools(open) {
+    return developerToolbox.setOpen(Boolean(open));
   },
   aiView() {
     return aiView.snapshot();

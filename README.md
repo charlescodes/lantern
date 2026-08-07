@@ -1,6 +1,6 @@
-# Lantern 0.8.0 / Visual Perception and Hunting
+# Lantern 0.8.1 / Playtest Mode and Developer Toolbox
 
-A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and enemy wizards that see, remember, hunt, search, and return to guard posts. The live pool is sized for 64 enemies while the authored encounter still caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, AI diagnostics, and TrueSight frame.
+A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and enemy wizards that see, remember, hunt, search, and return to guard posts. The live pool is sized for 64 enemies while the authored encounter still caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, AI diagnostics, and TrueSight frame. The application now boots into a clean, full-viewport playtest mode; press `;` to toggle the developer toolbox.
 
 ## Run
 
@@ -49,17 +49,17 @@ mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.0` adds [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) and advances snapshots/recordings to schema v8. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
+Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.1` adds [Playtest Mode and the Developer Toolbox](./docs/milestones/0.8.1-playtest-developer-toolbox.md) without changing simulation truth or serialization. Release `0.8.0` remains the [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) schema-v8 boundary. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
 
-## Play controls
+## Playtest controls and developer toolbox
 
 - Hold RMB to accelerate toward the pointer; release it to brake.
 - Press LMB to cast the selected spell; Fireball is the only handler. Fireballs explode on the first opposing actor, wall, rock, or obelisk they hit and pass through same-team actors.
-- Keep Spell Lab open while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed.
-- Press `Space` to pause, `.` to pause and advance one tick, `R` to reset the current seed, and `Shift+R` to choose a new seed.
-- Press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state.
-- Press `F` to focus the player. Use the wheel to zoom and MMB drag to pan.
-- Hover to inspect transiently. Click to pin or unpin an entity by stable ID.
+- Press `;` to reveal or hide the developer toolbox. The top controls, right-side instruments, bottom coordinate/help rail, authoring windows, debug overlays, and developer shortcuts remain behind this presentation-only gate. Closing the toolbox while editing returns to play mode.
+- Open **Spell Lab** from the toolbox while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed. **Collapse** removes the window from the arena and returns its launcher to the toolbox.
+- While the toolbox is open, press `Space` to pause, `.` to pause and advance one tick, `R` to reset the current seed, and `Shift+R` to choose a new seed.
+- While the toolbox is open, press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state; `F` focuses the player.
+- Use the wheel to zoom and MMB drag to pan in either mode. Toolbox-open hover inspects transiently, and click pins or unpins an entity by stable ID.
 - Use **Spark walls** to bypass or enable particle/map sweeps. **Ground bounce** defaults on and independently controls the single ground rebound.
 - At zero health, movement and casting freeze for 90 fixed ticks (1.5 seconds), then the same seed restarts automatically. Reset and Spell Lab actions remain available during defeat.
 
@@ -79,7 +79,7 @@ Scenario JSON v3 stores the grid, player spawn, authored rocks, and at most one 
 
 ## Spell Lab
 
-Spell Lab is a collapsible, non-modal arena overlay and a bottom drawer on narrow screens. It edits a validated complete Fireball definition v1 draft. Numeric fields pair a range control with an exact numeric input; collapsible sections cover essentials, projectile motion, distribution, lifecycle, collision, palette, emissive response, and lighting. The visible formulas explain the size-linked lifetime and lower-biased vertical sample.
+Spell Lab starts parked in the developer toolbox. Opening it creates a non-modal arena overlay and a bottom drawer on narrow screens; collapsing it removes the overlay and restores the toolbox launcher. It edits a validated complete Fireball definition v1 draft. Numeric fields pair a range control with an exact numeric input; collapsible sections cover essentials, projectile motion, distribution, lifecycle, collision, palette, emissive response, and lighting. The visible formulas explain the size-linked lifetime and lower-biased vertical sample.
 
 Its primary purpose is developer-side effect tuning. Player and enemy wizards cast from the same applied Fireball registry and current definition; Apply affects future casts from either side, while every existing effect retains its captured revision. Revision numbers remain runtime bookkeeping, not a player-facing version-management feature. Combat damage is a fixed shared rule and is intentionally not authorable in Fireball definition v1.
 

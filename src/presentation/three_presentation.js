@@ -504,7 +504,7 @@ export class ThreePresentation {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
    */
   render(snapshot, alpha, view) {
     const totalStarted = performance.now();
@@ -520,7 +520,10 @@ export class ThreePresentation {
     this.#updateProjectiles(snapshot, alpha);
     this.#updateParticles(snapshot);
     this.#updateView(snapshot, view);
-    this.#updateSightDebug(view.sightFrame ?? null);
+    this.#updateSightDebug(
+      view.sightFrame ?? null,
+      view.developerToolsOpen !== false,
+    );
     const updateFinished = performance.now();
     this.#updateLights(snapshot);
     const lightsFinished = performance.now();
@@ -748,9 +751,13 @@ export class ThreePresentation {
     this.sightTransport.stage(sightFrame);
   }
 
-  /** @param {import('../visibility/true_sight.js').TrueSightFrame|null} sightFrame */
-  #updateSightDebug(sightFrame) {
-    const enabled = Boolean(sightFrame && this.flags.values.sightDebug);
+  /** @param {import('../visibility/true_sight.js').TrueSightFrame|null} sightFrame @param {boolean} developerToolsOpen */
+  #updateSightDebug(sightFrame, developerToolsOpen) {
+    const enabled = Boolean(
+      developerToolsOpen
+      && sightFrame
+      && this.flags.values.sightDebug
+    );
     if (!enabled || !sightFrame) {
       this.sightRayLines.visible = false;
       this.sightPolygonLine.visible = false;

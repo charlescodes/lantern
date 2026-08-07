@@ -155,8 +155,9 @@ export class AiView {
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
    * @param {import('../visibility/true_sight.js').TrueSightFrame|null} sightFrame
+   * @param {boolean} [developerToolsOpen]
    */
-  update(snapshot, alpha, sightFrame) {
+  update(snapshot, alpha, sightFrame, developerToolsOpen = true) {
     this.lastSnapshot = snapshot;
     const mobs = collectAiMobs(snapshot);
     if (!this.selectedKey || !mobs.some((mob) => aiMobKey(mob) === this.selectedKey)) {
@@ -174,8 +175,12 @@ export class AiView {
         )
         : undefined,
     });
-    this.#draw(this.lastFrame);
-    this.#renderPanel();
+    if (developerToolsOpen) {
+      this.#draw(this.lastFrame);
+      this.#renderPanel();
+    } else {
+      this.#clearOverlay(true);
+    }
   }
 
   #syncModeInputs() {
@@ -253,10 +258,11 @@ export class AiView {
     return { width, height, backingScale };
   }
 
-  #clearOverlay() {
+  /** @param {boolean} [forceHidden] */
+  #clearOverlay(forceHidden = false) {
     this.context.setTransform(1, 0, 0, 1, 0, 0);
     this.context.clearRect(0, 0, this.overlay.width, this.overlay.height);
-    this.overlay.hidden = this.mode === AI_VIEW_MODE.off;
+    this.overlay.hidden = forceHidden || this.mode === AI_VIEW_MODE.off;
   }
 
   /** @param {ReturnType<typeof buildAiViewFrame>} frame */

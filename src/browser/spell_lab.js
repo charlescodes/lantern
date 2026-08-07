@@ -130,6 +130,7 @@ export class SpellLab {
     this.#buildControls();
     this.#install();
     this.#loadSelectedDefinition(true);
+    this.setCollapsed(this.panel.dataset.collapsed === "true");
   }
 
   #buildSelector() {
@@ -315,9 +316,11 @@ export class SpellLab {
   /** @param {boolean} collapsed */
   setCollapsed(collapsed) {
     this.panel.dataset.collapsed = String(collapsed);
+    this.panel.hidden = collapsed;
     this.toggleButton.textContent = collapsed ? "Expand" : "Collapse";
     this.toggleButton.setAttribute("aria-expanded", String(!collapsed));
     this.openButton.hidden = !collapsed;
+    this.openButton.setAttribute("aria-expanded", String(!collapsed));
   }
 
   #loadSelectedDefinition(replaceDraft) {

@@ -124,12 +124,13 @@ export class DebugRenderer {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
    */
   render(snapshot, alpha, view, colorVariation = true) {
     this.resize();
     const context = this.context;
     const scale = this.camera.worldToViewportScale;
+    const developerToolsOpen = view.developerToolsOpen !== false;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.fillStyle = COLORS.void;
     context.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -144,24 +145,26 @@ export class DebugRenderer {
     context.lineCap = "round";
     context.lineJoin = "round";
 
-    this.#drawMap(snapshot, view);
-    if (snapshot.debugFlags.explosionForces) {
+    this.#drawMap(snapshot, view, developerToolsOpen);
+    if (developerToolsOpen && snapshot.debugFlags.explosionForces) {
       this.#drawExplosionForces(snapshot, colorVariation);
     }
-    this.#drawParticles(snapshot, colorVariation);
-    this.#drawRocks(snapshot, alpha);
+    this.#drawParticles(snapshot, colorVariation, developerToolsOpen);
+    this.#drawRocks(snapshot, alpha, developerToolsOpen);
     this.#drawProjectiles(snapshot, colorVariation);
-    this.#drawEnemies(snapshot, alpha);
-    this.#drawPlayer(snapshot, alpha);
+    this.#drawEnemies(snapshot, alpha, developerToolsOpen);
+    this.#drawPlayer(snapshot, alpha, developerToolsOpen);
     this.#drawHealthBars(snapshot, alpha);
-    if (snapshot.debugFlags.contacts) this.#drawContacts(snapshot.contacts);
-    this.#drawInspection(view.hover, view.selected);
+    if (developerToolsOpen && snapshot.debugFlags.contacts) {
+      this.#drawContacts(snapshot.contacts);
+    }
+    if (developerToolsOpen) this.#drawInspection(view.hover, view.selected);
     if (view.mouseInside) {
       this.#drawMouse(view.mouseWorld, view.mode, view.editorTool, view.placementValid);
     }
     if (view.sightFrame) {
       this.#drawSightOverlay(view.sightFrame);
-      if (view.sightFrame.flags.sightDebug) {
+      if (developerToolsOpen && view.sightFrame.flags.sightDebug) {
         this.#drawSightDebug(view.sightFrame);
       }
     }
@@ -259,8 +262,8 @@ export class DebugRenderer {
     context.restore();
   }
 
-  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {{hover:Record<string,unknown>|null,selected:Record<string,unknown>|null}} view */
-  #drawMap(snapshot, view) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {{hover:Record<string,unknown>|null,selected:Record<string,unknown>|null}} view @param {boolean} developerToolsOpen */
+  #drawMap(snapshot, view, developerToolsOpen) {
     const context = this.context;
     const { map } = snapshot;
     context.fillStyle = COLORS.floorA;
@@ -313,24 +316,27 @@ export class DebugRenderer {
     this.#drawObelisks(snapshot.obelisks ?? []);
 
     if (
-      snapshot.debugFlags.gridCoordinates
+      developerToolsOpen
+      && snapshot.debugFlags.gridCoordinates
       && this.camera.worldLengthToViewport(1) >= GRID_LABEL_MINIMUM_VIEWPORT_SIZE
     ) {
       this.#drawGridLabels(minX, maxX, minZ, maxZ);
     }
 
-    context.beginPath();
-    context.arc(map.playerSpawn.x, map.playerSpawn.z, 0.12, 0, Math.PI * 2);
-    context.strokeStyle = COLORS.desired;
-    context.lineWidth = line * 1.5;
-    context.stroke();
+    if (developerToolsOpen) {
+      context.beginPath();
+      context.arc(map.playerSpawn.x, map.playerSpawn.z, 0.12, 0, Math.PI * 2);
+      context.strokeStyle = COLORS.desired;
+      context.lineWidth = line * 1.5;
+      context.stroke();
 
-    for (const entity of [view.hover, view.selected]) {
-      if (entity?.kind !== "cell" || !entity.cell) continue;
-      const cell = /** @type {{cx:number,cz:number}} */ (entity.cell);
-      context.strokeStyle = entity === view.selected ? COLORS.selected : COLORS.hover;
-      context.lineWidth = (entity === view.selected ? 3 : 2) * line;
-      context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
+      for (const entity of [view.hover, view.selected]) {
+        if (entity?.kind !== "cell" || !entity.cell) continue;
+        const cell = /** @type {{cx:number,cz:number}} */ (entity.cell);
+        context.strokeStyle = entity === view.selected ? COLORS.selected : COLORS.hover;
+        context.lineWidth = (entity === view.selected ? 3 : 2) * line;
+        context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
+      }
     }
   }
 
@@ -370,8 +376,8 @@ export class DebugRenderer {
     }
   }
 
-  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
-  #drawParticles(snapshot, colorVariation) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {boolean} colorVariation @param {boolean} developerToolsOpen */
+  #drawParticles(snapshot, colorVariation, developerToolsOpen) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const particle of snapshot.particles) {
@@ -398,7 +404,7 @@ export class DebugRenderer {
       context.fillStyle = "#000000";
       context.fill();
       context.restore();
-      if (snapshot.debugFlags.particleStems) {
+      if (developerToolsOpen && snapshot.debugFlags.particleStems) {
         context.beginPath();
         context.moveTo(particle.x, particle.z);
         context.lineTo(particle.x, liftedZ);
@@ -418,8 +424,8 @@ export class DebugRenderer {
     }
   }
 
-  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
-  #drawRocks(snapshot, alpha) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha @param {boolean} developerToolsOpen */
+  #drawRocks(snapshot, alpha, developerToolsOpen) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const rock of snapshot.rocks) {
@@ -455,7 +461,7 @@ export class DebugRenderer {
         context.lineWidth = line * 1.2;
         context.stroke();
       }
-      if (snapshot.debugFlags.velocityVectors) {
+      if (developerToolsOpen && snapshot.debugFlags.velocityVectors) {
         this.#drawArrow(x, z, rock.vx * 0.3, rock.vz * 0.3, COLORS.velocity);
       }
     }
@@ -562,8 +568,8 @@ export class DebugRenderer {
     }
   }
 
-  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
-  #drawPlayer(snapshot, alpha) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha @param {boolean} developerToolsOpen */
+  #drawPlayer(snapshot, alpha, developerToolsOpen) {
     const context = this.context;
     const player = snapshot.player;
     const x = player.previousX + (player.x - player.previousX) * alpha;
@@ -580,7 +586,7 @@ export class DebugRenderer {
     context.arc(x, z, line * 2.2, 0, Math.PI * 2);
     context.fillStyle = "#302611";
     context.fill();
-    if (snapshot.debugFlags.velocityVectors) {
+    if (developerToolsOpen && snapshot.debugFlags.velocityVectors) {
       this.#drawArrow(x, z, player.vx * 0.25, player.vz * 0.25, COLORS.velocity);
       this.#drawArrow(x, z, player.desiredVx * 0.25, player.desiredVz * 0.25, COLORS.desired);
       this.#drawArrow(
@@ -593,8 +599,8 @@ export class DebugRenderer {
     }
   }
 
-  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
-  #drawEnemies(snapshot, alpha) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha @param {boolean} developerToolsOpen */
+  #drawEnemies(snapshot, alpha, developerToolsOpen) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const enemy of snapshot.enemies ?? []) {
@@ -623,7 +629,7 @@ export class DebugRenderer {
       context.strokeStyle = "#5b1b22";
       context.lineWidth = line;
       context.stroke();
-      if (snapshot.debugFlags.velocityVectors) {
+      if (developerToolsOpen && snapshot.debugFlags.velocityVectors) {
         this.#drawArrow(x, z, enemy.vx * 0.25, enemy.vz * 0.25, COLORS.velocity);
         this.#drawArrow(
           x,

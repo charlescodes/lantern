@@ -12,6 +12,7 @@ export class InputController {
    * step:()=>void,
    * reset:(newSeed:boolean)=>void,
    * toggleMode:()=>void,
+   * developerToolsOpen?:()=>boolean,
    * focusPlayer:()=>void,
    * pinAt:(x:number,z:number)=>void,
    * editAt:(tool:string,button:number,x:number,z:number)=>void,
@@ -195,6 +196,9 @@ export class InputController {
       || target instanceof HTMLButtonElement
       || (target instanceof HTMLElement && target.isContentEditable)
     ) {
+      return;
+    }
+    if (this.actions.developerToolsOpen && !this.actions.developerToolsOpen()) {
       return;
     }
     if (event.code === "Space") {

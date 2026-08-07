@@ -124,7 +124,7 @@ export class ArenaUi {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
-   * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinnedHidden?:boolean,mode:string}} view
+   * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinnedHidden?:boolean,mode:string,developerToolsOpen?:boolean}} view
    * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>}} presentation
    */
   update(snapshot, metrics, view, presentation) {
@@ -147,6 +147,7 @@ export class ArenaUi {
     this.defeatCountdown.textContent = `Restarting this seed in ${number(remainingSeconds, 1)}s`;
     this.tickValue.textContent = String(snapshot.tick);
     this.seedValue.textContent = `0x${snapshot.seed.toString(16).padStart(8, "0")}`;
+    if (view.developerToolsOpen === false) return;
     const cx = Math.floor(view.mouseWorld.x);
     const cz = Math.floor(view.mouseWorld.z);
     const presentationTotal = presentation.presentationCpuMs.totalMs;

@@ -393,11 +393,7 @@ body[data-mode="edit"] .edit-hint {
   backdrop-filter: blur(12px);
 }
 
-.spell-lab[data-collapsed="true"] {
-  width: 236px;
-}
-
-.spell-lab[data-collapsed="true"] .spell-lab-body {
+.spell-lab[hidden] {
   display: none;
 }
 
@@ -413,10 +409,6 @@ body[data-mode="edit"] .edit-hint {
   padding: 9px 10px 9px 13px;
   border-bottom: 1px solid var(--rule);
   background: rgba(16, 23, 18, 0.98);
-}
-
-.spell-lab[data-collapsed="true"] .spell-lab-heading {
-  border-bottom: 0;
 }
 
 .spell-lab-heading h2 {
@@ -1262,4 +1254,32 @@ kbd {
   .render-lab-grid section + section {
     border-left: 0;
   }
+}
+
+/*
+ * Playtest mode is the default. Developer surfaces retain their individual
+ * layouts and state, but one late-cascade gate removes all of them and gives
+ * the arena the complete viewport.
+ */
+body[data-developer-tools="closed"] [data-developer-surface] {
+  display: none !important;
+}
+
+body[data-developer-tools="closed"] {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+body[data-developer-tools="closed"] .workspace {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+}
+
+body[data-developer-tools="closed"] .arena-shell {
+  height: 100%;
+  min-height: 0;
+  border-right: 0;
+  border-bottom: 0;
 }

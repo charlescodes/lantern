@@ -15,6 +15,7 @@ This ledger preserves architectural improvements that are credible and important
 | ID | Improvement | State | Promotion trigger |
 | --- | --- | --- | --- |
 | LT-001 | [Client-owned presentation effects](#lt-001-client-owned-presentation-effects) | Candidate | Before a strict authoritative server or particle state becomes a measured simulation/snapshot bottleneck |
+| LT-002 | [Parkable developer windows](#lt-002-parkable-developer-windows) | Working draft | When the next stateful developer panel is added or substantially revised, with AI View as the likely first conversion |
 
 ## LT-001: Client-owned presentation effects
 
@@ -137,6 +138,89 @@ Promoted work is complete only when:
 Promote LT-001 into an implementation plan before Lantern introduces a strict authoritative multiplayer/server runtime. It may be promoted earlier only if profiling shows that cosmetic particle simulation or snapshot projection materially obstructs nearer feature work.
 
 Until then, preserve the present particle implementation as a bounded deterministic reference and keep its gameplay influence at exactly zero.
+
+## LT-002: Parkable developer windows
+
+### Summary
+
+Use the 0.8.1 Spell Lab interaction as the preferred pattern for qualifying
+developer windows: a toolbar launcher opens a panel over the arena, the launcher
+gets out of the way while that panel is open, and Collapse or Close parks the
+panel back into the toolbox without discarding its local state.
+
+This is a small consistency rule, not approval to build a general window
+manager. Apply it when a real second consumer proves what should be shared.
+
+### Current state
+
+- Spell Lab is the reference implementation. It starts parked, opens as a
+  desktop overlay or narrow-screen drawer, and collapses completely back to its
+  launcher while retaining its draft, revision, seed lock, and last target.
+- AI View opens and closes a stateful diagnostic panel, but its launcher and
+  lifecycle do not yet follow the complete Spell Lab parking pattern.
+- Render Lab is a modal dialog whose launcher remains in the toolbar.
+- Frame instrumentation, bounded pools, Inspector, debug layers, events, and
+  artifact controls remain one persistent developer sidebar.
+- The outer semicolon gate already hides all developer surfaces together and
+  remains separate from each panel's parked/open state.
+
+### Qualifying tools
+
+The parkable-window pattern applies to stateful tools with content that benefits
+from remaining open while the arena stays interactive. Current candidates are
+AI View, Render Lab, and a future window containing the existing instrumentation
+sections.
+
+Immediate commands remain direct toolbar controls. Pause or Resume, Step,
+Reset, Enter Edit or Return to Play, and Focus do not become empty windows or
+participate in panel lifecycle state.
+
+### Target behavior
+
+- A parked tool has one clearly labeled launcher in the developer toolbox.
+- Opening the tool shows its established overlay, drawer, or dialog and hides
+  or marks its launcher so duplicate instances cannot be created.
+- Collapse or Close removes the panel from the arena and restores its launcher.
+- Parking preserves meaningful session-local state such as AI selection/view
+  mode, Render Lab settings/report, instrumentation choices, and scroll position
+  where practical. Browser reload persistence is not implied.
+- The outer semicolon gate can hide and restore all open developer surfaces
+  without injecting a simulation command, changing replay data, or discarding
+  panel state.
+- Desktop and narrow-screen behavior remain explicit per panel until repeated
+  use proves a shared responsive shell.
+
+### Deliberately deferred
+
+Do not add dragging, arbitrary resizing, docking, snapping, z-order management,
+saved layouts, cross-window collision avoidance, or a desktop-style window
+registry as part of the first conversions. Whether several panels may overlap,
+auto-arrange, or become mutually exclusive remains a future product decision.
+
+Do not force unlike controls through one abstraction. Extract a small shared
+park/open lifecycle only after AI View or another real panel reproduces the
+Spell Lab behavior and exposes the common seam.
+
+### Acceptance evidence
+
+Promoted work is complete for each converted panel only when:
+
+- launcher, open, park, and reopen behavior is keyboard- and pointer-usable;
+- reopening retains the panel's meaningful session state;
+- the panel cannot create duplicate instances or escape the semicolon gate;
+- closing the outer toolbox cannot leave hidden edit or modal focus traps;
+- Canvas2D and Three.js arena interaction remain available where that panel's
+  existing contract allows it;
+- automated DOM/state coverage and a real-browser desktop/narrow-screen check
+  confirm the lifecycle without changing simulation, schema, or replay truth.
+
+### Promotion trigger
+
+Promote LT-002 into a decision-complete implementation plan when AI View is next
+substantially revised, when another stateful developer panel is introduced, or
+when repeated one-off launcher/panel behavior starts crowding the toolbox. Use
+that concrete panel as the second consumer; do not build generalized window
+management in anticipation of unspecified tools.
 
 ## Entry template
 

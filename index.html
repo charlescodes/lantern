@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#101511">
-    <title>Lantern 0.8.0 · Visual Perception and Hunting</title>
+    <title>Lantern 0.8.1 · Playtest Mode</title>
     <link rel="stylesheet" href="./styles.css">
     <script type="importmap">
       {
@@ -17,13 +17,18 @@
       }
     </script>
   </head>
-  <body data-mode="play">
-    <header class="topbar">
+  <body data-mode="play" data-developer-tools="closed">
+    <header
+      id="developer-toolbox"
+      class="topbar"
+      data-developer-surface
+      aria-label="Developer toolbox"
+    >
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
-          <p class="eyebrow">Project Lantern / 0.8.0</p>
-          <h1>Visual Perception and Hunting</h1>
+          <p class="eyebrow">Project Lantern / 0.8.1</p>
+          <h1>Developer Toolbox</h1>
         </div>
       </div>
       <div class="run-summary" aria-label="Simulation status">
@@ -31,22 +36,34 @@
         <span>tick <strong id="tick-value">0</strong></span>
         <span>seed <strong id="seed-value">--</strong></span>
       </div>
-      <nav class="toolbar" aria-label="Arena controls">
+      <nav class="toolbar" aria-label="Developer controls">
         <button id="pause-button" type="button">Pause</button>
         <button id="step-button" type="button">Step</button>
         <button id="reset-button" type="button">Reset</button>
         <button id="mode-button" class="accent-button" type="button">Enter edit</button>
         <button id="focus-button" type="button">Focus</button>
-        <button id="spell-lab-open" type="button" hidden>Spell Lab</button>
+        <button
+          id="spell-lab-open"
+          type="button"
+          aria-expanded="false"
+          aria-controls="spell-lab"
+        >Spell Lab</button>
         <button id="ai-view-open" type="button" aria-expanded="false" aria-controls="ai-view-panel">AI View</button>
         <button id="render-lab-button" type="button" data-render-lab>Render Lab</button>
+        <button
+          id="developer-tools-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="developer-toolbox"
+          aria-keyshortcuts=";"
+        >Hide tools <kbd>;</kbd></button>
       </nav>
     </header>
 
     <main class="workspace">
       <section id="arena-viewport" class="arena-shell" aria-label="Lantern simulation viewport">
         <canvas id="arena" tabindex="0"></canvas>
-        <canvas id="ai-view-overlay" aria-hidden="true" hidden></canvas>
+        <canvas id="ai-view-overlay" data-developer-surface aria-hidden="true" hidden></canvas>
         <div id="defeat-overlay" class="defeat-overlay" role="status" hidden>
           <strong>DEFEATED</strong>
           <span id="defeat-countdown">Restarting this seed in 1.5s</span>
@@ -54,8 +71,10 @@
         <aside
           id="spell-lab"
           class="spell-lab"
-          data-collapsed="false"
+          data-collapsed="true"
+          data-developer-surface
           aria-label="Spell Lab authoring panel"
+          hidden
         >
           <header class="spell-lab-heading">
             <div>
@@ -65,9 +84,9 @@
             <button
               id="spell-lab-toggle"
               type="button"
-              aria-expanded="true"
+              aria-expanded="false"
               aria-controls="spell-lab-body"
-            >Collapse</button>
+            >Expand</button>
           </header>
           <div id="spell-lab-body" class="spell-lab-body">
             <div class="spell-lab-selector">
@@ -139,6 +158,7 @@
         <aside
           id="ai-view-panel"
           class="ai-view-panel"
+          data-developer-surface
           aria-label="AI View diagnostics panel"
           hidden
         >
@@ -183,7 +203,7 @@
             </section>
           </div>
         </aside>
-        <div class="editor-palette" aria-label="Scenario authoring tools">
+        <div class="editor-palette" data-developer-surface aria-label="Scenario authoring tools">
           <span>AUTHOR</span>
           <button type="button" data-editor-tool="wall" aria-pressed="true">Wall</button>
           <button type="button" data-editor-tool="small" aria-pressed="false">Rock .1m</button>
@@ -192,17 +212,17 @@
           <button type="button" data-editor-tool="erase" aria-pressed="false">Erase</button>
           <button id="restore-scenario-button" type="button">Restore positions</button>
         </div>
-        <div class="viewport-rail">
+        <div class="viewport-rail" data-developer-surface>
           <span id="pointer-value">x -- z -- · cell --</span>
           <span class="mode-hint play-hint">RMB move · LMB cast · click pins</span>
           <span class="mode-hint edit-hint">LMB applies selected tool · RMB erases · simulation paused</span>
         </div>
-        <div class="corner-readout" aria-hidden="true">
+        <div class="corner-readout" data-developer-surface aria-hidden="true">
           <span>X</span><i></i><span>Z</span>
         </div>
       </section>
 
-      <aside class="instrument-panel">
+      <aside class="instrument-panel" data-developer-surface aria-label="Developer instruments">
         <section class="panel-section telemetry-section">
           <div class="section-heading">
             <h2>Frame instrument</h2>
@@ -267,14 +287,14 @@
 
         <section class="panel-section shortcut-section">
           <div class="section-heading"><h2>Shortcuts</h2><span>window.__lantern</span></div>
-          <p><kbd>Space</kbd> pause <kbd>.</kbd> one tick <kbd>R</kbd> reset <kbd>⇧R</kbd> new seed <kbd>E</kbd> mode <kbd>F</kbd> focus</p>
+          <p><kbd>;</kbd> toolbox <kbd>Space</kbd> pause <kbd>.</kbd> one tick <kbd>R</kbd> reset <kbd>⇧R</kbd> new seed <kbd>E</kbd> mode <kbd>F</kbd> focus</p>
           <p><kbd>Wheel</kbd> zoom <kbd>MMB</kbd> pan</p>
         </section>
 
         <p id="error-output" class="error-output" role="alert" hidden></p>
       </aside>
     </main>
-    <dialog id="render-lab-dialog" class="render-lab" data-render-lab>
+    <dialog id="render-lab-dialog" class="render-lab" data-render-lab data-developer-surface>
       <div class="render-lab-heading">
         <div>
           <p class="eyebrow">Presentation controls</p>
