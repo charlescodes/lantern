@@ -49,7 +49,7 @@ mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.0` adds [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) and advances snapshots/recordings to schema v8. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
+Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.0` adds [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) and advances snapshots/recordings to schema v8. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
 
 ## Play controls
 

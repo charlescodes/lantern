@@ -1,0 +1,384 @@
+# Lantern: Lay of the Land in Pseudocode
+
+> **Descriptive snapshot:** Lantern 0.8.0, snapshot/recording schema v8.
+>
+> This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.
+
+## The one-screen model
+
+```text
+PROGRAM LanternBrowserApp
+    truth        := one authoritative X/Z Simulation
+    clock        := FixedStepRuntime running truth at 60 Hz
+    visibility   := presentation-side TrueSight derived from snapshots
+    presentation := Canvas2D or Three.js
+    tools        := UI + Spell Lab + Render Lab + AI View + window.__lantern
+
+    REPEAT every browser frame
+        WHILE enough fixed time is owed
+            command := sample input + drain queued actions
+            truth.tick(command)                    // gameplay changes here
+
+        snapshot := truth.snapshot()               // copied read model
+        sight    := visibility.update(snapshot)    // player-facing concealment
+        presentation.render(snapshot, sight)       // pixels only
+        tools.update(snapshot, diagnostics)
+END
+```
+
+The governing direction is:
+
+```text
+input / editor / simulation probes
+              |
+              v
+          COMMANDS
+              |
+              v
+    AUTHORITATIVE SIMULATION
+              |
+              v
+       COPIED SNAPSHOTS
+              |
+       +------+-------+-----------+
+       v              v           v
+    Canvas2D       Three.js     DOM tools
+
+No render result feeds gameplay back upward.
+```
+
+Most importantly, the two kinds of sight are unrelated authorities:
+
+```text
+mob vision := simulation facing + range + GridMap line-of-sight
+TrueSight  := snapshot geometry + player position + presentation flags
+
+mob vision may change AI state
+TrueSight may hide pixels and local interaction
+TrueSight never gives knowledge to AI
+```
+
+## Boot and frame loop
+
+```text
+FUNCTION boot()
+    simulation      := new Simulation(default scenario, schema-v8 profiles)
+    initialSnapshot := simulation.snapshot()
+
+    options   := parse renderer/backend/visual flags from URL
+    flags     := new PresentationFlags(options)
+    trueSight := new TrueSightSystem(flags)
+    sight     := trueSight.update(initialSnapshot, alpha = 0)
+
+    (camera, presentation) := await createPresentation(
+        canvas,
+        options,                 // Canvas2D default; Three.js opt-in
+        initialSnapshot,
+        flags,
+        sight,
+    )
+
+    runtime := new FixedStepRuntime(
+        simulation,
+        commandProvider = input.sampleCommand,
+        render = publishFrame,
+    )
+
+    connect input, UI, labs, diagnostics, and performance capture
+    expose window.__lantern
+    runtime.start()
+    dispatch "lantern:ready"
+END
+
+ON animationFrame(now)
+    elapsed := clamp(now - previousFrameTime, 0, 0.25 seconds)
+
+    IF not paused
+        accumulator += elapsed
+        WHILE accumulator >= 1/60 second
+            live     := canonicalize(input.sampleCommand())
+            injected := drain at most 64 items from queue(capacity = 2,048)
+            simulation.tick(merge(live, injected))
+            accumulator -= 1/60 second
+
+    alpha    := paused ? 0 : accumulator / (1/60 second)
+    snapshot := simulation.snapshot()
+    publishFrame(snapshot, alpha, runtime.metrics())
+    request next animation frame
+END
+```
+
+Wall-clock rendering may speed up, slow down, or stall; gameplay advances only in fixed ticks. Presentation interpolates between each body's previous and current position with `alpha`.
+
+Code: [`src/main.js`](../src/main.js) wires the app; [`src/runtime/fixed_step_runtime.js`](../src/runtime/fixed_step_runtime.js) owns the clock, queue, snapshots, and runtime metrics.
+
+## Authoritative state and one tick
+
+```text
+STATE Simulation
+    compatibility := seed + tick + schema/profile boundaries
+    authoredWorld := Scenario(GridMap, player spawn, rocks, one obelisk)
+
+    entities :=
+        player singleton
+        bounded EnemyWizardPool
+        bounded RockPool
+        bounded ProjectilePool
+        bounded ParticlePool        // deterministic visuals; no gameplay effect
+
+    infrastructure :=
+        immutable-revision SpellRegistry
+        navigation fields + destination cache + reachability
+        deterministic map-cell broadphase
+        deterministic RNG/hash lanes
+
+    boundedHistory :=
+        commands + impacts + combat + perception + contacts
+END
+
+FUNCTION Simulation.tick(rawInput)
+    command := canonicalize(rawInput)
+    clear this tick's contacts
+    apply command.actions at the tick boundary
+
+    IF defeated
+        advance same-seed restart flow
+        record the advancing defeated tick
+        RETURN
+
+    nextTick := tickCount + 1
+
+    encounterSystem(nextTick)                  // bounded obelisk spawns
+    IF enemy profile == perceptive-wizard-v1
+        perceptionSystem(nextTick)             // v8 geometry-only awareness
+    navigationSystem()                         // bounded incremental work
+
+    preparePlayerMovement(command.move)
+    prepareEnemyMovement(nextTick)
+    IF enemy profile == perceptive-wizard-v1
+        facingSystem(nextTick)
+    bodyPhysicsSystem()                         // actors, rocks, grid, contacts
+
+    decrease cooldowns
+    castPlayerSpell(command.cast)
+    castEnemySpells(nextTick)
+    advanceProjectiles()                        // hits -> explosions -> damage
+    removeDeadEnemies()
+    advanceParticles()
+    regenerateHealth(nextTick)
+    pruneUnreferencedSpellRevisions()
+
+    tickCount += 1
+    record canonical command
+END
+```
+
+That order is gameplay behavior. Extracting a step can be structural; reordering steps is a mechanics and replay change until proven otherwise.
+
+The entity pools are dense structure-of-arrays storage:
+
+```text
+spawn(values): append one row across typed-array columns, unless full
+remove(index): copy the last active row into the hole, then shorten
+
+stable ID travels with the copied row
+pool index is temporary and must never become external identity
+```
+
+Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded scheduler; [`src/sim/pools.js`](../src/sim/pools.js) owns bounded storage.
+
+## Fireball and combat vertical
+
+```text
+ON successful cast(caster, target)
+    definition := current Fireball revision
+    effectSeed := deterministic caster-local successful-cast seed
+
+    spawn projectile WITH
+        owner identity + team
+        captured spell revision
+        stable effect ID + seed
+        X/Z motion + collision + lifetime
+
+    advance cooldown and cast sequence only after successful spawn
+END
+
+EACH tick FOR each projectile
+    sweep X/Z path against grid/obelisk, rocks, and opposing actors
+
+    IF hit
+        create explosion from captured spell revision
+        apply grid-occluded radial impulse to nearby bodies
+        apply fixed team-aware combat damage to opposing actors
+        give an unseen mob only the impact-point clue, never attacker identity
+        emit deterministic visual particles
+        retain bounded diagnostics
+        remove projectile
+    ELSE
+        advance position and age
+END
+```
+
+Spell Lab affects future casts only. Existing projectiles, impacts, particles, and lights keep the revision captured at spawn.
+
+Code: the orchestration is in [`src/sim/simulation.js`](../src/sim/simulation.js); data/validation lives in [`src/spells`](../src/spells).
+
+## Perceptive wizard vertical
+
+```text
+STATE per mob
+    identity + spawn sequence
+    facing + personal guard point
+    state := unaware | noticing | engaged | hunting | returning
+    candidate exposure
+    personal last-seen player position/velocity/tick
+    optional impact-point clue
+    hunt/search goal + timers
+    navigation + strafe + dodge + retreat state
+END
+
+ON this mob's staggered perception lane
+    visible :=
+        within 12m
+        AND (inside 120-degree facing cone OR within 1.5m close radius)
+        AND unobstructed by GridMap
+
+    IF visible
+        start/continue noticing
+        IF exposure has remained qualified for 15 simulation ticks
+            engage
+        IF engaged
+            refresh personal last-seen memory
+    ELSE
+        cancel noticing
+        IF previously engaged
+            stop firing and hunt the personal last-seen point
+END
+
+FUNCTION chooseMovement(mob)
+    IF dodging a visible projectile threat
+        dodge                                  // highest movement overlay
+    ELSE IF low-health retreat is active
+        move away from visible/memorized threat
+    ELSE SWITCH mob.state
+        engaged:  approach beyond 9m; withdraw inside 6m; otherwise strafe
+        hunting:  visit memory/clue, then search reachable cells for 8 seconds
+        returning: navigate to personal guard point
+        otherwise: hold guard and sweep facing
+END
+
+FUNCTION maybeCast(mob)
+    REQUIRE engaged, not retreating, and cooldown/cadence ready
+    REQUIRE a fresh same-tick cone/range/GridMap sight check
+    cast through the player's Fireball registry using softened intercept aim
+END
+```
+
+Rocks, darkness, lights, particles, Three.js meshes, and TrueSight do not participate in `visible`. Low-level deterministic calculations live in [`src/sim/perceptive_wizard.js`](../src/sim/perceptive_wizard.js) and [`src/sim/tactical_wizard.js`](../src/sim/tactical_wizard.js); their lifecycle is still orchestrated by `Simulation`.
+
+## Snapshot, TrueSight, and presentation
+
+```text
+FUNCTION publishFrame(snapshot, alpha, metrics)
+    sight := TrueSight.update(snapshot, alpha, mode)
+        cache wall topology until map changes
+        interpolate player position as the origin
+        cast deterministic corner rays
+        build polygon and shared byte mask
+        apply presentation-only reveal/conceal fade
+
+    gate hover and stable selection through logical sight
+    presentation.render(snapshot, alpha, sight + local view state)
+    AI View, UI, Spell Lab, and Render Lab update from read-only data
+END
+
+IF Canvas2D
+    draw snapshot directly
+    draw shared sight mask as world-space void overlay
+    remain the regression/oracle renderer
+
+IF Three.js
+    copy snapshot rows into preallocated scene resources
+    use Y only for visual height over authoritative X/Z
+    upload the same sight mask through a resident texture
+    update resident effect lights and optional bloom/shadows
+    submit scene
+```
+
+Neither renderer owns collision bodies, health, AI state, or alternate entity IDs.
+
+Code: [`src/visibility/true_sight.js`](../src/visibility/true_sight.js), [`src/presentation/canvas_presentation.js`](../src/presentation/canvas_presentation.js), and [`src/presentation/three_presentation.js`](../src/presentation/three_presentation.js).
+
+## Mutation, observation, and replay
+
+```text
+IF a host action changes simulation truth
+    enqueue canonical command -> consume on fixed tick -> record for replay
+    // movement, casts, resets, editing, spell revisions, simulation flags
+
+IF a host action only reads
+    return copied snapshot or read-only diagnostics
+    // metrics, queries, enemy/spell diagnostics
+
+IF a host action changes only the view
+    mutate presentation state without a simulation command
+    // camera, renderer flags, pixel density, Render Lab, AI View mode
+```
+
+```text
+FUNCTION exportCommandLog()
+    RETURN deepCopy(
+        schema + seed + initial scenario
+        capacities + behavior profiles + spell baseline
+        canonical tick commands + truncation flag
+    )
+END
+
+FUNCTION Simulation.replay(recording)
+    validate schema v2..v8
+    choose its frozen behavior profile:
+        v2-v4 legacy effects
+        v5    versioned Fireball / pre-combat
+        v6    basic wizard
+        v7    omniscient tactical wizard
+        v8    perceptive wizard + v8 scaling metadata
+
+    replayed := new Simulation(recorded initial state)
+    FOR command IN recording.commands
+        replayed.tick(command)
+    RETURN replayed
+END
+```
+
+Enemy choices are regenerated from authoritative state, stable identities, deterministic lanes, and tick order. They are not recorded as synthetic player input.
+
+## Reading route
+
+```text
+src/main.js
+    -> composition and browser-facing authority routing
+
+src/runtime/fixed_step_runtime.js
+    -> command queue, fixed clock, snapshots, publish
+
+src/sim/simulation.js
+    -> current schedule and cross-system orchestration
+       -> pools.js
+       -> collision.js + explosion.js
+       -> perceptive_wizard.js + tactical_wizard.js
+       -> navigation_field.js + destination_field_cache.js
+       -> ../spells/spell_registry.js + fireball_definition.js
+
+snapshot
+    -> visibility/true_sight.js
+    -> presentation/factory.js
+       -> CanvasPresentation | ThreePresentation
+    -> browser UI + labs + AI View
+
+test/*.test.js
+    -> executable contracts for determinism, compatibility, parity, and bounds
+```
+
+If one sentence must survive the rest of the document:
+
+> Lantern is a deterministic, fixed-tick X/Z game simulation that publishes copied snapshots to replaceable browser presentations; `Simulation` is currently the crowded scheduler holding that boundary together.

@@ -2,7 +2,7 @@
 
 > **Review snapshot:** the Lantern 0.8.0 working tree built on commit `2727c2e`, before the human visual/behavioral release gate.
 >
-> **Purpose:** explain the code as it exists, distinguish strong foundations from accumulating debt, and provide a practical route for reviewing and later refactoring it. This is a living engineering guide, not a frozen release contract.
+> **Purpose:** explain the code as it exists, distinguish strong foundations from accumulating debt, and provide a practical route for reviewing and later refactoring it. This is a living engineering guide, not a frozen release contract. For a control-flow-first view, use the companion [lay of the land in pseudocode](./lay-of-the-land-pseudocode.md).
 
 ## Bottom line
 
@@ -82,7 +82,7 @@ Two nuances are worth knowing:
 1. Visual spark particles have `y`, `vy`, gravity, and bounce state inside `Simulation`. They are prohibited from affecting gameplay, but their visual-effect lifecycle is simulated and replayed on the authoritative side. Therefore the gameplay model is 2D, while not every calculation under `src/sim` is strictly two-dimensional.
 2. The folder named `visibility` means player-facing presentation visibility. Enemy sight lives under `src/sim`. This separation is correct, but the generic folder name makes the distinction easier to misunderstand than it needs to be.
 
-Neither issue is an urgent violation. If Lantern eventually needs a strict server simulation with no visual-effect work, particle state is the first candidate to split into a deterministic client-effect stream driven by authoritative impact events.
+Neither issue is an urgent violation. If Lantern eventually needs a strict server simulation with no visual-effect work, particle state is the first candidate to split into a deterministic client-effect stream driven by authoritative impact events. That trigger, target boundary, compatibility posture, and acceptance evidence are tracked as [LT-001: Client-owned presentation effects](./soft-specs/long-term-improvements.md#lt-001-client-owned-presentation-effects).
 
 ## Repository map
 

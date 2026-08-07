@@ -5,6 +5,16 @@ Lantern `0.8.0` is the current application release. Documents are separated by p
 ## Start here
 
 - [Architecture review and owner's guide](./architecture-guide.md) — a current code map, plain-language mental model, strengths and drift assessment, review route, and staged refactoring strategy.
+- [Lay of the land in pseudocode](./lay-of-the-land-pseudocode.md) — the current startup, fixed-tick, simulation, combat, AI, presentation, command, and replay flows in one compact trace.
+
+## Soft specifications
+
+These documents preserve future intent and candidate experiments. They are mutable and non-authoritative: current code, tests, and contracts still define shipped behavior.
+
+- [Soft-specification collection and promotion rules](./soft-specs/README.md) — how brainstorming becomes a candidate, implementation plan, and eventually a proven contract without rewriting milestone history.
+- [Emergent co-op simulation north star](./soft-specs/emergent-coop-simulation.md) — the rat wizard, movable furniture, stealth and sound, elemental surfaces, layered world data, AI composition, CPU/GPU authority, networking shape, portability, and architectural pressure.
+- [Candidate feature roadmap](./soft-specs/candidate-roadmap.md) — small vertical slices from player telekinesis through the enchanted rat, sound, elemental contact, actor composition, co-op authority, and larger-world experiments.
+- [Long-term improvement ledger](./soft-specs/long-term-improvements.md) — trigger-driven architecture work, beginning with moving visual particles and lighting behind a client-effect event boundary before authoritative multiplayer.
 
 ## Current contracts
 
