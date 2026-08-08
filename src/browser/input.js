@@ -51,6 +51,7 @@ export class InputController {
     this.mode = mode;
     this.rightHeld = false;
     this.paintButton = -1;
+    this.pointerDown.button = -1;
     this.lastPaintedCell = "";
   }
 
@@ -70,19 +71,30 @@ export class InputController {
       this.mouseInside = false;
     });
     this.canvas.addEventListener("pointermove", (event) => this.#onPointerMove(event));
-    this.canvas.addEventListener("pointerdown", (event) => this.#onPointerDown(event));
-    this.canvas.addEventListener("pointerup", (event) => this.#onPointerUp(event));
-    this.canvas.addEventListener("pointercancel", (event) => this.#onPointerUp(event));
+    // Pointer capture preserves drags, while mouse events report every button
+    // transition in an RMB+LMB chord instead of only the first/last one.
+    this.canvas.addEventListener("pointerdown", (event) => this.#capturePointer(event));
+    this.canvas.addEventListener("pointerup", (event) => this.#releasePointer(event));
+    this.canvas.addEventListener("pointercancel", (event) => {
+      this.#releasePointer(event);
+      this.rightHeld = false;
+      this.paintButton = -1;
+      this.panning = false;
+      this.pointerDown.button = -1;
+    });
+    this.canvas.addEventListener("mousedown", (event) => this.#onMouseDown(event));
     this.canvas.addEventListener("wheel", (event) => this.#onWheel(event), { passive: false });
+    window.addEventListener("mouseup", (event) => this.#onMouseUp(event));
     window.addEventListener("blur", () => {
       this.rightHeld = false;
       this.paintButton = -1;
       this.panning = false;
+      this.pointerDown.button = -1;
     });
     window.addEventListener("keydown", (event) => this.#onKeyDown(event));
   }
 
-  /** @param {PointerEvent} event */
+  /** @param {MouseEvent|PointerEvent} event */
   #viewportPoint(event) {
     const bounds = this.canvas.getBoundingClientRect();
     return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
@@ -114,12 +126,23 @@ export class InputController {
   }
 
   /** @param {PointerEvent} event */
-  #onPointerDown(event) {
+  #capturePointer(event) {
+    this.canvas.setPointerCapture(event.pointerId);
+  }
+
+  /** @param {PointerEvent} event */
+  #releasePointer(event) {
+    if (this.canvas.hasPointerCapture(event.pointerId)) {
+      this.canvas.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  /** @param {MouseEvent} event */
+  #onMouseDown(event) {
     const point = this.#viewportPoint(event);
     this.lastPointer = point;
-    this.pointerDown = { ...point, button: event.button };
+    if (event.button === 0) this.pointerDown = { ...point, button: event.button };
     this.mouseWorld = this.camera.viewportToWorld(point.x, point.y);
-    this.canvas.setPointerCapture(event.pointerId);
     if (event.button === 1) {
       this.panning = true;
       event.preventDefault();
@@ -141,8 +164,8 @@ export class InputController {
     }
   }
 
-  /** @param {PointerEvent} event */
-  #onPointerUp(event) {
+  /** @param {MouseEvent} event */
+  #onMouseUp(event) {
     const point = this.#viewportPoint(event);
     if (event.button === 1) this.panning = false;
     if (event.button === 2) this.rightHeld = false;
@@ -151,13 +174,14 @@ export class InputController {
     if (
       this.mode === "play"
       && event.button === 0
+      && this.pointerDown.button === 0
       && moved < POINTER_CLICK_SLOP_VIEWPORT_UNITS
       && !this.panning
     ) {
       const world = this.camera.viewportToWorld(point.x, point.y);
       this.actions.pinAt(world.x, world.z);
     }
-    if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
+    if (event.button === 0) this.pointerDown.button = -1;
   }
 
   #editCurrentPoint() {
