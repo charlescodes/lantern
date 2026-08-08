@@ -2,11 +2,11 @@
 
 > **Authority:** read-only presentation and developer diagnostics
 >
-> **Compatibility:** Off/Selected/All behavior and stable selection remain unchanged; Lantern 0.8.0 extends the copied schema-v8 snapshot without adding an AI command or mutation surface
+> **Compatibility:** Off/Selected/All behavior and stable selection remain unchanged; Lantern 0.9.0 extends the copied schema-v9 snapshot without adding an AI command or mutation surface
 
 ## Purpose
 
-AI View makes perception, hunting, and tactical state inspectable while the
+AI View makes perception, investigation, hunting, and tactical state inspectable while the
 simulation continues to run. It is a view toggle, never an AI enable/disable
 switch. Opening the panel, changing its mode, or selecting a mob does not inject
 a command, pause an actor, change a decision, or enter recording/replay state.
@@ -26,7 +26,7 @@ identity rather than pool index.
 
 ## Displayed truth
 
-The renderer-neutral view model consumes the same copied schema-v8 snapshot as
+The renderer-neutral view model consumes the same copied schema-v9 snapshot as
 Canvas2D and Three.js. It labels **player sight** separately from **mob vision**:
 player sight is the presentation-only TrueSight result, while mob vision is the
 authoritative cone/range/grid-occlusion sample. Neither value is inferred from
@@ -37,18 +37,22 @@ For each displayed mob the panel includes:
 - perception state and knowledge source, current visibility, sample tick,
   five-lane identity, and exposure progress toward the 15-tick threshold;
 - normalized facing, candidate and confirmed target identity, guard point,
-  personal last-seen data, damage stimulus, hunt phase, anchor, search goal,
-  and active timers;
+  personal last-seen data, investigation source/priority/anchor/timestamps,
+  effect and projectile IDs, observed projectile pose/velocity, inferred
+  origin, hunt phase, search goal, and active timers;
 - behavior and retreat state, health, position and velocity, desired velocity,
   movement goal, strafe schedule, intercept aim, line of sight, tracked visible
   projectile threat, dodge timers, and cast sequence/cooldown;
 - destination-cache slot, key, cost, version, and stale/building flags.
 
 World-space marks include the `120°`/`12m` perception cone, `1.5m` close-awareness
-circle, facing and exposure, the `6-9m` engagement band, target, last-seen or
-impact marker, search point, guard point, movement goal, desired velocity,
-predicted aim, line of sight, tracked threat, dodge direction, and navigation
-state. The cone and close-awareness circle are never drawn when AI View is Off.
+circle, selected-wizard `16m` hearing radius, facing and exposure, the `6-9m`
+engagement band, target, last-seen, sound-impact or damage marker, projectile
+observation point, reverse-trajectory ray, inferred-origin marker, search point,
+guard point, movement goal, desired velocity, predicted aim, line of sight,
+tracked threat, dodge direction, and navigation state. `INVESTIGATING` has a
+distinct state color. The cone, close-awareness circle, and hearing radius are
+never drawn when AI View is Off.
 The small hood/nose direction marker on the ordinary hostile silhouette is not
 debug geometry and remains available in normal rendering.
 
@@ -62,14 +66,17 @@ actor types have perception behavior.
 ## Diagnostics and event history
 
 `window.__lantern.enemyDiagnostics(id?)` returns the same copied per-enemy
-perception, hunt, tactical, and destination-field data for every enemy or one
+perception, investigation, hunt, tactical, and destination-field data for every enemy or one
 stable ID. The global diagnostics replace the old single player-rooted field
 status with the bounded destination-cache slots, current builder, expansion
 budget, reference counts, map revision, and completed/stale versions.
 
 The simulation retains a bounded 128-entry perception-event ring. Diagnostics
 expose its latest 32 detection, loss, search, return, damage-alert,
-reacquisition, and awareness-clear events plus retained, capacity, and dropped counts.
+reacquisition, awareness-clear, projectile-observation, explosion-hearing,
+redirect, deduplication, and priority-rejection events plus retained, capacity,
+and dropped counts. Bounded aggregate counters report projectile observations,
+heard explosions, accepted redirects, deduplication, and priority rejection.
 Reading diagnostics cannot affect event retention, decisions, or replay.
 
 ## TrueSight and interaction boundary

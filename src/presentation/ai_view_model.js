@@ -164,6 +164,19 @@ function guardText(mob) {
   return `${pointText(guard.point)} · return ${integer(guard.returnStartTick)}t${unreachable}`;
 }
 
+/** @param {Record<string,any>} mob */
+function investigationText(mob) {
+  const investigation = mob.investigation;
+  if (!investigation) return "unavailable";
+  if (!investigation.active) return "none";
+  const identities = [];
+  if (investigation.effectId) identities.push(`effect #${integer(investigation.effectId)}`);
+  if (investigation.projectileId) {
+    identities.push(`projectile #${integer(investigation.projectileId)}`);
+  }
+  return `${investigation.source ?? "none"} · priority ${integer(investigation.priority)} · observed ${integer(investigation.observationTick)}t · accepted ${integer(investigation.acceptedTick)}t${identities.length > 0 ? ` · ${identities.join(" · ")}` : ""}`;
+}
+
 /**
  * @param {Record<string,any>} snapshot
  * @param {Record<string,any>} mob
@@ -203,6 +216,7 @@ export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
     `aim         ${aimText(mob)}`,
     `line sight  ${mob.lineOfSight ? "clear" : "blocked"}`,
     `last seen   ${pointText(mob.lastSeen)} · impact ${pointText(mob.stimulus)}`,
+    `investigate ${investigationText(mob)}`,
     `hunt        ${huntText(mob)}`,
     `guard       ${guardText(mob)}`,
     `threat      ${threatText(mob)}`,
@@ -266,6 +280,28 @@ function mobView(snapshot, mob, alpha, sightVisible, selected) {
   const targetPoint = targetIdentity?.kind === "player" && snapshot.player
     ? { x: Number(snapshot.player.x), z: Number(snapshot.player.z) }
     : null;
+  const investigation = mob.investigation ?? null;
+  const investigationAnchor = investigation?.anchor
+    && finite(investigation.anchor.x) !== null
+    && finite(investigation.anchor.z) !== null
+    ? { x: Number(investigation.anchor.x), z: Number(investigation.anchor.z) }
+    : null;
+  const projectileObservationPoint = investigation?.projectileObservation?.position
+    && finite(investigation.projectileObservation.position.x) !== null
+    && finite(investigation.projectileObservation.position.z) !== null
+    ? {
+      x: Number(investigation.projectileObservation.position.x),
+      z: Number(investigation.projectileObservation.position.z),
+    }
+    : null;
+  const inferredOriginPoint = investigation?.inferredOrigin
+    && finite(investigation.inferredOrigin.x) !== null
+    && finite(investigation.inferredOrigin.z) !== null
+    ? {
+      x: Number(investigation.inferredOrigin.x),
+      z: Number(investigation.inferredOrigin.z),
+    }
+    : null;
   return {
     key: aiMobKey(mob),
     id: mob.id,
@@ -299,8 +335,17 @@ function mobView(snapshot, mob, alpha, sightVisible, selected) {
     lastSeenPoint: mob.lastSeen?.position
       ? { x: Number(mob.lastSeen.position.x), z: Number(mob.lastSeen.position.z) }
       : null,
-    stimulusPoint: mob.stimulus?.position
+    stimulusPoint: investigation?.source !== "sound" && mob.stimulus?.position
       ? { x: Number(mob.stimulus.position.x), z: Number(mob.stimulus.position.z) }
+      : null,
+    soundImpactPoint: investigation?.source === "sound" ? investigationAnchor : null,
+    hearingCircle: selected
+      ? { x, z, radius: PERCEPTIVE_WIZARD.fireballHearingMeters }
+      : null,
+    projectileObservationPoint,
+    inferredOriginPoint,
+    reverseTrajectory: projectileObservationPoint && inferredOriginPoint
+      ? { start: projectileObservationPoint, end: inferredOriginPoint }
       : null,
     searchPoint: mob.hunt?.searchGoal
       ? { x: Number(mob.hunt.searchGoal.x), z: Number(mob.hunt.searchGoal.z) }

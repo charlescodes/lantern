@@ -1,15 +1,16 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
-export const APPLICATION_VERSION = "0.8.2";
+export const APPLICATION_VERSION = "0.9.0";
 
 export const GAMEPLAY_PROFILE_OBELISK_DUEL = "obelisk-duel-v1";
 export const GAMEPLAY_PROFILE_PRE_COMBAT = "pre-combat-v1";
 export const ENEMY_AI_PROFILE_BASIC = "basic-wizard-v1";
 export const ENEMY_AI_PROFILE_TACTICAL = "tactical-wizard-v1";
 export const ENEMY_AI_PROFILE_PERCEPTIVE = "perceptive-wizard-v1";
+export const ENEMY_AI_PROFILE_INVESTIGATIVE = "investigative-wizard-v1";
 export const ENEMY_AI_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
@@ -72,6 +73,7 @@ export const PERCEPTIVE_WIZARD = Object.freeze({
   visualRangeMeters: 12,
   fieldOfViewDegrees: 120,
   closeAwarenessMeters: 1.5,
+  fireballHearingMeters: 16,
   perceptionLanes: 5,
   exposureTicks: 15,
   maximumTurnRadiansPerSecond: Math.PI,

@@ -11,6 +11,7 @@ export const PERCEPTION_STATE = Object.freeze({
   engaged: 2,
   hunting: 3,
   returning: 4,
+  investigating: 5,
 });
 
 export const PERCEPTION_STATE_NAMES = Object.freeze([
@@ -19,15 +20,166 @@ export const PERCEPTION_STATE_NAMES = Object.freeze([
   "engaged",
   "hunting",
   "returning",
+  "investigating",
 ]);
 
 export const KNOWLEDGE_SOURCE = Object.freeze({
   none: 0,
   visual: 1,
   damage: 2,
+  projectile: 3,
+  sound: 4,
 });
 
-export const KNOWLEDGE_SOURCE_NAMES = Object.freeze(["none", "visual", "damage"]);
+export const KNOWLEDGE_SOURCE_NAMES = Object.freeze([
+  "none",
+  "visual",
+  "damage",
+  "projectile",
+  "sound",
+]);
+
+export const INVESTIGATION_PRIORITY = Object.freeze({
+  none: 0,
+  sound: 1,
+  damage: 2,
+  lastSeen: 3,
+  projectile: 4,
+  directSight: 5,
+});
+
+export const INVESTIGATION_DECISION = Object.freeze({
+  accept: "accept",
+  deduplicate: "deduplicate",
+  priorityReject: "priority-reject",
+  staleReject: "stale-reject",
+});
+
+/**
+ * Investigation anchors are cell-addressable world points. Keeping them on
+ * cell centers at the map edge prevents a reconstructed launch point from
+ * producing an out-of-bounds navigation key.
+ * @param {{width:number,height:number}} map
+ * @param {number} x
+ * @param {number} z
+ */
+export function clampInvestigationAnchor(map, x, z) {
+  const minimumX = map.width > 0 ? 0.5 : 0;
+  const minimumZ = map.height > 0 ? 0.5 : 0;
+  const maximumX = Math.max(minimumX, map.width - 0.5);
+  const maximumZ = Math.max(minimumZ, map.height - 0.5);
+  return {
+    x: Math.max(minimumX, Math.min(maximumX, Number(x))),
+    z: Math.max(minimumZ, Math.min(maximumZ, Number(z))),
+  };
+}
+
+/**
+ * Fireball motion is authoritative, so a single pose, velocity, and age
+ * sample reconstructs the launch point without consulting ownership.
+ * @param {{width:number,height:number}} map
+ * @param {{x:number,z:number,vx:number,vz:number,age:number}} projectile
+ */
+export function inferProjectileOrigin(map, projectile) {
+  const age = Math.max(0, Number(projectile.age) || 0);
+  const rawX = Number(projectile.x) - Number(projectile.vx) * age;
+  const rawZ = Number(projectile.z) - Number(projectile.vz) * age;
+  const clamped = clampInvestigationAnchor(map, rawX, rawZ);
+  return {
+    ...clamped,
+    rawX,
+    rawZ,
+    clamped: clamped.x !== rawX || clamped.z !== rawZ,
+  };
+}
+
+/** @param {{effectId?:number,projectileId?:number}} left @param {{effectId?:number,projectileId?:number}} right */
+function sameEffect(left, right) {
+  const leftEffect = Number(left.effectId) >>> 0;
+  const rightEffect = Number(right.effectId) >>> 0;
+  if (leftEffect > 0 || rightEffect > 0) return leftEffect > 0 && leftEffect === rightEffect;
+  const leftProjectile = Number(left.projectileId) >>> 0;
+  const rightProjectile = Number(right.projectileId) >>> 0;
+  return leftProjectile > 0 && leftProjectile === rightProjectile;
+}
+
+/**
+ * Pure clue arbitration used by every v9 sensing path. Later observations win
+ * within a priority; same-tick freshness is the unsigned effect/projectile ID
+ * tuple. A projectile's later samples and explosion are recognized first so
+ * they update diagnostics without restarting movement.
+ * @param {{priority?:number,observationTick?:number,effectId?:number,projectileId?:number}} current
+ * @param {{priority?:number,observationTick?:number,effectId?:number,projectileId?:number}} incoming
+ */
+export function arbitrateInvestigationClue(current, incoming) {
+  if (sameEffect(current, incoming)) {
+    return { decision: INVESTIGATION_DECISION.deduplicate, reason: "same-effect" };
+  }
+  const currentPriority = Math.max(0, Number(current.priority) || 0);
+  const incomingPriority = Math.max(0, Number(incoming.priority) || 0);
+  if (incomingPriority > currentPriority) {
+    return { decision: INVESTIGATION_DECISION.accept, reason: "higher-priority" };
+  }
+  if (incomingPriority < currentPriority) {
+    return { decision: INVESTIGATION_DECISION.priorityReject, reason: "lower-priority" };
+  }
+  const currentTick = Number(current.observationTick) >>> 0;
+  const incomingTick = Number(incoming.observationTick) >>> 0;
+  if (incomingTick > currentTick) {
+    return { decision: INVESTIGATION_DECISION.accept, reason: "newer" };
+  }
+  if (incomingTick < currentTick) {
+    return { decision: INVESTIGATION_DECISION.staleReject, reason: "older" };
+  }
+  const currentEffect = Number(current.effectId) >>> 0;
+  const incomingEffect = Number(incoming.effectId) >>> 0;
+  if (incomingEffect > currentEffect) {
+    return { decision: INVESTIGATION_DECISION.accept, reason: "same-tick-effect" };
+  }
+  if (incomingEffect < currentEffect) {
+    return { decision: INVESTIGATION_DECISION.staleReject, reason: "same-tick-effect" };
+  }
+  const currentProjectile = Number(current.projectileId) >>> 0;
+  const incomingProjectile = Number(incoming.projectileId) >>> 0;
+  if (incomingProjectile > currentProjectile) {
+    return { decision: INVESTIGATION_DECISION.accept, reason: "same-tick-projectile" };
+  }
+  return { decision: INVESTIGATION_DECISION.staleReject, reason: "not-newer" };
+}
+
+/**
+ * Geometry-free Fireball hearing. A zero team is neutral; allied and neutral
+ * sources are ineligible before the inclusive distance boundary is applied.
+ * @param {number} listenerX
+ * @param {number} listenerZ
+ * @param {number} listenerTeam
+ * @param {number} impactX
+ * @param {number} impactZ
+ * @param {number} sourceTeam
+ * @param {number} [radius]
+ */
+export function fireballHearingCheck(
+  listenerX,
+  listenerZ,
+  listenerTeam,
+  impactX,
+  impactZ,
+  sourceTeam,
+  radius = PERCEPTIVE_WIZARD.fireballHearingMeters,
+) {
+  const dx = Number(listenerX) - Number(impactX);
+  const dz = Number(listenerZ) - Number(impactZ);
+  const distanceSquared = dx * dx + dz * dz;
+  const maximum = Math.max(0, Number(radius) || 0);
+  const hostile = Number(sourceTeam) > 0 && Number(sourceTeam) !== Number(listenerTeam);
+  const inRange = distanceSquared <= maximum * maximum + 1e-9;
+  return {
+    heard: hostile && inRange,
+    hostile,
+    inRange,
+    distance: Math.sqrt(distanceSquared),
+  };
+}
 
 export const HUNT_PHASE = Object.freeze({
   none: 0,

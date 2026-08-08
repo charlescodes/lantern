@@ -200,6 +200,21 @@ export class EnemyWizardPool {
     this.stimulusX = new Float32Array(capacity);
     this.stimulusZ = new Float32Array(capacity);
     this.stimulusTick = new Uint32Array(capacity);
+    this.investigationSource = new Uint8Array(capacity);
+    this.investigationPriority = new Uint8Array(capacity);
+    this.investigationAnchorX = new Float32Array(capacity);
+    this.investigationAnchorZ = new Float32Array(capacity);
+    this.investigationObservationTick = new Uint32Array(capacity);
+    this.investigationAcceptedTick = new Uint32Array(capacity);
+    this.investigationEffectId = new Uint32Array(capacity);
+    this.investigationProjectileId = new Uint32Array(capacity);
+    this.investigationProjectileX = new Float32Array(capacity);
+    this.investigationProjectileZ = new Float32Array(capacity);
+    this.investigationProjectileVx = new Float32Array(capacity);
+    this.investigationProjectileVz = new Float32Array(capacity);
+    this.investigationProjectileAge = new Float32Array(capacity);
+    this.investigationOriginX = new Float32Array(capacity);
+    this.investigationOriginZ = new Float32Array(capacity);
     this.navigationSlot = new Int16Array(capacity);
   }
 
@@ -322,6 +337,21 @@ export class EnemyWizardPool {
     this.stimulusX[index] = Number.NaN;
     this.stimulusZ[index] = Number.NaN;
     this.stimulusTick[index] = 0;
+    this.investigationSource[index] = 0;
+    this.investigationPriority[index] = 0;
+    this.investigationAnchorX[index] = Number.NaN;
+    this.investigationAnchorZ[index] = Number.NaN;
+    this.investigationObservationTick[index] = 0;
+    this.investigationAcceptedTick[index] = 0;
+    this.investigationEffectId[index] = 0;
+    this.investigationProjectileId[index] = 0;
+    this.investigationProjectileX[index] = Number.NaN;
+    this.investigationProjectileZ[index] = Number.NaN;
+    this.investigationProjectileVx[index] = 0;
+    this.investigationProjectileVz[index] = 0;
+    this.investigationProjectileAge[index] = 0;
+    this.investigationOriginX[index] = Number.NaN;
+    this.investigationOriginZ[index] = Number.NaN;
     this.navigationSlot[index] = -1;
     this.activeCount += 1;
     return id;
@@ -428,6 +458,21 @@ export class EnemyWizardPool {
         this.stimulusX,
         this.stimulusZ,
         this.stimulusTick,
+        this.investigationSource,
+        this.investigationPriority,
+        this.investigationAnchorX,
+        this.investigationAnchorZ,
+        this.investigationObservationTick,
+        this.investigationAcceptedTick,
+        this.investigationEffectId,
+        this.investigationProjectileId,
+        this.investigationProjectileX,
+        this.investigationProjectileZ,
+        this.investigationProjectileVx,
+        this.investigationProjectileVz,
+        this.investigationProjectileAge,
+        this.investigationOriginX,
+        this.investigationOriginZ,
         this.navigationSlot,
       ]) {
         component[index] = component[last];

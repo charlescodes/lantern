@@ -199,6 +199,91 @@ test("AI View exposes perception geometry, personal memory, and bounded navigati
   assert.match(mob.labelLines.join("\n"), /search left 240t · goal timeout 420t/);
 });
 
+test("AI View exposes v9 trajectory and sound investigation diagnostics read-only", () => {
+  const value = snapshot();
+  value.enemyAiProfile = "investigative-wizard-v1";
+  value.enemies = [enemy(9, {
+    aiProfile: "investigative-wizard-v1",
+    behaviorState: "investigating",
+    perceptionState: "investigating",
+    knowledgeSource: "projectile",
+    currentVisibility: false,
+    visibilitySampleTick: 41,
+    perceptionLane: 1,
+    exposure: { progressTicks: 0, thresholdTicks: 15 },
+    facing: { x: 1, z: 0 },
+    candidateTarget: null,
+    confirmedTarget: null,
+    guard: { point: { x: 19.5, z: 17.5 }, returnStartTick: null },
+    lastSeen: null,
+    stimulus: { position: { x: 4.5, z: 5.5 }, tick: 41 },
+    investigation: {
+      active: true,
+      source: "projectile",
+      priority: 4,
+      anchor: { x: 4.5, z: 5.5 },
+      observationTick: 41,
+      acceptedTick: 36,
+      effectId: 301,
+      projectileId: 44,
+      projectileObservation: {
+        position: { x: 8.5, z: 5.5 },
+        velocity: { x: 9, z: 0 },
+        age: 0.4,
+      },
+      inferredOrigin: { x: 4.5, z: 5.5 },
+    },
+    hunt: {
+      phase: "travel",
+      anchor: { x: 4.5, z: 5.5 },
+      travelTimeoutTick: 756,
+      searchTicksRemaining: null,
+      searchGoal: null,
+      sequence: 0,
+    },
+  })];
+  const before = structuredClone(value);
+  let frame = buildAiViewFrame(value, 1, {
+    mode: AI_VIEW_MODE.selected,
+    selectedKey: aiMobKey(value.enemies[0]),
+  });
+  let mob = frame.mobs[0];
+  assert.deepEqual(mob.projectileObservationPoint, { x: 8.5, z: 5.5 });
+  assert.deepEqual(mob.inferredOriginPoint, { x: 4.5, z: 5.5 });
+  assert.deepEqual(mob.reverseTrajectory, {
+    start: { x: 8.5, z: 5.5 },
+    end: { x: 4.5, z: 5.5 },
+  });
+  assert.equal(mob.hearingCircle.radius, 16);
+  assert.equal(mob.soundImpactPoint, null);
+  assert.match(
+    mob.labelLines.join("\n"),
+    /investigate projectile · priority 4 · observed 41t · accepted 36t · effect #301 · projectile #44/,
+  );
+  assert.deepEqual(value, before);
+
+  value.enemies[0].investigation = {
+    active: true,
+    source: "sound",
+    priority: 1,
+    anchor: { x: 12.5, z: 6.5 },
+    observationTick: 50,
+    acceptedTick: 50,
+    effectId: 302,
+    projectileId: 45,
+    projectileObservation: null,
+    inferredOrigin: null,
+  };
+  frame = buildAiViewFrame(value, 1, {
+    mode: AI_VIEW_MODE.selected,
+    selectedKey: aiMobKey(value.enemies[0]),
+  });
+  mob = frame.mobs[0];
+  assert.deepEqual(mob.soundImpactPoint, { x: 12.5, z: 6.5 });
+  assert.equal(mob.projectileObservationPoint, null);
+  assert.equal(mob.reverseTrajectory, null);
+});
+
 test("AI View panel wording cannot be mistaken for an AI behavior toggle", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   assert.match(html, /<h2>AI View<\/h2>/);

@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Working draft |
 | Authority | Non-authoritative soft specification |
-| Last reviewed | 2026-08-04 |
+| Last reviewed | 2026-08-07 |
 | Scheduling | No dates, release numbers, or commitments |
 | Parent direction | [Emergent co-op simulation north star](./emergent-coop-simulation.md) |
 
@@ -43,13 +43,13 @@ This roadmap is a sequence of experiments, not a backlog that must be completed 
 
 ### 3. Footwear, surfaces, sound, and investigation
 
-**Playable result:** Boots and bare feet make measurably different sounds on tile and rug; a hearing-capable guard investigates an audible origin without gaining perfect actor identity.
+**Playable result:** Boots and bare feet make measurably different sounds on tile and rug; a hearing-capable guard investigates an audible origin without gaining perfect actor identity. A small group may use stable search temperaments so their legal waypoint order and scan rhythm differ without becoming nondeterministic or clairvoyant.
 
-**Seams tested:** surface registry/layer, equipment state, bounded noise facts, hearing sensor, observation uncertainty, personal memory, investigation behavior.
+**Seams tested:** surface registry/layer, equipment state, bounded noise facts, hearing sensor, observation uncertainty, personal memory, investigation behavior, actor-local temperament lanes, and AI diagnostics.
 
-**Keep deliberately narrow:** two footwear states, two surfaces, one sound type, one hearing profile, and no voice/squad communication.
+**Keep deliberately narrow:** two footwear states, two surfaces, one sound type, one hearing profile, and a few bounded search biases. No per-tick personality RNG, hidden-player sampling, voice, or squad communication.
 
-**Acceptance seed:** A fixed movement trace produces deterministic noise events. The guard investigates boots-on-tile inside its hearing conditions but ignores or loses a barefoot-on-rug trace below threshold.
+**Acceptance seed:** A fixed movement trace produces deterministic noise events. Guards investigate boots-on-tile inside their hearing conditions but ignore or lose a barefoot-on-rug trace below threshold. Given the same clue, different stable guard identities may choose different legal search order or linger timing; replay reproduces each path exactly and all guards still respect the shared timeout and return rules.
 
 ### 4. First elemental contact: water, metal, and lightning
 

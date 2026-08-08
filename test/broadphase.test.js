@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   ACTOR_TEAM,
   COMBAT,
+  ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
   PROJECTILE_OWNER_KIND,
@@ -128,6 +129,95 @@ test("broadphase and brute-force oracle produce exact collision, contact, and pr
       `broadphase diverged at tick ${tick + 1}`,
     );
   }
+});
+
+function investigativeComparisonSimulation(useBroadphase) {
+  const map = borderedMap(32, 18, { x: 3.5, z: 3.5 });
+  for (let z = 1; z < map.height - 1; z += 1) map.set(12, z, 1);
+  const simulation = new Simulation({
+    scenario: new ArenaScenario(map),
+    seed: 0x0900_b80a,
+    enemyAiProfile: ENEMY_AI_PROFILE_INVESTIGATIVE,
+    particleBurstCount: 0,
+    useBroadphase,
+  });
+  for (let index = 0; index < 4; index += 1) {
+    assert.ok(simulation.enemies.spawn({
+      spawnSequence: index + 1,
+      spawnTick: 0,
+      x: 17.5 + index * 2,
+      z: 5.5 + index * 2,
+      radius: ENEMY_WIZARD.radius,
+      massKg: ENEMY_WIZARD.massKg,
+      maximumHealth: COMBAT.maximumHealth,
+      shotReadyTick: 0xffff_ffff,
+      facingX: index % 2 === 0 ? -1 : 1,
+      facingZ: 0,
+      guardX: 17.5 + index * 2,
+      guardZ: 5.5 + index * 2,
+      guardBaseFacingX: index % 2 === 0 ? -1 : 1,
+      guardBaseFacingZ: 0,
+      perceptionLane: (index + 1) % 5,
+    }) > 0);
+  }
+  return simulation;
+}
+
+function spawnComparisonFireball(simulation, value) {
+  const spell = simulation.spells.get(FIREBALL_SPELL_ID);
+  const definition = spell.definitions.get(spell.currentRevision);
+  assert.ok(simulation.projectiles.spawn({
+    ...value,
+    lifetime: definition.projectile.lifetime,
+    radius: definition.projectile.radius,
+    ownerId: simulation.player.id,
+    ownerKind: PROJECTILE_OWNER_KIND.player,
+    ownerTeam: ACTOR_TEAM.player,
+    spellCode: FIREBALL_SPELL_CODE,
+    definitionRevision: spell.currentRevision,
+    effectSeed: value.effectId,
+  }) > 0);
+}
+
+test("v9 broadphase matches brute force for visual observations, dodges, and explosion hearing", () => {
+  const broadphase = investigativeComparisonSimulation(true);
+  const brute = investigativeComparisonSimulation(false);
+  let effectId = 1;
+  for (let tick = 0; tick < 240; tick += 1) {
+    if (tick % 30 === 0) {
+      const visible = {
+        x: 15.5 + tick % 3,
+        z: 5.5 + tick % 4,
+        vx: 3,
+        vz: 0,
+        effectId,
+      };
+      spawnComparisonFireball(broadphase, visible);
+      spawnComparisonFireball(brute, visible);
+      effectId += 1;
+    }
+    if (tick % 45 === 10) {
+      const auditory = {
+        x: 11.8,
+        z: 7.5 + tick % 5,
+        vx: 9,
+        vz: 0,
+        effectId,
+      };
+      spawnComparisonFireball(broadphase, auditory);
+      spawnComparisonFireball(brute, auditory);
+      effectId += 1;
+    }
+    broadphase.tick(null);
+    brute.tick(null);
+    assert.deepEqual(
+      comparableSnapshot(broadphase),
+      comparableSnapshot(brute),
+      `v9 broadphase diverged at tick ${tick + 1}`,
+    );
+  }
+  assert.ok(broadphase.investigationEventMetrics.projectileObservations > 0);
+  assert.ok(broadphase.investigationEventMetrics.heardExplosions > 0);
 });
 
 test("swept projectile candidates retain the historical first enemy pool hit", () => {

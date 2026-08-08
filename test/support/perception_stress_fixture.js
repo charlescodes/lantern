@@ -3,7 +3,7 @@
 import {
   ACTOR_TEAM,
   COMBAT,
-  ENEMY_AI_PROFILE_PERCEPTIVE,
+  ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_WIZARD,
   PERCEPTIVE_WIZARD,
   PROJECTILE_OWNER_KIND,
@@ -16,6 +16,7 @@ import { GridMap } from "../../src/sim/grid_map.js";
 import {
   deterministicGuardHeading,
   HUNT_PHASE,
+  INVESTIGATION_PRIORITY,
   KNOWLEDGE_SOURCE,
   PERCEPTION_STATE,
   TARGET_KIND,
@@ -125,6 +126,21 @@ function clearPerceptionState(pool, index) {
   pool.stimulusX[index] = Number.NaN;
   pool.stimulusZ[index] = Number.NaN;
   pool.stimulusTick[index] = 0;
+  pool.investigationSource[index] = KNOWLEDGE_SOURCE.none;
+  pool.investigationPriority[index] = INVESTIGATION_PRIORITY.none;
+  pool.investigationAnchorX[index] = Number.NaN;
+  pool.investigationAnchorZ[index] = Number.NaN;
+  pool.investigationObservationTick[index] = 0;
+  pool.investigationAcceptedTick[index] = 0;
+  pool.investigationEffectId[index] = 0;
+  pool.investigationProjectileId[index] = 0;
+  pool.investigationProjectileX[index] = Number.NaN;
+  pool.investigationProjectileZ[index] = Number.NaN;
+  pool.investigationProjectileVx[index] = 0;
+  pool.investigationProjectileVz[index] = 0;
+  pool.investigationProjectileAge[index] = 0;
+  pool.investigationOriginX[index] = Number.NaN;
+  pool.investigationOriginZ[index] = Number.NaN;
   pool.guardReturnStartTick[index] = 0;
   pool.guardUnreachableStartTick[index] = 0;
   pool.navigationSlot[index] = -1;
@@ -203,6 +219,14 @@ export function configurePerceptionStressFixture(simulation) {
       pool.lastSeenTick[index] = tick;
       pool.huntAnchorX[index] = pool.lastSeenX[index];
       pool.huntAnchorZ[index] = pool.lastSeenZ[index];
+      if (simulation.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
+        pool.investigationSource[index] = KNOWLEDGE_SOURCE.visual;
+        pool.investigationPriority[index] = INVESTIGATION_PRIORITY.lastSeen;
+        pool.investigationAnchorX[index] = pool.lastSeenX[index];
+        pool.investigationAnchorZ[index] = pool.lastSeenZ[index];
+        pool.investigationObservationTick[index] = tick;
+        pool.investigationAcceptedTick[index] = tick;
+      }
       if (group % 2 === 0) {
         pool.huntPhase[index] = HUNT_PHASE.search;
         pool.searchStartTick[index] = tick;
@@ -227,6 +251,14 @@ export function configurePerceptionStressFixture(simulation) {
       pool.lastSeenX[index] = position.x;
       pool.lastSeenZ[index] = position.z;
       pool.lastSeenTick[index] = tick;
+      if (simulation.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
+        pool.investigationSource[index] = KNOWLEDGE_SOURCE.visual;
+        pool.investigationPriority[index] = INVESTIGATION_PRIORITY.lastSeen;
+        pool.investigationAnchorX[index] = position.x;
+        pool.investigationAnchorZ[index] = position.z;
+        pool.investigationObservationTick[index] = tick;
+        pool.investigationAcceptedTick[index] = tick;
+      }
       pool.guardX[index] = position.x + (index % 2 === 0 ? 2 : -2);
       pool.guardReturnStartTick[index] = tick;
       pool.guardUnreachableStartTick[index] = 0;
@@ -240,11 +272,14 @@ export function configurePerceptionStressFixture(simulation) {
   return simulation;
 }
 
-export function createPerceptionStressSimulation(seed = 0x0800_5000) {
+export function createPerceptionStressSimulation(
+  seed = 0x0900_5000,
+  enemyAiProfile = ENEMY_AI_PROFILE_INVESTIGATIVE,
+) {
   const simulation = new Simulation({
     scenario: new ArenaScenario(borderedStressMap()),
     seed,
-    enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+    enemyAiProfile,
     enemyCapacity: ENEMY_WIZARD.capacity,
     encounterMaximumAlive: ENEMY_WIZARD.encounterMaximumAlive,
     particleBurstCount: 0,

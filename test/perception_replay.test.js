@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   ENEMY_AI_PROFILE_BASIC,
+  ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
@@ -35,12 +36,12 @@ function withoutBroadphase(snapshot) {
   return value;
 }
 
-test("schema-v8 recording stores exact scaling metadata and replays perceptive state", () => {
+test("schema-v9 recording stores investigative profile metadata and replays exactly", () => {
   const source = new Simulation({ seed: 0x0800_f17e, particleBurstCount: 0 });
   runFixture(source);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 8);
-  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
+  assert.equal(recording.schemaVersion, 9);
+  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
   assert.equal(
     recording.configuration.encounterMaximumAlive,
@@ -50,6 +51,20 @@ test("schema-v8 recording stores exact scaling metadata and replays perceptive s
   const replay = Simulation.replay(recording);
   assert.equal(replay.enemies.capacity, 64);
   assert.equal(replay.encounterMaximumAlive, 4);
+  assert.deepEqual(withoutBroadphase(replay.snapshot()), withoutBroadphase(source.snapshot()));
+});
+
+test("schema-v8 recording selects the frozen perceptive profile", () => {
+  const source = new Simulation({
+    seed: 0x0800_f17e,
+    particleBurstCount: 0,
+    enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+  });
+  runFixture(source);
+  const recording = source.exportCommandLog();
+  recording.schemaVersion = 8;
+  const replay = Simulation.replay(recording);
+  assert.equal(replay.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
   assert.deepEqual(withoutBroadphase(replay.snapshot()), withoutBroadphase(source.snapshot()));
 });
 
@@ -83,10 +98,14 @@ test("schema-v7 and v6 replay construct historical four-entry pools and frozen p
 });
 
 test("schema-v8 rejects compatibility metadata or profiles that would blur replay boundaries", () => {
-  const source = new Simulation({ particleBurstCount: 0 });
+  const source = new Simulation({
+    particleBurstCount: 0,
+    enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+  });
   source.tick(null);
   const recording = source.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 8);
+  recording.schemaVersion = 8;
+  assert.equal(SCHEMA_VERSION, 9);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),
@@ -107,6 +126,197 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
     }),
     /invalid or missing gameplay profiles/,
   );
+});
+
+test("schema-v9 rejects perceptive profile metadata at the new boundary", () => {
+  const source = new Simulation({ particleBurstCount: 0 });
+  source.tick(null);
+  const recording = source.exportCommandLog();
+  assert.equal(recording.schemaVersion, 9);
+  assert.throws(
+    () => Simulation.replay({
+      ...structuredClone(recording),
+      configuration: {
+        ...structuredClone(recording.configuration),
+        enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+      },
+    }),
+    /invalid or missing gameplay profiles/,
+  );
+});
+
+const SCHEMA_V8_GOLDEN_AF58A3D = Object.freeze([
+  {
+    tick: 1,
+    mapRevision: 1,
+    player: [
+      3.5059486604731496,
+      18.498600315182788,
+      0.3569196283889779,
+      -0.08398108903270067,
+      100,
+    ],
+    enemy: [
+      20.5, 17.5, 0, 0, "unaware", "unaware", "none", false, 1, 0,
+      null, null, null, "none", null, null, 0,
+    ],
+    counts: [1, 1, 0, 1, 0],
+    lastPerception: null,
+  },
+  {
+    tick: 180,
+    mapRevision: 1,
+    player: [
+      12.611693065580791,
+      16.300001,
+      1.0590829951993141,
+      0.000823004667989017,
+      100,
+    ],
+    enemy: [
+      21.25232696533203,
+      17.201330184936523,
+      0.087493896484375,
+      -2.5537447929382324,
+      "hunting",
+      "hunting",
+      "damage",
+      false,
+      176,
+      0,
+      null,
+      null,
+      null,
+      "search",
+      20.200077056884766,
+      17.48967170715332,
+      0,
+    ],
+    counts: [1, 0, 2, 2, 2],
+    lastPerception: "search",
+  },
+  {
+    tick: 240,
+    mapRevision: 3,
+    player: [
+      13.505280179602615,
+      14.750529775569508,
+      0.6111809052137946,
+      -4.457627081430703,
+      100,
+    ],
+    enemy: [
+      18.271549224853516,
+      16.60692024230957,
+      -4.169098854064941,
+      -0.5959357619285583,
+      "hunting",
+      "hunting",
+      "visual",
+      false,
+      236,
+      15,
+      13.272557258605957,
+      16.128053665161133,
+      221,
+      "travel",
+      13.272557258605957,
+      16.128053665161133,
+      1,
+    ],
+    counts: [1, 1, 3, 3, 5],
+    lastPerception: "loss",
+  },
+  {
+    tick: 360,
+    mapRevision: 3,
+    player: [9.300001, 14.699630439407173, 0, -0.0442272711392039, 100],
+    enemy: [
+      13.77044677734375,
+      17.600303649902344,
+      4.463354110717773,
+      -0.6123905181884766,
+      "hunting",
+      "hunting",
+      "visual",
+      false,
+      356,
+      15,
+      13.272557258605957,
+      16.128053665161133,
+      221,
+      "search",
+      13.272557258605957,
+      16.128053665161133,
+      1,
+    ],
+    counts: [1, 0, 5, 3, 6],
+    lastPerception: "search",
+  },
+]);
+
+function schemaV8GoldenPoint(simulation) {
+  const snapshot = simulation.snapshot();
+  const enemy = snapshot.enemies[0];
+  return {
+    tick: simulation.tickCount,
+    mapRevision: simulation.mapRevision,
+    player: [
+      simulation.player.x,
+      simulation.player.z,
+      simulation.player.vx,
+      simulation.player.vz,
+      simulation.player.health,
+    ],
+    enemy: enemy
+      ? [
+        enemy.x,
+        enemy.z,
+        enemy.vx,
+        enemy.vz,
+        enemy.behaviorState,
+        enemy.perceptionState,
+        enemy.knowledgeSource,
+        enemy.currentVisibility,
+        enemy.visibilitySampleTick,
+        enemy.exposure.progressTicks,
+        enemy.lastSeen?.position.x ?? null,
+        enemy.lastSeen?.position.z ?? null,
+        enemy.lastSeen?.tick ?? null,
+        enemy.hunt.phase,
+        enemy.hunt.anchor?.x ?? null,
+        enemy.hunt.anchor?.z ?? null,
+        enemy.castSequence,
+      ]
+      : null,
+    counts: [
+      simulation.enemies.activeCount,
+      simulation.projectiles.activeCount,
+      simulation.impactEvents.length,
+      simulation.combatEvents.length,
+      simulation.perceptionEvents.length,
+    ],
+    lastPerception: snapshot.recentPerceptionEvents.at(-1)?.type ?? null,
+  };
+}
+
+test("schema-v8 replay retains the af58a3d perceptive golden trace", () => {
+  const source = new Simulation({
+    seed: 0x0800_f17e,
+    particleBurstCount: 0,
+    enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+  });
+  runFixture(source);
+  const recording = source.exportCommandLog();
+  recording.schemaVersion = 8;
+  const actual = SCHEMA_V8_GOLDEN_AF58A3D.map(({ tick }) => {
+    const prefix = structuredClone(recording);
+    prefix.commands = prefix.commands.slice(0, tick);
+    const replay = Simulation.replay(prefix);
+    assert.equal(replay.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
+    return schemaV8GoldenPoint(replay);
+  });
+  assert.deepEqual(actual, SCHEMA_V8_GOLDEN_AF58A3D);
 });
 
 const SCHEMA_V7_GOLDEN_2727C2E = Object.freeze([

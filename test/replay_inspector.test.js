@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  ENEMY_AI_PROFILE_PERCEPTIVE,
+  ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_NONE,
   ENEMY_WIZARD,
   GAMEPLAY_PROFILE_PRE_COMBAT,
@@ -80,7 +80,7 @@ test("contact-heavy command recording replays to identical current-build state",
 
   const recording = simulation.exportCommandLog();
   const replayed = Simulation.replay(recording);
-  assert.equal(recording.schemaVersion, 8);
+  assert.equal(recording.schemaVersion, 9);
   assert.ok(contactTicks >= 120, `expected sustained contact, received ${contactTicks} ticks`);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
@@ -129,7 +129,7 @@ test("snapshots and exported recordings cannot mutate simulation history", () =>
   assert.equal(simulation.commandLog.toArray()[0].command.move.x, 5);
 });
 
-test("snapshot, runtime, and recording schema are v8 while scenarios remain v3", () => {
+test("snapshot, runtime, and recording schema are v9 while scenarios remain v3", () => {
   const simulation = new Simulation({
     particleBounce: false,
     particleWallCollision: false,
@@ -137,12 +137,12 @@ test("snapshot, runtime, and recording schema are v8 while scenarios remain v3",
   const runtime = new FixedStepRuntime({ simulation });
   const snapshot = simulation.snapshot();
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 8);
-  assert.equal(snapshot.schemaVersion, 8);
-  assert.equal(runtime.metrics().schemaVersion, 8);
+  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(snapshot.schemaVersion, 9);
+  assert.equal(runtime.metrics().schemaVersion, 9);
   assert.deepEqual(Object.keys(runtime.metrics().snapshotMs), ["p50", "p95", "p99"]);
   assert.ok(runtime.metrics().snapshotMs.p99 >= 0);
-  assert.equal(recording.schemaVersion, 8);
+  assert.equal(recording.schemaVersion, 9);
   assert.equal(recording.configuration.spells.length, 1);
   assert.equal(recording.configuration.spells[0].id, "fireball");
   assert.equal(recording.configuration.spells[0].currentRevision, 1);
@@ -150,7 +150,7 @@ test("snapshot, runtime, and recording schema are v8 while scenarios remain v3",
   assert.equal(snapshot.scenarioVersion, 3);
   assert.equal(recording.initialScenario.version, 3);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
-  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
+  assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
   assert.equal(recording.configuration.encounterMaximumAlive, ENEMY_WIZARD.encounterMaximumAlive);
   assert.equal(recording.configuration.particleProfile, PARTICLE_PROFILE_M0_2_5);

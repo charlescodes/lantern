@@ -21,6 +21,7 @@ const COLORS = Object.freeze({
   engaged: "#6bc8a8",
   hunting: "#f39b58",
   returning: "#75a9df",
+  investigating: "#42d6e8",
   unknown: "#d7ddd8",
   goal: "#62d9d0",
   desired: "#e6eee9",
@@ -33,6 +34,11 @@ const COLORS = Object.freeze({
   facing: "#fff3c4",
   memory: "#ff9e6f",
   impact: "#ff6f9f",
+  sound: "#f0a6ff",
+  hearing: "#c989ff",
+  projectileObservation: "#66e4ff",
+  inferredOrigin: "#ffcf6a",
+  reverseTrajectory: "#8ddff0",
   search: "#70d7cf",
   guard: "#84a9ff",
 });
@@ -299,6 +305,13 @@ export class AiView {
         context.stroke();
       }
       this.#drawPerception(mob, anchor);
+      if (mob.hearingCircle) {
+        this.#drawWorldCircle(
+          mob.hearingCircle,
+          COLORS.hearing,
+          `HEARING ${mob.hearingCircle.radius}m`,
+        );
+      }
       if (mob.movementGoal) {
         this.#drawArrow(
           anchor,
@@ -338,6 +351,34 @@ export class AiView {
       }
       if (mob.stimulusPoint) {
         this.#drawWorldMarker(mob.stimulusPoint, COLORS.impact, "!");
+      }
+      if (mob.soundImpactPoint) {
+        this.#drawWorldMarker(mob.soundImpactPoint, COLORS.sound, "♪");
+      }
+      if (mob.reverseTrajectory) {
+        this.#drawLine(
+          this.options.camera.worldToViewport(
+            mob.reverseTrajectory.start.x,
+            mob.reverseTrajectory.start.z,
+          ),
+          this.options.camera.worldToViewport(
+            mob.reverseTrajectory.end.x,
+            mob.reverseTrajectory.end.z,
+          ),
+          COLORS.reverseTrajectory,
+          true,
+          0.9,
+        );
+      }
+      if (mob.projectileObservationPoint) {
+        this.#drawWorldMarker(
+          mob.projectileObservationPoint,
+          COLORS.projectileObservation,
+          "P",
+        );
+      }
+      if (mob.inferredOriginPoint) {
+        this.#drawWorldMarker(mob.inferredOriginPoint, COLORS.inferredOrigin, "O");
       }
       if (mob.searchPoint) {
         this.#drawWorldMarker(mob.searchPoint, COLORS.search, "S");
@@ -456,6 +497,36 @@ export class AiView {
     context.fillStyle = color;
     context.font = "bold 9px ui-monospace, SFMono-Regular, Consolas, monospace";
     context.fillText(label, viewport.x - 3, viewport.y + 3);
+  }
+
+  /** @param {{x:number,z:number,radius:number}} circle @param {string} color @param {string} label */
+  #drawWorldCircle(circle, color, label) {
+    const context = this.context;
+    context.beginPath();
+    const points = 72;
+    for (let index = 0; index <= points; index += 1) {
+      const angle = index / points * Math.PI * 2;
+      const point = this.options.camera.worldToViewport(
+        circle.x + Math.cos(angle) * circle.radius,
+        circle.z + Math.sin(angle) * circle.radius,
+      );
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    }
+    context.setLineDash([3, 5]);
+    context.strokeStyle = color;
+    context.globalAlpha = 0.48;
+    context.lineWidth = 1;
+    context.stroke();
+    context.setLineDash([]);
+    context.globalAlpha = 1;
+    const labelPoint = this.options.camera.worldToViewport(
+      circle.x + circle.radius,
+      circle.z,
+    );
+    context.fillStyle = color;
+    context.font = "9px ui-monospace, SFMono-Regular, Consolas, monospace";
+    context.fillText(label, labelPoint.x + 5, labelPoint.y - 4);
   }
 
   /** @param {Array<{x:number,z:number,radius:number,label:string}>} rings */

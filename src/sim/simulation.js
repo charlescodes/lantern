@@ -7,6 +7,7 @@ import {
   DEFAULT_PARTICLE_PROFILE,
   DYNAMIC_PHYSICS,
   ENEMY_AI_PROFILE_BASIC,
+  ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_NONE,
   ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_AI_PROFILE_TACTICAL,
@@ -75,11 +76,16 @@ import {
   RockPool,
 } from "./pools.js";
 import {
+  arbitrateInvestigationClue,
   deterministicGuardHeading,
   deterministicGuardSweepPhase,
+  fireballHearingCheck,
   guardSweepFacing,
   HUNT_PHASE,
   HUNT_PHASE_NAMES,
+  inferProjectileOrigin,
+  INVESTIGATION_DECISION,
+  INVESTIGATION_PRIORITY,
   KNOWLEDGE_SOURCE,
   KNOWLEDGE_SOURCE_NAMES,
   PERCEPTION_STATE,
@@ -160,6 +166,12 @@ const SPAWN_OFFSETS = Object.freeze([
 const ROCK_NAME_BY_CODE = new Map(
   Object.entries(ROCK_ARCHETYPES).map(([name, definition]) => [definition.code, name]),
 );
+
+/** @param {string} profile */
+function usesPerceptionProfile(profile) {
+  return profile === ENEMY_AI_PROFILE_PERCEPTIVE
+    || profile === ENEMY_AI_PROFILE_INVESTIGATIVE;
+}
 
 /** @param {unknown} value */
 function finiteNumber(value) {
@@ -450,12 +462,13 @@ export class Simulation {
     }
     this.enemyAiProfile = options.enemyAiProfile
       ?? (this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
-        ? ENEMY_AI_PROFILE_PERCEPTIVE
+        ? ENEMY_AI_PROFILE_INVESTIGATIVE
         : ENEMY_AI_PROFILE_NONE);
     if (
       this.enemyAiProfile !== ENEMY_AI_PROFILE_BASIC
       && this.enemyAiProfile !== ENEMY_AI_PROFILE_TACTICAL
       && this.enemyAiProfile !== ENEMY_AI_PROFILE_PERCEPTIVE
+      && this.enemyAiProfile !== ENEMY_AI_PROFILE_INVESTIGATIVE
       && this.enemyAiProfile !== ENEMY_AI_PROFILE_NONE
     ) {
       throw new RangeError(`Unsupported enemy AI profile: ${this.enemyAiProfile}`);
@@ -467,6 +480,7 @@ export class Simulation {
           this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
           || this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
           || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+          || this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
         )
       ) || (
         this.gameplayProfile === GAMEPLAY_PROFILE_PRE_COMBAT
@@ -482,7 +496,7 @@ export class Simulation {
     if (this.scenario.entities.filter((entity) => entity.kind === "rock").length > rockCapacity) {
       throw new RangeError("Scenario has more rocks than the configured rock pool");
     }
-    const defaultEnemyCapacity = this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+    const defaultEnemyCapacity = usesPerceptionProfile(this.enemyAiProfile)
       ? ENEMY_WIZARD.capacity
       : ENEMY_WIZARD.legacyCapacity;
     const enemyCapacity = options.enemyCapacity ?? defaultEnemyCapacity;
@@ -554,6 +568,13 @@ export class Simulation {
     this.combatEventDropped = 0;
     this.perceptionEvents = new RingBuffer(PERCEPTIVE_WIZARD.perceptionEventCapacity);
     this.perceptionEventDropped = 0;
+    this.investigationEventMetrics = {
+      projectileObservations: 0,
+      heardExplosions: 0,
+      acceptedRedirects: 0,
+      deduplicated: 0,
+      priorityRejected: 0,
+    };
     this.commandLog = new RingBuffer(HISTORY.commands);
     this.commandLogDropped = 0;
     this.commandLogScenario = this.scenario.toJSON();
@@ -670,6 +691,11 @@ export class Simulation {
     this.combatEventDropped = 0;
     this.perceptionEvents.clear();
     this.perceptionEventDropped = 0;
+    this.investigationEventMetrics.projectileObservations = 0;
+    this.investigationEventMetrics.heardExplosions = 0;
+    this.investigationEventMetrics.acceptedRedirects = 0;
+    this.investigationEventMetrics.deduplicated = 0;
+    this.investigationEventMetrics.priorityRejected = 0;
     this.spells.prune(new Map());
     this.contacts.count = 0;
     this.contacts.dropped = 0;
@@ -731,6 +757,7 @@ export class Simulation {
           this.enemyAiProfile === ENEMY_AI_PROFILE_BASIC
           || this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
           || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+          || this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
         )
         && Boolean(this.scenario.obelisk),
       nextSpawnTick: this.tickCount + 1,
@@ -773,13 +800,16 @@ export class Simulation {
     }
     const simulationTick = this.tickCount + 1;
     this.#encounterSystem(simulationTick);
-    if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
+    if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
+      this.broadphase.rebuild(this.enemies, this.rocks, this.projectiles);
+      this.#investigativePerceptionSystem(simulationTick);
+    } else if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
       this.#perceptionSystem(simulationTick);
     }
     this.#navigationSystem();
     this.#prepareMovement(command.move, SIMULATION.dt);
     this.#prepareEnemyMovement(SIMULATION.dt, simulationTick);
-    if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
+    if (usesPerceptionProfile(this.enemyAiProfile)) {
       this.#facingSystem(simulationTick);
     }
     this.#bodyPhysicsSystem(SIMULATION.dt);
@@ -1027,6 +1057,166 @@ export class Simulation {
     pool.searchGoalStartTick[index] = 0;
   }
 
+  /** @param {number} index */
+  #clearInvestigation(index) {
+    const pool = this.enemies;
+    pool.investigationSource[index] = KNOWLEDGE_SOURCE.none;
+    pool.investigationPriority[index] = INVESTIGATION_PRIORITY.none;
+    pool.investigationAnchorX[index] = Number.NaN;
+    pool.investigationAnchorZ[index] = Number.NaN;
+    pool.investigationObservationTick[index] = 0;
+    pool.investigationAcceptedTick[index] = 0;
+    pool.investigationEffectId[index] = 0;
+    pool.investigationProjectileId[index] = 0;
+    pool.investigationProjectileX[index] = Number.NaN;
+    pool.investigationProjectileZ[index] = Number.NaN;
+    pool.investigationProjectileVx[index] = 0;
+    pool.investigationProjectileVz[index] = 0;
+    pool.investigationProjectileAge[index] = 0;
+    pool.investigationOriginX[index] = Number.NaN;
+    pool.investigationOriginZ[index] = Number.NaN;
+  }
+
+  /** @param {number} index @param {Record<string,any>} clue */
+  #updateProjectileInvestigationDiagnostic(index, clue) {
+    if (clue.source !== KNOWLEDGE_SOURCE.projectile || !clue.projectile) return;
+    const pool = this.enemies;
+    pool.investigationObservationTick[index] = Number(clue.observationTick) >>> 0;
+    pool.investigationProjectileX[index] = Number(clue.projectile.x);
+    pool.investigationProjectileZ[index] = Number(clue.projectile.z);
+    pool.investigationProjectileVx[index] = Number(clue.projectile.vx);
+    pool.investigationProjectileVz[index] = Number(clue.projectile.vz);
+    pool.investigationProjectileAge[index] = Number(clue.projectile.age);
+    pool.investigationOriginX[index] = Number(clue.inferredOrigin?.x);
+    pool.investigationOriginZ[index] = Number(clue.inferredOrigin?.z);
+  }
+
+  /**
+   * The only v9 entry point that may redirect a wizard to an indirect clue.
+   * @param {number} index
+   * @param {number} tick
+   * @param {Record<string,any>} clue
+   * @param {{state?:number,immediateSearch?:boolean}} [options]
+   */
+  #acceptInvestigationClue(index, tick, clue, options = {}) {
+    const pool = this.enemies;
+    const current = {
+      priority: pool.investigationPriority[index],
+      observationTick: pool.investigationObservationTick[index],
+      effectId: pool.investigationEffectId[index],
+      projectileId: pool.investigationProjectileId[index],
+    };
+    let arbitration = arbitrateInvestigationClue(current, clue);
+    if (
+      arbitration.decision !== INVESTIGATION_DECISION.deduplicate
+      && pool.currentVisibility[index]
+    ) {
+      arbitration = arbitrateInvestigationClue({
+        priority: INVESTIGATION_PRIORITY.directSight,
+        observationTick: tick,
+        effectId: 0,
+        projectileId: 0,
+      }, clue);
+    }
+    if (arbitration.decision === INVESTIGATION_DECISION.deduplicate) {
+      this.investigationEventMetrics.deduplicated += 1;
+      this.#updateProjectileInvestigationDiagnostic(index, clue);
+      this.#recordPerceptionEvent("investigation-deduplicated", index, tick, {
+        reason: arbitration.reason,
+        source: KNOWLEDGE_SOURCE_NAMES[clue.source] ?? "none",
+        effectId: Number(clue.effectId) >>> 0 || null,
+        projectileId: Number(clue.projectileId) >>> 0 || null,
+      });
+      return arbitration;
+    }
+    if (arbitration.decision !== INVESTIGATION_DECISION.accept) {
+      this.investigationEventMetrics.priorityRejected += 1;
+      this.#recordPerceptionEvent("investigation-rejected", index, tick, {
+        reason: arbitration.reason,
+        decision: arbitration.decision,
+        source: KNOWLEDGE_SOURCE_NAMES[clue.source] ?? "none",
+        priority: Number(clue.priority) || 0,
+        activePriority: pool.currentVisibility[index]
+          ? INVESTIGATION_PRIORITY.directSight
+          : pool.investigationPriority[index],
+        effectId: Number(clue.effectId) >>> 0 || null,
+        projectileId: Number(clue.projectileId) >>> 0 || null,
+      });
+      return arbitration;
+    }
+
+    const previous = {
+      source: KNOWLEDGE_SOURCE_NAMES[pool.investigationSource[index]] ?? "none",
+      priority: pool.investigationPriority[index],
+      anchor: Number.isFinite(pool.investigationAnchorX[index])
+        && Number.isFinite(pool.investigationAnchorZ[index])
+        ? {
+          x: pool.investigationAnchorX[index],
+          z: pool.investigationAnchorZ[index],
+        }
+        : null,
+    };
+    const anchorX = Number(clue.anchor?.x);
+    const anchorZ = Number(clue.anchor?.z);
+    pool.investigationSource[index] = Number(clue.source) || KNOWLEDGE_SOURCE.none;
+    pool.investigationPriority[index] = Number(clue.priority) || 0;
+    pool.investigationAnchorX[index] = anchorX;
+    pool.investigationAnchorZ[index] = anchorZ;
+    pool.investigationObservationTick[index] = Number(clue.observationTick) >>> 0;
+    pool.investigationAcceptedTick[index] = tick;
+    pool.investigationEffectId[index] = Number(clue.effectId) >>> 0;
+    pool.investigationProjectileId[index] = Number(clue.projectileId) >>> 0;
+    pool.investigationProjectileX[index] = Number.NaN;
+    pool.investigationProjectileZ[index] = Number.NaN;
+    pool.investigationProjectileVx[index] = 0;
+    pool.investigationProjectileVz[index] = 0;
+    pool.investigationProjectileAge[index] = 0;
+    pool.investigationOriginX[index] = Number.NaN;
+    pool.investigationOriginZ[index] = Number.NaN;
+    this.#updateProjectileInvestigationDiagnostic(index, clue);
+    pool.knowledgeSource[index] = pool.investigationSource[index];
+    pool.hasStimulus[index] = 1;
+    pool.stimulusX[index] = anchorX;
+    pool.stimulusZ[index] = anchorZ;
+    pool.stimulusTick[index] = Number(clue.observationTick) >>> 0;
+    pool.guardReturnStartTick[index] = 0;
+    pool.guardUnreachableStartTick[index] = 0;
+    this.#clearCandidate(index);
+    const state = options.state ?? PERCEPTION_STATE.investigating;
+    if (options.immediateSearch) {
+      this.#beginSearch(
+        index,
+        tick,
+        anchorX,
+        anchorZ,
+        KNOWLEDGE_SOURCE_NAMES[clue.source] ?? "investigation",
+        state,
+      );
+    } else {
+      pool.perceptionState[index] = state;
+      pool.huntPhase[index] = HUNT_PHASE.travel;
+      pool.huntAnchorX[index] = anchorX;
+      pool.huntAnchorZ[index] = anchorZ;
+      pool.huntTravelStartTick[index] = tick;
+      pool.searchStartTick[index] = 0;
+      pool.searchEndTick[index] = 0;
+      pool.searchSequence[index] = 0;
+      this.#clearSearchGoal(index);
+    }
+    this.investigationEventMetrics.acceptedRedirects += 1;
+    this.#recordPerceptionEvent("investigation-redirect", index, tick, {
+      reason: arbitration.reason,
+      previous,
+      source: KNOWLEDGE_SOURCE_NAMES[clue.source] ?? "none",
+      priority: Number(clue.priority) || 0,
+      anchor: { x: anchorX, z: anchorZ },
+      observationTick: Number(clue.observationTick) >>> 0,
+      effectId: Number(clue.effectId) >>> 0 || null,
+      projectileId: Number(clue.projectileId) >>> 0 || null,
+    });
+    return arbitration;
+  }
+
   /** @param {number} index @param {number} tick */
   #updateLastSeen(index, tick) {
     const pool = this.enemies;
@@ -1037,10 +1227,15 @@ export class Simulation {
     pool.lastSeenVz[index] = this.player.vz;
     pool.lastSeenTick[index] = tick;
     pool.knowledgeSource[index] = KNOWLEDGE_SOURCE.visual;
-    pool.hasStimulus[index] = 0;
-    pool.stimulusX[index] = Number.NaN;
-    pool.stimulusZ[index] = Number.NaN;
-    pool.stimulusTick[index] = 0;
+    if (
+      this.enemyAiProfile !== ENEMY_AI_PROFILE_INVESTIGATIVE
+      || pool.investigationPriority[index] === INVESTIGATION_PRIORITY.none
+    ) {
+      pool.hasStimulus[index] = 0;
+      pool.stimulusX[index] = Number.NaN;
+      pool.stimulusZ[index] = Number.NaN;
+      pool.stimulusTick[index] = 0;
+    }
   }
 
   /** @param {number} index @param {number} tick @param {string} reason */
@@ -1070,6 +1265,9 @@ export class Simulation {
     pool.stimulusX[index] = Number.NaN;
     pool.stimulusZ[index] = Number.NaN;
     pool.stimulusTick[index] = 0;
+    if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
+      this.#clearInvestigation(index);
+    }
     pool.guardReturnStartTick[index] = 0;
     pool.guardUnreachableStartTick[index] = 0;
     pool.navigationSlot[index] = -1;
@@ -1132,10 +1330,10 @@ export class Simulation {
     return false;
   }
 
-  /** @param {number} index @param {number} tick @param {number} anchorX @param {number} anchorZ @param {string} reason */
-  #beginSearch(index, tick, anchorX, anchorZ, reason) {
+  /** @param {number} index @param {number} tick @param {number} anchorX @param {number} anchorZ @param {string} reason @param {number} [state] */
+  #beginSearch(index, tick, anchorX, anchorZ, reason, state = PERCEPTION_STATE.hunting) {
     const pool = this.enemies;
-    pool.perceptionState[index] = PERCEPTION_STATE.hunting;
+    pool.perceptionState[index] = state;
     pool.huntPhase[index] = HUNT_PHASE.search;
     pool.huntAnchorX[index] = anchorX;
     pool.huntAnchorZ[index] = anchorZ;
@@ -1171,20 +1369,61 @@ export class Simulation {
   }
 
   /** @param {number} index @param {number} tick */
+  #beginInvestigativeHuntAfterLoss(index, tick) {
+    const pool = this.enemies;
+    const result = this.#acceptInvestigationClue(index, tick, {
+      source: KNOWLEDGE_SOURCE.visual,
+      priority: INVESTIGATION_PRIORITY.lastSeen,
+      anchor: { x: pool.lastSeenX[index], z: pool.lastSeenZ[index] },
+      observationTick: pool.lastSeenTick[index],
+      effectId: 0,
+      projectileId: 0,
+    }, { state: PERCEPTION_STATE.hunting });
+    if (result.decision === INVESTIGATION_DECISION.accept) {
+      this.#recordPerceptionEvent("loss", index, tick, {
+        lastSeen: {
+          x: pool.lastSeenX[index],
+          z: pool.lastSeenZ[index],
+          tick: pool.lastSeenTick[index],
+        },
+      });
+      return;
+    }
+    if (pool.investigationPriority[index] > INVESTIGATION_PRIORITY.lastSeen) {
+      pool.perceptionState[index] = PERCEPTION_STATE.investigating;
+      pool.knowledgeSource[index] = pool.investigationSource[index];
+      if (pool.huntPhase[index] === HUNT_PHASE.none) {
+        pool.huntPhase[index] = HUNT_PHASE.travel;
+        pool.huntAnchorX[index] = pool.investigationAnchorX[index];
+        pool.huntAnchorZ[index] = pool.investigationAnchorZ[index];
+        pool.huntTravelStartTick[index] = pool.investigationAcceptedTick[index];
+      }
+      this.#clearCandidate(index);
+      this.#recordPerceptionEvent("loss", index, tick, {
+        resumedInvestigation: true,
+        source: KNOWLEDGE_SOURCE_NAMES[pool.investigationSource[index]] ?? "none",
+        priority: pool.investigationPriority[index],
+      });
+    }
+  }
+
+  /** @param {number} index @param {number} tick */
   #confirmPlayer(index, tick) {
     const pool = this.enemies;
+    const retainInvestigation = this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+      && pool.investigationPriority[index] > INVESTIGATION_PRIORITY.none;
     pool.perceptionState[index] = PERCEPTION_STATE.engaged;
     pool.knowledgeSource[index] = KNOWLEDGE_SOURCE.visual;
     pool.confirmedTargetKind[index] = TARGET_KIND.player;
     pool.confirmedTargetId[index] = this.player.id;
     pool.confirmedTargetTeam[index] = ACTOR_TEAM.player;
-    pool.huntPhase[index] = HUNT_PHASE.none;
+    if (!retainInvestigation) pool.huntPhase[index] = HUNT_PHASE.none;
     pool.guardReturnStartTick[index] = 0;
     pool.guardUnreachableStartTick[index] = 0;
     this.#clearCandidate(index);
     pool.exposureStartTick[index] = Math.max(0, tick - PERCEPTIVE_WIZARD.exposureTicks);
     pool.exposureProgress[index] = PERCEPTIVE_WIZARD.exposureTicks;
-    this.#clearSearchGoal(index);
+    if (!retainInvestigation) this.#clearSearchGoal(index);
     this.#updateLastSeen(index, tick);
   }
 
@@ -1345,6 +1584,272 @@ export class Simulation {
     }
   }
 
+  /** @param {number} index */
+  #selectVisibleHostileProjectile(index) {
+    const pool = this.enemies;
+    const range = PERCEPTIVE_WIZARD.visualRangeMeters;
+    const candidateCount = this.broadphase.queryProjectiles(
+      pool.x[index] - range,
+      pool.z[index] - range,
+      pool.x[index] + range,
+      pool.z[index] + range,
+    );
+    let selected = -1;
+    let selectedDistanceSquared = Infinity;
+    for (let candidate = 0; candidate < candidateCount; candidate += 1) {
+      const projectileIndex = this.broadphase.projectileCandidates[candidate];
+      if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player) continue;
+      const spellCode = this.projectiles.spellCode[projectileIndex];
+      if (
+        spellCode > 0
+        && this.spells.getByCode(spellCode)?.id !== FIREBALL_SPELL_ID
+      ) {
+        continue;
+      }
+      const sight = visualCheck(
+        this.map,
+        pool.x[index],
+        pool.z[index],
+        pool.facingX[index],
+        pool.facingZ[index],
+        this.projectiles.x[projectileIndex],
+        this.projectiles.z[projectileIndex],
+      );
+      if (!sight.visible) continue;
+      const dx = this.projectiles.x[projectileIndex] - pool.x[index];
+      const dz = this.projectiles.z[projectileIndex] - pool.z[index];
+      const distanceSquared = dx * dx + dz * dz;
+      if (selected >= 0) {
+        const farther = distanceSquared > selectedDistanceSquared + 1e-9;
+        const sameDistance = Math.abs(distanceSquared - selectedDistanceSquared) <= 1e-9;
+        const effectId = this.projectiles.effectId[projectileIndex];
+        const selectedEffectId = this.projectiles.effectId[selected];
+        const projectileId = this.projectiles.id[projectileIndex];
+        const selectedProjectileId = this.projectiles.id[selected];
+        if (
+          farther
+          || (sameDistance && effectId > selectedEffectId)
+          || (
+            sameDistance
+            && effectId === selectedEffectId
+            && projectileId >= selectedProjectileId
+          )
+        ) {
+          continue;
+        }
+      }
+      selected = projectileIndex;
+      selectedDistanceSquared = distanceSquared;
+    }
+    return selected;
+  }
+
+  /** @param {number} index @param {number} simulationTick */
+  #observeHostileProjectile(index, simulationTick) {
+    const projectileIndex = this.#selectVisibleHostileProjectile(index);
+    if (projectileIndex < 0) return;
+    const projectile = {
+      x: this.projectiles.x[projectileIndex],
+      z: this.projectiles.z[projectileIndex],
+      vx: this.projectiles.vx[projectileIndex],
+      vz: this.projectiles.vz[projectileIndex],
+      age: this.projectiles.age[projectileIndex],
+    };
+    const inferredOrigin = inferProjectileOrigin(this.map, projectile);
+    const effectId = this.projectiles.effectId[projectileIndex];
+    const projectileId = this.projectiles.id[projectileIndex];
+    this.investigationEventMetrics.projectileObservations += 1;
+    this.#recordPerceptionEvent("projectile-observation", index, simulationTick, {
+      observation: {
+        position: { x: projectile.x, z: projectile.z },
+        velocity: { x: projectile.vx, z: projectile.vz },
+        age: projectile.age,
+      },
+      inferredOrigin: {
+        x: inferredOrigin.x,
+        z: inferredOrigin.z,
+        rawX: inferredOrigin.rawX,
+        rawZ: inferredOrigin.rawZ,
+        clamped: inferredOrigin.clamped,
+      },
+      effectId: effectId || null,
+      projectileId,
+    });
+    this.#acceptInvestigationClue(index, simulationTick, {
+      source: KNOWLEDGE_SOURCE.projectile,
+      priority: INVESTIGATION_PRIORITY.projectile,
+      anchor: { x: inferredOrigin.x, z: inferredOrigin.z },
+      observationTick: simulationTick,
+      effectId,
+      projectileId,
+      projectile,
+      inferredOrigin,
+    });
+  }
+
+  /** @param {number} simulationTick */
+  #investigativePerceptionSystem(simulationTick) {
+    const pool = this.enemies;
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      let state = pool.perceptionState[index];
+      if (
+        state === PERCEPTION_STATE.unaware
+        && Math.hypot(
+          pool.x[index] - pool.guardX[index],
+          pool.z[index] - pool.guardZ[index],
+        ) > PERCEPTIVE_WIZARD.guardReturnDistanceMeters
+      ) {
+        this.#beginReturn(index, simulationTick, "displaced");
+        state = pool.perceptionState[index];
+      }
+
+      if (
+        state === PERCEPTION_STATE.hunting
+        || state === PERCEPTION_STATE.investigating
+      ) {
+        if (pool.huntPhase[index] === HUNT_PHASE.travel) {
+          const arrived = Math.hypot(
+            pool.x[index] - pool.huntAnchorX[index],
+            pool.z[index] - pool.huntAnchorZ[index],
+          ) <= PERCEPTIVE_WIZARD.lastSeenArrivalMeters;
+          const timedOut = simulationTick - pool.huntTravelStartTick[index]
+            >= PERCEPTIVE_WIZARD.travelTimeoutTicks;
+          if (arrived || timedOut) {
+            this.#beginSearch(
+              index,
+              simulationTick,
+              pool.huntAnchorX[index],
+              pool.huntAnchorZ[index],
+              arrived
+                ? state === PERCEPTION_STATE.investigating
+                  ? "investigation-arrival"
+                  : "last-seen-arrival"
+                : "travel-timeout",
+              state,
+            );
+          }
+        } else if (pool.huntPhase[index] === HUNT_PHASE.search) {
+          if (simulationTick >= pool.searchEndTick[index]) {
+            this.#beginReturn(index, simulationTick, "search-complete");
+          } else {
+            const arrived = pool.hasSearchGoal[index]
+              && Math.hypot(
+                pool.x[index] - pool.searchGoalX[index],
+                pool.z[index] - pool.searchGoalZ[index],
+              ) <= PERCEPTIVE_WIZARD.lastSeenArrivalMeters;
+            const timedOut = simulationTick - pool.searchGoalStartTick[index]
+              >= PERCEPTIVE_WIZARD.searchGoalTimeoutTicks;
+            if (arrived || timedOut) this.#chooseSearchGoal(index, simulationTick);
+          }
+        }
+        state = pool.perceptionState[index];
+      }
+
+      if (state === PERCEPTION_STATE.returning) {
+        const arrived = Math.hypot(
+          pool.x[index] - pool.guardX[index],
+          pool.z[index] - pool.guardZ[index],
+        ) <= PERCEPTIVE_WIZARD.guardReturnDistanceMeters;
+        if (arrived) {
+          this.#clearAwareness(index, simulationTick, "guard-arrival");
+        } else {
+          const slot = pool.navigationSlot[index];
+          const cx = Math.floor(pool.x[index]);
+          const cz = Math.floor(pool.z[index]);
+          const unreachable = this.destinationFields.isCurrent(slot, this.mapRevision)
+            && this.destinationFields.rawCostAt(slot, cx, cz) === NAVIGATION_UNREACHABLE;
+          if (!unreachable) {
+            pool.guardUnreachableStartTick[index] = 0;
+          } else if (pool.guardUnreachableStartTick[index] === 0) {
+            pool.guardUnreachableStartTick[index] = simulationTick;
+          } else if (
+            simulationTick - pool.guardUnreachableStartTick[index]
+            >= PERCEPTIVE_WIZARD.travelTimeoutTicks
+          ) {
+            pool.guardX[index] = this.map.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
+            pool.guardZ[index] = this.map.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
+            pool.guardBaseFacingX[index] = pool.facingX[index];
+            pool.guardBaseFacingZ[index] = pool.facingZ[index];
+            this.#recordPerceptionEvent("return", index, simulationTick, {
+              reason: "guard-rebased",
+              guard: { x: pool.guardX[index], z: pool.guardZ[index] },
+            });
+            this.#clearAwareness(index, simulationTick, "guard-rebased");
+          }
+        }
+      }
+
+      if (
+        simulationTick % PERCEPTIVE_WIZARD.perceptionLanes
+        !== pool.perceptionLane[index]
+      ) {
+        continue;
+      }
+      const result = visualCheck(
+        this.map,
+        pool.x[index],
+        pool.z[index],
+        pool.facingX[index],
+        pool.facingZ[index],
+        this.player.x,
+        this.player.z,
+      );
+      pool.currentVisibility[index] = result.visible ? 1 : 0;
+      pool.visibilitySampleTick[index] = simulationTick;
+      pool.lineOfSight[index] = result.blocked ? 0 : 1;
+      state = pool.perceptionState[index];
+      if (result.visible) {
+        if (
+          pool.confirmedTargetKind[index] === TARGET_KIND.player
+          && (
+            state === PERCEPTION_STATE.hunting
+            || state === PERCEPTION_STATE.returning
+            || state === PERCEPTION_STATE.investigating
+          )
+        ) {
+          const from = PERCEPTION_STATE_NAMES[state];
+          this.#confirmPlayer(index, simulationTick);
+          this.#recordPerceptionEvent("reacquisition", index, simulationTick, {
+            from,
+            target: { kind: "player", id: this.player.id, team: "player" },
+          });
+        } else if (state === PERCEPTION_STATE.engaged) {
+          this.#updateLastSeen(index, simulationTick);
+        } else if (state !== PERCEPTION_STATE.noticing) {
+          pool.noticingResumeState[index] = state;
+          pool.perceptionState[index] = PERCEPTION_STATE.noticing;
+          pool.candidateTargetKind[index] = TARGET_KIND.player;
+          pool.candidateTargetId[index] = this.player.id;
+          pool.candidateTargetTeam[index] = ACTOR_TEAM.player;
+          pool.exposureStartTick[index] = simulationTick;
+          pool.exposureProgress[index] = 0;
+          this.#recordPerceptionEvent("detection", index, simulationTick, {
+            phase: "noticing",
+            target: { kind: "player", id: this.player.id, team: "player" },
+          });
+        } else {
+          pool.exposureProgress[index] = Math.min(
+            PERCEPTIVE_WIZARD.exposureTicks,
+            simulationTick - pool.exposureStartTick[index],
+          );
+          if (pool.exposureProgress[index] >= PERCEPTIVE_WIZARD.exposureTicks) {
+            this.#confirmPlayer(index, simulationTick);
+            this.#recordPerceptionEvent("detection", index, simulationTick, {
+              phase: "engaged",
+              target: { kind: "player", id: this.player.id, team: "player" },
+            });
+          }
+        }
+      } else if (state === PERCEPTION_STATE.engaged) {
+        this.#beginInvestigativeHuntAfterLoss(index, simulationTick);
+      } else if (state === PERCEPTION_STATE.noticing) {
+        pool.perceptionState[index] = pool.noticingResumeState[index];
+        this.#clearCandidate(index);
+      }
+      this.#observeHostileProjectile(index, simulationTick);
+    }
+  }
+
   /** @param {number} simulationTick */
   #encounterSystem(simulationTick) {
     if (!this.encounter.enabled || simulationTick < this.encounter.nextSpawnTick) return;
@@ -1474,7 +1979,7 @@ export class Simulation {
       );
       return;
     }
-    if (this.enemyAiProfile !== ENEMY_AI_PROFILE_PERCEPTIVE) return;
+    if (!usesPerceptionProfile(this.enemyAiProfile)) return;
     const pool = this.enemies;
     this.destinationFields.beginTick();
     for (let index = 0; index < pool.activeCount; index += 1) {
@@ -1494,6 +1999,17 @@ export class Simulation {
             this.mapRevision,
             Math.floor(this.player.x),
             Math.floor(this.player.z),
+          );
+        } else if (
+          this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+          && pool.investigationPriority[index] > INVESTIGATION_PRIORITY.none
+          && Number.isFinite(pool.investigationAnchorX[index])
+          && Number.isFinite(pool.investigationAnchorZ[index])
+        ) {
+          pool.navigationSlot[index] = this.destinationFields.requestGoal(
+            this.mapRevision,
+            Math.floor(pool.investigationAnchorX[index]),
+            Math.floor(pool.investigationAnchorZ[index]),
           );
         } else if (pool.hasLastSeen[index]) {
           pool.navigationSlot[index] = this.destinationFields.requestGoal(
@@ -1521,7 +2037,10 @@ export class Simulation {
           Math.floor(this.player.x),
           Math.floor(this.player.z),
         );
-      } else if (state === PERCEPTION_STATE.hunting) {
+      } else if (
+        state === PERCEPTION_STATE.hunting
+        || state === PERCEPTION_STATE.investigating
+      ) {
         const goalX = pool.huntPhase[index] === HUNT_PHASE.search
           ? pool.searchGoalX[index]
           : pool.huntAnchorX[index];
@@ -1629,7 +2148,7 @@ export class Simulation {
     const pool = this.enemies;
     let bestIndex = -1;
     let bestMetrics = null;
-    const candidateCount = this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+    const candidateCount = usesPerceptionProfile(this.enemyAiProfile)
       ? this.broadphase.queryProjectiles(
         pool.x[index] - PERCEPTIVE_WIZARD.visualRangeMeters,
         pool.z[index] - PERCEPTIVE_WIZARD.visualRangeMeters,
@@ -1638,12 +2157,12 @@ export class Simulation {
       )
       : this.projectiles.activeCount;
     for (let candidate = 0; candidate < candidateCount; candidate += 1) {
-      const projectileIndex = this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+      const projectileIndex = usesPerceptionProfile(this.enemyAiProfile)
         ? this.broadphase.projectileCandidates[candidate]
         : candidate;
       if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player) continue;
       if (
-        this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+        usesPerceptionProfile(this.enemyAiProfile)
         && !visualCheck(
           this.map,
           pool.x[index],
@@ -1990,6 +2509,14 @@ export class Simulation {
       if (pool.currentVisibility[index]) {
         hostileX = this.player.x;
         hostileZ = this.player.z;
+      } else if (
+        this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+        && pool.investigationPriority[index] > INVESTIGATION_PRIORITY.none
+        && Number.isFinite(pool.investigationAnchorX[index])
+        && Number.isFinite(pool.investigationAnchorZ[index])
+      ) {
+        hostileX = pool.investigationAnchorX[index];
+        hostileZ = pool.investigationAnchorZ[index];
       } else if (pool.hasLastSeen[index]) {
         hostileX = pool.lastSeenX[index];
         hostileZ = pool.lastSeenZ[index];
@@ -2065,7 +2592,10 @@ export class Simulation {
       return;
     }
 
-    if (state === PERCEPTION_STATE.hunting) {
+    if (
+      state === PERCEPTION_STATE.hunting
+      || state === PERCEPTION_STATE.investigating
+    ) {
       const searching = pool.huntPhase[index] === HUNT_PHASE.search;
       const hasGoal = searching ? Boolean(pool.hasSearchGoal[index]) : true;
       const targetX = searching ? pool.searchGoalX[index] : pool.huntAnchorX[index];
@@ -2172,6 +2702,12 @@ export class Simulation {
       }
       return;
     }
+    if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        this.#preparePerceptiveEnemyMovement(index, dt, simulationTick);
+      }
+      return;
+    }
     if (this.enemyAiProfile !== ENEMY_AI_PROFILE_TACTICAL) {
       this.#prepareBasicEnemyMovement(dt);
       return;
@@ -2206,7 +2742,10 @@ export class Simulation {
           targetX = sweep.x;
           targetZ = sweep.z;
         } else if (
-          state === PERCEPTION_STATE.hunting
+          (
+            state === PERCEPTION_STATE.hunting
+            || state === PERCEPTION_STATE.investigating
+          )
           && pool.huntPhase[index] === HUNT_PHASE.search
         ) {
           const scan = searchScanFacing(
@@ -2244,7 +2783,7 @@ export class Simulation {
       let aimZ = this.player.z;
       let interceptTime = 0;
       let leadTime = 0;
-      if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
+      if (usesPerceptionProfile(this.enemyAiProfile)) {
         pool.predictedAimX[index] = Number.NaN;
         pool.predictedAimZ[index] = Number.NaN;
         pool.aimInterceptTime[index] = 0;
@@ -2303,7 +2842,7 @@ export class Simulation {
       pool.predictedAimZ[index] = aimZ;
       pool.aimInterceptTime[index] = interceptTime;
       pool.aimLeadTime[index] = leadTime;
-      if (this.enemyAiProfile !== ENEMY_AI_PROFILE_PERCEPTIVE) {
+      if (!usesPerceptionProfile(this.enemyAiProfile)) {
         const blocked = gridRayBlocked(
           this.map,
           pool.x[index],
@@ -2373,7 +2912,7 @@ export class Simulation {
         target: { kind: "player", id: this.player.id },
         ...(
           this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
-          || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+          || usesPerceptionProfile(this.enemyAiProfile)
           ? { aim: { x: aimX, z: aimZ, interceptTime, leadTime } }
           : {}),
       });
@@ -3315,6 +3854,7 @@ export class Simulation {
           hitZ,
         );
         this.#applyExplosion(event);
+        this.#deliverFireballExplosionHearing(event, pool.ownerTeam[index]);
         this.impactEvents.push(event);
         this.#emitParticles(event);
         pool.removeSwap(index);
@@ -3324,6 +3864,55 @@ export class Simulation {
       pool.x[index] = startX + deltaX;
       pool.z[index] = startZ + deltaZ;
       index += 1;
+    }
+  }
+
+  /** @param {Record<string,any>} event @param {number} sourceTeam */
+  #deliverFireballExplosionHearing(event, sourceTeam) {
+    if (
+      this.enemyAiProfile !== ENEMY_AI_PROFILE_INVESTIGATIVE
+      || event.spellId !== FIREBALL_SPELL_ID
+    ) {
+      return;
+    }
+    const x = Number(event.originX);
+    const z = Number(event.originZ);
+    const radius = PERCEPTIVE_WIZARD.fireballHearingMeters;
+    const candidateCount = this.broadphase.queryEnemies(
+      x - radius,
+      z - radius,
+      x + radius,
+      z + radius,
+    );
+    for (let candidate = 0; candidate < candidateCount; candidate += 1) {
+      const index = this.broadphase.enemyCandidates[candidate];
+      if (!(this.enemies.health[index] > 0)) continue;
+      const hearing = fireballHearingCheck(
+        this.enemies.x[index],
+        this.enemies.z[index],
+        ACTOR_TEAM.enemy,
+        x,
+        z,
+        sourceTeam,
+        radius,
+      );
+      if (!hearing.heard) continue;
+      this.investigationEventMetrics.heardExplosions += 1;
+      this.#recordPerceptionEvent("explosion-heard", index, Number(event.tick), {
+        impact: { x, z },
+        distance: hearing.distance,
+        radius,
+        effectId: Number(event.effectId) >>> 0 || null,
+        projectileId: Number(event.projectileId) >>> 0 || null,
+      });
+      this.#acceptInvestigationClue(index, Number(event.tick), {
+        source: KNOWLEDGE_SOURCE.sound,
+        priority: INVESTIGATION_PRIORITY.sound,
+        anchor: { x, z },
+        observationTick: Number(event.tick),
+        effectId: Number(event.effectId) >>> 0,
+        projectileId: Number(event.projectileId) >>> 0,
+      });
     }
   }
 
@@ -3645,6 +4234,28 @@ export class Simulation {
 
   /** @param {number} index @param {Record<string,any>} source @param {number} tick */
   #applyUnseenDamageStimulus(index, source, tick) {
+    if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
+      const x = Number.isFinite(Number(source.originX))
+        ? Number(source.originX)
+        : Number(source.x ?? this.enemies.x[index]);
+      const z = Number.isFinite(Number(source.originZ))
+        ? Number(source.originZ)
+        : Number(source.z ?? this.enemies.z[index]);
+      const result = this.#acceptInvestigationClue(index, tick, {
+        source: KNOWLEDGE_SOURCE.damage,
+        priority: INVESTIGATION_PRIORITY.damage,
+        anchor: { x, z },
+        observationTick: tick,
+        effectId: Number(source.effectId) >>> 0,
+        projectileId: Number(source.projectileId) >>> 0,
+      }, { immediateSearch: true });
+      this.#recordPerceptionEvent("damage-alert", index, tick, {
+        stimulus: { x, z },
+        accepted: result.decision === INVESTIGATION_DECISION.accept,
+        decision: result.decision,
+      });
+      return;
+    }
     if (this.enemyAiProfile !== ENEMY_AI_PROFILE_PERCEPTIVE) return;
     const pool = this.enemies;
     const playerVisible = visualCheck(
@@ -4443,6 +5054,9 @@ export class Simulation {
             guard: cloneUnknown(enemy.guard),
             lastSeen: cloneUnknown(enemy.lastSeen),
             stimulus: cloneUnknown(enemy.stimulus),
+            ...(enemy.investigation
+              ? { investigation: cloneUnknown(enemy.investigation) }
+              : {}),
             hunt: cloneUnknown(enemy.hunt),
           }
           : {}),
@@ -4451,12 +5065,15 @@ export class Simulation {
       combatEventMetrics: { ...snapshot.combatEventMetrics },
       recentPerceptionEvents: snapshot.recentPerceptionEvents.map(cloneUnknown),
       perceptionEventMetrics: { ...snapshot.perceptionEventMetrics },
+      ...(snapshot.investigationEventMetrics
+        ? { investigationEventMetrics: { ...snapshot.investigationEventMetrics } }
+        : {}),
     };
   }
 
   /** @param {number} index */
   #enemyBehaviorState(index) {
-    if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
+    if (usesPerceptionProfile(this.enemyAiProfile)) {
       if (this.enemies.aiState[index] === ENEMY_AI_DODGE) return "dodge";
       if (this.enemies.aiState[index] === ENEMY_AI_RETREAT) return "retreat";
       const state = this.enemies.perceptionState[index];
@@ -4467,7 +5084,7 @@ export class Simulation {
     }
     const names = (
       this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
-      || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+      || usesPerceptionProfile(this.enemyAiProfile)
     )
       ? ENEMY_AI_STATE_NAMES_TACTICAL
       : ENEMY_AI_STATE_NAMES_BASIC;
@@ -4505,7 +5122,7 @@ export class Simulation {
     const navigationCost = pool.navigationCost[index];
     const aimX = pool.predictedAimX[index];
     const aimZ = pool.predictedAimZ[index];
-    const destination = this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+    const destination = usesPerceptionProfile(this.enemyAiProfile)
       ? this.destinationFields.slotDiagnostics(pool.navigationSlot[index])
       : null;
     return {
@@ -4578,6 +5195,8 @@ export class Simulation {
     const hasLastSeen = Boolean(pool.hasLastSeen[index]);
     const hasSearchGoal = Boolean(pool.hasSearchGoal[index]);
     const hasStimulus = Boolean(pool.hasStimulus[index]);
+    const hasInvestigation = this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+      && pool.investigationPriority[index] > INVESTIGATION_PRIORITY.none;
     return {
       perceptionState: PERCEPTION_STATE_NAMES[state] ?? "unaware",
       perceptionStateCode: state,
@@ -4628,6 +5247,49 @@ export class Simulation {
           tick: pool.stimulusTick[index],
         }
         : null,
+      ...(this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+        ? {
+          investigation: {
+            active: hasInvestigation,
+            source: KNOWLEDGE_SOURCE_NAMES[pool.investigationSource[index]] ?? "none",
+            sourceCode: pool.investigationSource[index],
+            priority: pool.investigationPriority[index],
+            anchor: hasInvestigation
+              && Number.isFinite(pool.investigationAnchorX[index])
+              && Number.isFinite(pool.investigationAnchorZ[index])
+              ? {
+                x: pool.investigationAnchorX[index],
+                z: pool.investigationAnchorZ[index],
+              }
+              : null,
+            observationTick: pool.investigationObservationTick[index] || null,
+            acceptedTick: pool.investigationAcceptedTick[index] || null,
+            effectId: pool.investigationEffectId[index] || null,
+            projectileId: pool.investigationProjectileId[index] || null,
+            projectileObservation: Number.isFinite(pool.investigationProjectileX[index])
+              && Number.isFinite(pool.investigationProjectileZ[index])
+              ? {
+                position: {
+                  x: pool.investigationProjectileX[index],
+                  z: pool.investigationProjectileZ[index],
+                },
+                velocity: {
+                  x: pool.investigationProjectileVx[index],
+                  z: pool.investigationProjectileVz[index],
+                },
+                age: pool.investigationProjectileAge[index],
+              }
+              : null,
+            inferredOrigin: Number.isFinite(pool.investigationOriginX[index])
+              && Number.isFinite(pool.investigationOriginZ[index])
+              ? {
+                x: pool.investigationOriginX[index],
+                z: pool.investigationOriginZ[index],
+              }
+              : null,
+          },
+        }
+        : {}),
       hunt: {
         phase: HUNT_PHASE_NAMES[pool.huntPhase[index]] ?? "none",
         phaseCode: pool.huntPhase[index],
@@ -4670,6 +5332,9 @@ export class Simulation {
       navigation: cloneUnknown(snapshot.navigation),
       recentPerceptionEvents: snapshot.recentPerceptionEvents.map(cloneUnknown),
       perceptionEventMetrics: { ...snapshot.perceptionEventMetrics },
+      ...(snapshot.investigationEventMetrics
+        ? { investigationEventMetrics: { ...snapshot.investigationEventMetrics } }
+        : {}),
       enemies: snapshot.enemies
         .filter((enemy) => requestedId === null || enemy.id === requestedId)
         .map(cloneUnknown),
@@ -4715,7 +5380,7 @@ export class Simulation {
       const maximumHealth = this.enemies.maximumHealth[index];
       const damageFreeTicks = this.enemies.damageFreeTicks[index];
       const tacticalState = this.#enemyTacticalState(index);
-      const perceptionState = this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+      const perceptionState = usesPerceptionProfile(this.enemyAiProfile)
         ? this.#enemyPerceptionState(index)
         : null;
       enemies[index] = {
@@ -4871,7 +5536,7 @@ export class Simulation {
       tick: this.tickCount,
       gameplayProfile: this.gameplayProfile,
       enemyAiProfile: this.enemyAiProfile,
-      navigation: this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+      navigation: usesPerceptionProfile(this.enemyAiProfile)
         ? this.destinationFields.diagnostics(this.mapRevision)
         : {
           mapRevision: this.mapRevision,
@@ -4965,6 +5630,9 @@ export class Simulation {
         capacity: this.perceptionEvents.capacity,
         dropped: this.perceptionEventDropped,
       },
+      ...(this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+        ? { investigationEventMetrics: { ...this.investigationEventMetrics } }
+        : {}),
       broadphase: this.broadphase.diagnostics(),
       pools: {
         rocks: {
@@ -5146,7 +5814,7 @@ export class Simulation {
     const maximumHealth = this.enemies.maximumHealth[index];
     const damageFreeTicks = this.enemies.damageFreeTicks[index];
     const tacticalState = this.#enemyTacticalState(index);
-    const perceptionState = this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+    const perceptionState = usesPerceptionProfile(this.enemyAiProfile)
       ? this.#enemyPerceptionState(index)
       : null;
     return {
@@ -5408,7 +6076,7 @@ export class Simulation {
   /** @param {Record<string, any>} recording */
   static replay(recording) {
     const recordingSchema = Number(recording.schemaVersion);
-    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 8) {
+    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 9) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
     const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
@@ -5477,6 +6145,29 @@ export class Simulation {
         )
       ) {
         throw new TypeError("Schema-v8 recording has invalid enemy capacity metadata");
+      }
+    } else if (recordingSchema === 9) {
+      gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
+      enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
+      const validProfiles = (
+        gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+      ) || (
+        gameplayProfile === GAMEPLAY_PROFILE_PRE_COMBAT
+        && enemyAiProfile === ENEMY_AI_PROFILE_NONE
+      );
+      if (!validProfiles) {
+        throw new TypeError("Schema-v9 recording has invalid or missing gameplay profiles");
+      }
+      if (
+        gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && (
+          Number(recording.configuration?.enemyCapacity) !== ENEMY_WIZARD.capacity
+          || Number(recording.configuration?.encounterMaximumAlive)
+            !== ENEMY_WIZARD.encounterMaximumAlive
+        )
+      ) {
+        throw new TypeError("Schema-v9 recording has invalid enemy capacity metadata");
       }
     }
     const enemyCapacity = recordingSchema >= 8

@@ -4,8 +4,8 @@
 | --- | --- |
 | Status | Working draft |
 | Authority | Non-authoritative soft specification |
-| Last reviewed | 2026-08-04 |
-| Horizon | Feature direction beyond the current 0.8.0 contract; no release assignment |
+| Last reviewed | 2026-08-07 |
+| Horizon | Feature direction beyond the current 0.9.0 contract; no release assignment |
 | Related current documents | [Platform contract](../platform.md), [architecture guide](../architecture-guide.md), [lay of the land](../lay-of-the-land-pseudocode.md) |
 
 This document formalizes an owner brain dump about Lantern's possible future. It is deliberately broader than an implementation plan and narrower than a promise. Its job is to preserve the character of the desired game, expose architectural pressure early, and provide concrete stories from which small features can be promoted.
@@ -100,6 +100,8 @@ This story probes a shared actor foundation without requiring every actor to pay
 
 The present engine already protects several foundations described by the [platform contract](../platform.md): fixed 60 Hz simulation authority, commands, copied snapshots, replay versions, stable entity identity, bounded typed-array pools, deterministic AI inputs, shared navigation infrastructure, broadphase queries, versioned spell data, and renderer independence.
 
+The shipped [0.9.0 Fireball Investigation AI](../milestones/0.9.0-fireball-investigation-ai.md) is a narrow first slice of this direction. Wizards can anonymously infer a visible Fireball's launch point or hear its impact, arbitrate that clue against personal memory and damage, and run a bounded search. This is deliberately not yet a general sound system or a broad personality model.
+
 The current world and navigation data are intentionally narrower than this north star:
 
 - `GridMap.cells` is a CPU-side `Uint8Array` with one byte per cell, currently normalized to `0 = floor` or `1 = solid`.
@@ -184,6 +186,33 @@ Actors can differ without changing the meaning of the pipeline:
 - A fallback action is required when a budget or cache is exhausted.
 
 Physics can remain frequent while sensing is staggered and expensive deliberation runs less often or on meaningful observation changes. The exact cadences are implementation decisions to measure, not promises in this document.
+
+### Deterministic imperfection and search temperament
+
+**Intent:** A group should look like individuals making plausible choices, not synchronized copies executing one visibly perfect pattern. Their differences should still be explainable, bounded, replayable, and independent of frame rate or renderer state.
+
+The current foothold already derives each wizard's search rotation, reversal, and scan phase from named enemy-local hash lanes using the simulation seed and stable spawn sequence. Every wizard obeys the same radius, timeout, and reachability rules, but several wizards need not inspect nearby cells in the same order.
+
+**Working hypothesis:** future AI profiles may derive a small search temperament once per stable actor, then use it to weight an otherwise shared candidate set. Candidate traits include:
+
+- preference for near versus outer search cells;
+- clockwise versus counterclockwise sweep order;
+- shorter decisive scans versus longer cautious pauses;
+- willingness to revisit a plausible cell after other candidates fail;
+- tendency to favor cover edges, corridor mouths, or the incoming clue direction;
+- source-sensitive uncertainty, so a vague sound produces a broader search than a seen trajectory.
+
+These are bounded biases, not permission to read hidden player state. A cautious wizard may inspect a less efficient reachable cell or linger longer, but it cannot know which route the unseen player actually took. Variation should be sampled from named actor-local lanes or stored as explicit versioned profile data, never consumed from global simulation RNG on each decision.
+
+**Constraints:**
+
+- The same schema, seed, actor identity, observations, and commands reproduce the same choices.
+- Search traits alter ordering and timing only inside declared candidate, duration, navigation-work, and memory limits.
+- No trait may change geometry truth, identify an anonymous caster, bypass exposure, or turn an inferred position into a firing target.
+- Diagnostics should expose the chosen temperament and why a waypoint won, so apparent mistakes remain readable rather than arbitrary.
+- Existing replay schemas retain their frozen search behavior; a materially different live profile requires an explicit compatibility decision.
+
+**Acceptance seed:** Give four guards the same anonymous clue in a symmetric room. At least two choose observably different legal search sequences or scan rhythms, every guard remains within the same bounded work and return rules, and rerunning the recording reproduces each individual path exactly.
 
 ## Actor and capability shape
 

@@ -6,6 +6,7 @@ import os from "node:os";
 import {
   ACTOR_TEAM,
   COMBAT,
+  ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_WIZARD,
   PERCEPTIVE_WIZARD,
@@ -36,7 +37,7 @@ function percentile(values, fraction) {
   return sorted[Math.ceil(sorted.length * fraction) - 1] ?? 0;
 }
 
-test("7,200-tick perceptive 50-mob soak stays bounded through mixed hunting and combat pressure", () => {
+test("7,200-tick investigative 50-mob soak stays bounded through visual and auditory Fireball traffic", () => {
   const simulation = createPerceptionStressSimulation();
   const totalTicks = 7_200;
   const warmupTicks = 120;
@@ -148,13 +149,14 @@ test("7,200-tick perceptive 50-mob soak stays bounded through mixed hunting and 
   const p99 = percentile(measured, 0.99);
   const heapAfter = process.memoryUsage().heapUsed;
   const snapshot = simulation.snapshot();
-  assert.equal(simulation.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
+  assert.equal(simulation.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(simulation.enemies.capacity, ENEMY_WIZARD.capacity);
   assert.equal(simulation.encounterMaximumAlive, ENEMY_WIZARD.encounterMaximumAlive);
   assert.ok(perceptionStateTicks[PERCEPTION_STATE.engaged] > 0);
   assert.ok(perceptionStateTicks[PERCEPTION_STATE.hunting] > 0);
   assert.ok(perceptionStateTicks[PERCEPTION_STATE.returning] > 0);
   assert.ok(perceptionStateTicks[PERCEPTION_STATE.unaware] > 0);
+  assert.ok(perceptionStateTicks[PERCEPTION_STATE.investigating] > 0);
   assert.ok(damageAlerts > 0);
   assert.ok(dodgeTicks > 0);
   assert.ok(retreatTicks > 0);
@@ -162,6 +164,11 @@ test("7,200-tick perceptive 50-mob soak stays bounded through mixed hunting and 
   assert.equal(restarts, 2);
   assert.ok(mapEdits >= 17);
   assert.ok(maximumProjectiles > 0);
+  assert.ok(simulation.investigationEventMetrics.projectileObservations > 0);
+  assert.ok(simulation.investigationEventMetrics.heardExplosions > 0);
+  assert.ok(simulation.investigationEventMetrics.acceptedRedirects > 0);
+  assert.ok(simulation.investigationEventMetrics.deduplicated > 0);
+  assert.ok(simulation.investigationEventMetrics.priorityRejected > 0);
   assert.ok(maximumExpansions <= PERCEPTIVE_WIZARD.navigationExpansionsPerTick);
   assert.ok(
     snapshot.recentPerceptionEvents.length
@@ -186,6 +193,7 @@ test("7,200-tick perceptive 50-mob soak stays bounded through mixed hunting and 
     restarts,
     mapEdits,
     maximumProjectiles,
+    investigation: { ...simulation.investigationEventMetrics },
     maximumNavigationExpansions: maximumExpansions,
     simP99Ms: Number(p99.toFixed(3)),
     heapDeltaMiB: Number(((heapAfter - heapBefore) / 2 ** 20).toFixed(2)),
