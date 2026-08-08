@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.0` is the current application release. The development runtime is now at snapshot/recording schema v10. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.0` is the current application release. The development runtime is now at snapshot/recording schema v11. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -19,6 +19,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 ## Current contracts
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
+- [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
 - [0.3.0 renderer regression notes](./notes/0.3.0-renderer-regressions.md) — cold-pipeline and stale-instance symptoms that future renderer changes must not reintroduce.
@@ -67,12 +68,12 @@ These documents preserve future intent and candidate experiments. They are mutab
 These identifiers evolve independently:
 
 - Application/package release: `0.9.0`.
-- Snapshot and command-recording schema: v10.
+- Snapshot and command-recording schema: v11.
 - Scenario JSON schema: v3; legacy scenario v2 and map v1 remain importable.
 - Fireball definition format: v1.
-- Performance-report schema: v3.
+- Performance-report schema: v4.
 - Default particle behavior profile: `m0.2.5-balanced`.
 - Historical replay particle profile: `m0.2`.
 - Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
 
-Release numbering must not rename a frozen profile or increment a serialization schema unless that compatibility contract changes. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities.
+Release numbering must not rename a frozen profile or increment a serialization schema unless that compatibility contract changes. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.

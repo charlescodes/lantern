@@ -208,6 +208,9 @@ export class EnemyWizardPool {
     this.investigationAcceptedTick = new Uint32Array(capacity);
     this.investigationEffectId = new Uint32Array(capacity);
     this.investigationProjectileId = new Uint32Array(capacity);
+    this.investigationSoundEventId = new Uint32Array(capacity);
+    this.investigationSoundKind = new Uint8Array(capacity);
+    this.investigationSoundRadius = new Float32Array(capacity);
     this.investigationProjectileX = new Float32Array(capacity);
     this.investigationProjectileZ = new Float32Array(capacity);
     this.investigationProjectileVx = new Float32Array(capacity);
@@ -345,6 +348,9 @@ export class EnemyWizardPool {
     this.investigationAcceptedTick[index] = 0;
     this.investigationEffectId[index] = 0;
     this.investigationProjectileId[index] = 0;
+    this.investigationSoundEventId[index] = 0;
+    this.investigationSoundKind[index] = 0;
+    this.investigationSoundRadius[index] = 0;
     this.investigationProjectileX[index] = Number.NaN;
     this.investigationProjectileZ[index] = Number.NaN;
     this.investigationProjectileVx[index] = 0;
@@ -466,6 +472,9 @@ export class EnemyWizardPool {
         this.investigationAcceptedTick,
         this.investigationEffectId,
         this.investigationProjectileId,
+        this.investigationSoundEventId,
+        this.investigationSoundKind,
+        this.investigationSoundRadius,
         this.investigationProjectileX,
         this.investigationProjectileZ,
         this.investigationProjectileVx,

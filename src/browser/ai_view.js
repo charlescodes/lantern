@@ -286,6 +286,13 @@ export class AiView {
     context.lineCap = "round";
     context.lineJoin = "round";
     this.#drawEngagementRings(frame.engagementRings);
+    for (const sound of frame.soundMarkers) {
+      this.#drawWorldMarker(
+        sound,
+        sound.kind === "footstep" ? COLORS.sound : COLORS.impact,
+        sound.kind === "footstep" ? "♪" : "!",
+      );
+    }
     const boxes = [];
     for (let index = 0; index < frame.mobs.length; index += 1) {
       const mob = frame.mobs[index];
@@ -305,11 +312,11 @@ export class AiView {
         context.stroke();
       }
       this.#drawPerception(mob, anchor);
-      if (mob.hearingCircle) {
+      for (const hearingCircle of mob.hearingCircles) {
         this.#drawWorldCircle(
-          mob.hearingCircle,
-          COLORS.hearing,
-          `HEARING ${mob.hearingCircle.radius}m`,
+          hearingCircle,
+          hearingCircle.kind === "footstep" ? COLORS.sound : COLORS.hearing,
+          hearingCircle.label,
         );
       }
       if (mob.movementGoal) {

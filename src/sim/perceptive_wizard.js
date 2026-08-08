@@ -93,14 +93,19 @@ export function inferProjectileOrigin(map, projectile) {
   };
 }
 
-/** @param {{effectId?:number,projectileId?:number}} left @param {{effectId?:number,projectileId?:number}} right */
+/** @param {{effectId?:number,projectileId?:number,soundEventId?:number}} left @param {{effectId?:number,projectileId?:number,soundEventId?:number}} right */
 function sameEffect(left, right) {
   const leftEffect = Number(left.effectId) >>> 0;
   const rightEffect = Number(right.effectId) >>> 0;
   if (leftEffect > 0 || rightEffect > 0) return leftEffect > 0 && leftEffect === rightEffect;
   const leftProjectile = Number(left.projectileId) >>> 0;
   const rightProjectile = Number(right.projectileId) >>> 0;
-  return leftProjectile > 0 && leftProjectile === rightProjectile;
+  if (leftProjectile > 0 || rightProjectile > 0) {
+    return leftProjectile > 0 && leftProjectile === rightProjectile;
+  }
+  const leftSound = Number(left.soundEventId) >>> 0;
+  const rightSound = Number(right.soundEventId) >>> 0;
+  return leftSound > 0 && leftSound === rightSound;
 }
 
 /**
@@ -108,8 +113,8 @@ function sameEffect(left, right) {
  * within a priority; same-tick freshness is the unsigned effect/projectile ID
  * tuple. A projectile's later samples and explosion are recognized first so
  * they update diagnostics without restarting movement.
- * @param {{priority?:number,observationTick?:number,effectId?:number,projectileId?:number}} current
- * @param {{priority?:number,observationTick?:number,effectId?:number,projectileId?:number}} incoming
+ * @param {{priority?:number,observationTick?:number,effectId?:number,projectileId?:number,soundEventId?:number}} current
+ * @param {{priority?:number,observationTick?:number,effectId?:number,projectileId?:number,soundEventId?:number}} incoming
  */
 export function arbitrateInvestigationClue(current, incoming) {
   if (sameEffect(current, incoming)) {
@@ -144,7 +149,47 @@ export function arbitrateInvestigationClue(current, incoming) {
   if (incomingProjectile > currentProjectile) {
     return { decision: INVESTIGATION_DECISION.accept, reason: "same-tick-projectile" };
   }
+  if (incomingProjectile === currentProjectile) {
+    const currentSound = Number(current.soundEventId) >>> 0;
+    const incomingSound = Number(incoming.soundEventId) >>> 0;
+    if (incomingSound > currentSound) {
+      return { decision: INVESTIGATION_DECISION.accept, reason: "same-tick-sound" };
+    }
+  }
   return { decision: INVESTIGATION_DECISION.staleReject, reason: "not-newer" };
+}
+
+/**
+ * Geometry-free, team-aware hearing shared by authoritative sound sources.
+ * @param {number} listenerX
+ * @param {number} listenerZ
+ * @param {number} listenerTeam
+ * @param {number} soundX
+ * @param {number} soundZ
+ * @param {number} sourceTeam
+ * @param {number} radius
+ */
+export function soundHearingCheck(
+  listenerX,
+  listenerZ,
+  listenerTeam,
+  soundX,
+  soundZ,
+  sourceTeam,
+  radius,
+) {
+  const dx = Number(listenerX) - Number(soundX);
+  const dz = Number(listenerZ) - Number(soundZ);
+  const distanceSquared = dx * dx + dz * dz;
+  const maximum = Math.max(0, Number(radius) || 0);
+  const hostile = Number(sourceTeam) > 0 && Number(sourceTeam) !== Number(listenerTeam);
+  const inRange = distanceSquared <= maximum * maximum + 1e-9;
+  return {
+    heard: hostile && inRange,
+    hostile,
+    inRange,
+    distance: Math.sqrt(distanceSquared),
+  };
 }
 
 /**
@@ -167,18 +212,15 @@ export function fireballHearingCheck(
   sourceTeam,
   radius = PERCEPTIVE_WIZARD.fireballHearingMeters,
 ) {
-  const dx = Number(listenerX) - Number(impactX);
-  const dz = Number(listenerZ) - Number(impactZ);
-  const distanceSquared = dx * dx + dz * dz;
-  const maximum = Math.max(0, Number(radius) || 0);
-  const hostile = Number(sourceTeam) > 0 && Number(sourceTeam) !== Number(listenerTeam);
-  const inRange = distanceSquared <= maximum * maximum + 1e-9;
-  return {
-    heard: hostile && inRange,
-    hostile,
-    inRange,
-    distance: Math.sqrt(distanceSquared),
-  };
+  return soundHearingCheck(
+    listenerX,
+    listenerZ,
+    listenerTeam,
+    impactX,
+    impactZ,
+    sourceTeam,
+    radius,
+  );
 }
 
 export const HUNT_PHASE = Object.freeze({

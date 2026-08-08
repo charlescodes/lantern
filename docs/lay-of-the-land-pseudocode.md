@@ -1,7 +1,7 @@
 # Lantern: Lay of the Land in Pseudocode
 
 > **Descriptive snapshot:** Lantern 0.9.0 development runtime,
-> snapshot/recording schema v10.
+> snapshot/recording schema v11.
 >
 > This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.
 
@@ -63,7 +63,7 @@ TrueSight never gives knowledge to AI
 
 ```text
 FUNCTION boot()
-    simulation      := new Simulation(default scenario, schema-v10 profiles)
+    simulation      := new Simulation(default scenario, schema-v11 profiles)
     initialSnapshot := simulation.snapshot()
 
     options   := parse renderer/backend/visual flags from URL
@@ -127,6 +127,7 @@ STATE Simulation
         bounded InertDeadBodyRing     // FIFO scenery; no per-tick interaction
         bounded RockPool
         bounded ProjectilePool
+        bounded SoundEventQueue      // one-tick authoritative stimuli
         bounded ParticlePool        // deterministic visuals; no gameplay effect
 
     infrastructure :=
@@ -136,11 +137,12 @@ STATE Simulation
         deterministic RNG/hash lanes
 
     boundedHistory :=
-        commands + impacts + combat + perception + contacts
+        commands + impacts + combat + perception + sound diagnostics + contacts
 END
 
 FUNCTION Simulation.tick(rawInput)
     command := canonicalize(rawInput)
+    clear the previous tick's sound queue
     clear this tick's contacts
     apply command.actions at the tick boundary
 
@@ -153,7 +155,7 @@ FUNCTION Simulation.tick(rawInput)
 
     encounterSystem(nextTick)                  // bounded obelisk spawns
     IF enemy profile == investigative-wizard-v1
-        investigativePerceptionSystem(nextTick) // v10 retains v9 behavior
+        investigativePerceptionSystem(nextTick) // visual/projectile sampling
     navigationSystem()                         // bounded incremental work
 
     preparePlayerMovement(command.move)
@@ -161,11 +163,13 @@ FUNCTION Simulation.tick(rawInput)
     IF enemy profile uses facing perception
         facingSystem(nextTick)
     bodyPhysicsSystem()                         // actors, rocks, dynamic bodies, grid
+    movementSoundSystem(nextTick)               // running cadence; walking is silent
 
     decrease cooldowns
     castPlayerSpell(command.cast)
     castEnemySpells(nextTick)
     advanceProjectiles()                        // bodies intercept; blast moves them
+    deliverQueuedSounds()                       // accepted now; movement starts next tick
     settleExistingDeadBodies(nextTick)
     transferNewlyDeadEnemies(nextTick)          // AI row -> compact body row
     advanceParticles()
@@ -190,6 +194,38 @@ pool index is temporary and must never become external identity
 ```
 
 Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded scheduler; [`src/sim/pools.js`](../src/sim/pools.js) and [`src/sim/dead_body_pool.js`](../src/sim/dead_body_pool.js) own bounded storage.
+
+## Player movement and sound vertical
+
+```text
+FUNCTION preparePlayerMovement(RMB target)
+    IF no target
+        mode := idle
+    ELSE IF distance(player, target) <= 0.75m
+        mode := walking; requested speed := 2.25m/s
+    ELSE
+        mode := running; requested speed := 4.5m/s
+
+    IF mode changed from running to walking/idle
+        reset run cadence
+END
+
+AFTER body physics, IF mode == running
+    advance cadence by control locomotion only       // never external knockback
+    IF heading changed >= 120 degrees AND gate >= 12 ticks
+        queue one footstep(reason = turn, radius = 8m)
+    ELSE IF first 0.75m or later 1.5m stride reached
+        queue one footstep(reason = stride, radius = 8m)
+END
+
+SoundEventQueue := bounded typed columns, insertion order, drop newest
+default capacity := projectile capacity + one possible player footstep
+diagnostic ring := separate 128 entries; never participates in delivery
+```
+
+Schema-v2 through v10 select the frozen `none` profile: every nonzero target
+uses the old full speed, footsteps are absent, and Fireball hearing retains its
+direct delivery path.
 
 ## Fireball and combat vertical
 
@@ -217,6 +253,7 @@ EACH tick FOR each projectile
         apply fixed team-aware combat damage to opposing living actors
         apply impulse-only response to dynamic dead bodies
         give an unseen mob only the impact-point clue, never attacker identity
+        queue the Fireball impact as a hostile 16m sound stimulus
         emit deterministic visual particles
         retain bounded diagnostics
         remove projectile
@@ -375,13 +412,16 @@ FUNCTION exportCommandLog()
 END
 
 FUNCTION Simulation.replay(recording)
-    validate schema v2..v8
+    validate schema v2..v11
     choose its frozen behavior profile:
         v2-v4 legacy effects
         v5    versioned Fireball / pre-combat
         v6    basic wizard
         v7    omniscient tactical wizard
         v8    perceptive wizard + v8 scaling metadata
+        v9    investigative wizard, no dead bodies, no movement sounds
+        v10   investigative wizard + dead bodies, no movement sounds
+        v11   proximity walking + queued footsteps/Fireball sounds
 
     replayed := new Simulation(recorded initial state)
     FOR command IN recording.commands

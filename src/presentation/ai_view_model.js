@@ -1,6 +1,6 @@
 // @ts-check
 
-import { PERCEPTIVE_WIZARD } from "../config.js";
+import { MOVEMENT_SOUND, PERCEPTIVE_WIZARD } from "../config.js";
 
 export const AI_VIEW_MODE = Object.freeze({
   off: "off",
@@ -174,7 +174,13 @@ function investigationText(mob) {
   if (investigation.projectileId) {
     identities.push(`projectile #${integer(investigation.projectileId)}`);
   }
-  return `${investigation.source ?? "none"} · priority ${integer(investigation.priority)} · observed ${integer(investigation.observationTick)}t · accepted ${integer(investigation.acceptedTick)}t${identities.length > 0 ? ` · ${identities.join(" · ")}` : ""}`;
+  if (investigation.sound?.eventId) {
+    identities.push(`sound #${integer(investigation.sound.eventId)}`);
+  }
+  const sound = investigation.sound
+    ? ` · ${investigation.sound.kind} ${decimal(investigation.sound.radius, 1)}m`
+    : "";
+  return `${investigation.source ?? "none"}${sound} · priority ${integer(investigation.priority)} · observed ${integer(investigation.observationTick)}t · accepted ${integer(investigation.acceptedTick)}t${identities.length > 0 ? ` · ${identities.join(" · ")}` : ""}`;
 }
 
 /**
@@ -339,9 +345,27 @@ function mobView(snapshot, mob, alpha, sightVisible, selected) {
       ? { x: Number(mob.stimulus.position.x), z: Number(mob.stimulus.position.z) }
       : null,
     soundImpactPoint: investigation?.source === "sound" ? investigationAnchor : null,
-    hearingCircle: selected
-      ? { x, z, radius: PERCEPTIVE_WIZARD.fireballHearingMeters }
+    soundKind: investigation?.source === "sound"
+      ? String(investigation.sound?.kind ?? "fireball-impact")
       : null,
+    hearingCircles: selected
+      ? [
+        {
+          x,
+          z,
+          radius: MOVEMENT_SOUND.footstepHearingMeters,
+          label: `FOOTSTEPS ${MOVEMENT_SOUND.footstepHearingMeters}m`,
+          kind: "footstep",
+        },
+        {
+          x,
+          z,
+          radius: PERCEPTIVE_WIZARD.fireballHearingMeters,
+          label: `FIREBALL ${PERCEPTIVE_WIZARD.fireballHearingMeters}m`,
+          kind: "fireball-impact",
+        },
+      ]
+      : [],
     projectileObservationPoint,
     inferredOriginPoint,
     reverseTrajectory: projectileObservationPoint && inferredOriginPoint
@@ -418,5 +442,16 @@ export function buildAiViewFrame(snapshot, alpha, state) {
       }))
       : [],
     navigation: snapshot.navigation ?? null,
+    soundMarkers: mode === AI_VIEW_MODE.off
+      ? []
+      : (snapshot.soundEvents?.recent ?? [])
+        .filter((event) => Number(snapshot.tick) - Number(event.tick) <= 30)
+        .slice(-8)
+        .map((event) => ({
+          id: Number(event.id),
+          x: Number(event.x),
+          z: Number(event.z),
+          kind: String(event.kind ?? "sound"),
+        })),
   };
 }

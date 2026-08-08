@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.0";
@@ -14,6 +14,8 @@ export const ENEMY_AI_PROFILE_INVESTIGATIVE = "investigative-wizard-v1";
 export const ENEMY_AI_PROFILE_NONE = "none";
 export const DEAD_BODY_PROFILE_V1 = "enemy-dead-body-v1";
 export const DEAD_BODY_PROFILE_NONE = "none";
+export const MOVEMENT_SOUND_PROFILE_V1 = "proximity-walk-footsteps-v1";
+export const MOVEMENT_SOUND_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
   player: 1,
@@ -43,6 +45,18 @@ export const PLAYER = Object.freeze({
   acceleration: 22,
   braking: 28,
   externalDamping: 2,
+});
+
+export const MOVEMENT_SOUND = Object.freeze({
+  walkTargetRadiusMeters: 0.75,
+  walkSpeedMetersPerSecond: 2.25,
+  firstFootstepMeters: 0.75,
+  runningStrideMeters: 1.5,
+  turnThresholdRadians: (Math.PI * 2) / 3,
+  turnCooldownTicks: 12,
+  footstepHearingMeters: 8,
+  historyCapacity: 128,
+  snapshotEventCount: 32,
 });
 
 export const COMBAT = Object.freeze({

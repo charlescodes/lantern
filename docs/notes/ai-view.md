@@ -2,7 +2,7 @@
 
 > **Authority:** read-only presentation and developer diagnostics
 >
-> **Compatibility:** Off/Selected/All behavior and stable selection remain unchanged; the schema-v10 snapshot adds dead bodies without making them AI View mobs or adding a command or mutation surface
+> **Compatibility:** Off/Selected/All behavior and stable selection remain unchanged; schema-v11 adds read-only movement-sound diagnostics without making sound or dead-body rows AI View mobs or adding a command or mutation surface
 
 ## Purpose
 
@@ -26,7 +26,7 @@ identity rather than pool index.
 
 ## Displayed truth
 
-The renderer-neutral view model consumes the same copied schema-v10 snapshot as
+The renderer-neutral view model consumes the same copied schema-v11 snapshot as
 Canvas2D and Three.js. It labels **player sight** separately from **mob vision**:
 player sight is the presentation-only TrueSight result, while mob vision is the
 authoritative cone/range/grid-occlusion sample. Neither value is inferred from
@@ -46,7 +46,8 @@ For each displayed mob the panel includes:
 - destination-cache slot, key, cost, version, and stale/building flags.
 
 World-space marks include the `120°`/`12m` perception cone, `1.5m` close-awareness
-circle, selected-wizard `16m` hearing radius, facing and exposure, the `6-9m`
+circle, selected-wizard `8m` footstep and `16m` Fireball hearing radii, recent
+sound origins, facing and exposure, the `6-9m`
 engagement band, target, last-seen, sound-impact or damage marker, projectile
 observation point, reverse-trajectory ray, inferred-origin marker, search point,
 guard point, movement goal, desired velocity, predicted aim, line of sight,
@@ -73,11 +74,16 @@ budget, reference counts, map revision, and completed/stale versions.
 
 The simulation retains a bounded 128-entry perception-event ring. Diagnostics
 expose its latest 32 detection, loss, search, return, damage-alert,
-reacquisition, awareness-clear, projectile-observation, explosion-hearing,
+reacquisition, awareness-clear, projectile-observation, footstep-hearing, explosion-hearing,
 redirect, deduplication, and priority-rejection events plus retained, capacity,
 and dropped counts. Bounded aggregate counters report projectile observations,
-heard explosions, accepted redirects, deduplication, and priority rejection.
+heard footsteps and explosions, accepted redirects, deduplication, and priority rejection.
 Reading diagnostics cannot affect event retention, decisions, or replay.
+
+A separate 128-entry sound-event ring exposes the latest 32 stable sound IDs,
+kinds, reasons, sources, origins, radii, and optional effect/projectile IDs. AI
+View draws at most eight origins from the last 30 ticks. The ring is diagnostic
+only; authoritative delivery uses the one-tick typed queue.
 
 ## TrueSight and interaction boundary
 

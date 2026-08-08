@@ -53,6 +53,7 @@ function enemy(id, overrides = {}) {
 
 function snapshot() {
   return {
+    tick: 60,
     enemyAiProfile: "tactical-wizard-v1",
     navigation: { version: 3, building: true, stale: true },
     player: { x: 4, z: 5 },
@@ -63,6 +64,12 @@ function snapshot() {
       lineOfSight: false,
     })],
     projectiles: [{ id: 9, effectId: 77, x: 8, z: 9 }],
+    soundEvents: {
+      recent: [
+        { id: 1, tick: 20, kind: "fireball-impact", x: 2, z: 3 },
+        { id: 2, tick: 45, kind: "footstep", x: 4, z: 5 },
+      ],
+    },
   };
 }
 
@@ -77,6 +84,7 @@ test("AI View filters off, selected, and all modes by stable mob identity", () =
   assert.equal(off.availableMobs.length, 2);
   assert.equal(off.mobs.length, 0);
   assert.equal(off.engagementRings.length, 0);
+  assert.equal(off.soundMarkers.length, 0);
   assert.equal(off.selectedSightVisible, false);
 
   const selected = buildAiViewFrame(value, 0.5, {
@@ -92,6 +100,9 @@ test("AI View filters off, selected, and all modes by stable mob identity", () =
   assert.deepEqual(selected.mobs[0].threatPoint, { x: 8, z: 9 });
   assert.equal(selected.engagementRings[0].radius, 6);
   assert.equal(selected.engagementRings[1].radius, 9);
+  assert.deepEqual(selected.soundMarkers, [
+    { id: 2, x: 4, z: 5, kind: "footstep" },
+  ]);
 
   value.enemies.reverse();
   const reordered = buildAiViewFrame(value, 0.5, {
@@ -254,7 +265,13 @@ test("AI View exposes v9 trajectory and sound investigation diagnostics read-onl
     start: { x: 8.5, z: 5.5 },
     end: { x: 4.5, z: 5.5 },
   });
-  assert.equal(mob.hearingCircle.radius, 16);
+  assert.deepEqual(
+    mob.hearingCircles.map(({ kind, radius }) => ({ kind, radius })),
+    [
+      { kind: "footstep", radius: 8 },
+      { kind: "fireball-impact", radius: 16 },
+    ],
+  );
   assert.equal(mob.soundImpactPoint, null);
   assert.match(
     mob.labelLines.join("\n"),
@@ -271,6 +288,7 @@ test("AI View exposes v9 trajectory and sound investigation diagnostics read-onl
     acceptedTick: 50,
     effectId: 302,
     projectileId: 45,
+    sound: { eventId: 91, kind: "fireball-impact", radius: 16 },
     projectileObservation: null,
     inferredOrigin: null,
   };
@@ -280,6 +298,8 @@ test("AI View exposes v9 trajectory and sound investigation diagnostics read-onl
   });
   mob = frame.mobs[0];
   assert.deepEqual(mob.soundImpactPoint, { x: 12.5, z: 6.5 });
+  assert.equal(mob.soundKind, "fireball-impact");
+  assert.match(mob.labelLines.join("\n"), /sound #91/);
   assert.equal(mob.projectileObservationPoint, null);
   assert.equal(mob.reverseTrajectory, null);
 });

@@ -20,6 +20,9 @@ import {
   GAMEPLAY_PROFILE_PRE_COMBAT,
   HISTORY,
   MAP_VERSION,
+  MOVEMENT_SOUND,
+  MOVEMENT_SOUND_PROFILE_NONE,
+  MOVEMENT_SOUND_PROFILE_V1,
   normalizeParticleProfile,
   PARTICLE,
   PARTICLE_PROFILES,
@@ -104,11 +107,19 @@ import {
   PERCEPTION_STATE_NAMES,
   searchCandidate,
   searchScanFacing,
+  soundHearingCheck,
   TARGET_KIND,
   TARGET_KIND_NAMES,
   turnFacing,
   visualCheck,
 } from "./perceptive_wizard.js";
+import {
+  SOUND_EVENT_KIND,
+  SOUND_EVENT_KIND_NAMES,
+  SOUND_EVENT_REASON,
+  SOUND_EVENT_REASON_NAMES,
+  SoundEventQueue,
+} from "./sound_event_pool.js";
 import {
   ArenaScenario,
   createDebugArenaScenario,
@@ -138,6 +149,10 @@ const ENEMY_AI_HOLD = 0;
 const ENEMY_AI_APPROACH = 1;
 const ENEMY_AI_WITHDRAW = 2;
 const ENEMY_AI_RETREAT = 3;
+const PLAYER_MOVEMENT_IDLE = 0;
+const PLAYER_MOVEMENT_WALKING = 1;
+const PLAYER_MOVEMENT_RUNNING = 2;
+const PLAYER_MOVEMENT_MODE_NAMES = Object.freeze(["idle", "walking", "running"]);
 const ENEMY_AI_DODGE = 4;
 const ENEMY_AI_STATE_NAMES_BASIC = Object.freeze(["hold", "approach", "withdraw"]);
 const ENEMY_AI_STATE_NAMES_TACTICAL = Object.freeze([
@@ -435,7 +450,9 @@ function ownerKindName(code) {
 
 /** @param {number} code */
 function teamName(code) {
-  return code === ACTOR_TEAM.enemy ? "enemy" : "player";
+  if (code === ACTOR_TEAM.enemy) return "enemy";
+  if (code === ACTOR_TEAM.player) return "player";
+  return "neutral";
 }
 
 export class Simulation {
@@ -460,6 +477,8 @@ export class Simulation {
    * gameplayProfile?:string,
    * enemyAiProfile?:string,
    * deadBodyProfile?:string,
+   * movementSoundProfile?:string,
+   * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
    * }} [options]
@@ -512,6 +531,16 @@ export class Simulation {
       && this.deadBodyProfile !== DEAD_BODY_PROFILE_NONE
     ) {
       throw new RangeError(`Unsupported dead-body profile: ${this.deadBodyProfile}`);
+    }
+    this.movementSoundProfile = options.movementSoundProfile
+      ?? MOVEMENT_SOUND_PROFILE_V1;
+    if (
+      this.movementSoundProfile !== MOVEMENT_SOUND_PROFILE_V1
+      && this.movementSoundProfile !== MOVEMENT_SOUND_PROFILE_NONE
+    ) {
+      throw new RangeError(
+        `Unsupported movement-sound profile: ${this.movementSoundProfile}`,
+      );
     }
     const rockCapacity = options.rockCapacity ?? ROCK.capacity;
     if (!Number.isInteger(rockCapacity) || rockCapacity <= 0) {
@@ -572,6 +601,17 @@ export class Simulation {
     this.destinationFields = new DestinationFieldCache(this.map);
     this.reachability = new GridReachability(this.map);
     this.projectiles = new ProjectilePool(options.projectileCapacity ?? PROJECTILE.capacity);
+    const soundEventCapacity = options.soundEventCapacity
+      ?? (this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1
+        ? this.projectiles.capacity + 1
+        : 1);
+    if (
+      !Number.isInteger(soundEventCapacity)
+      || soundEventCapacity <= 0
+    ) {
+      throw new RangeError("Sound-event capacity must be a positive integer");
+    }
+    this.soundEvents = new SoundEventQueue(soundEventCapacity);
     this.broadphase = new MapCellBroadphase(this.map, {
       enemyCapacity,
       rockCapacity,
@@ -617,9 +657,19 @@ export class Simulation {
     this.combatEventDropped = 0;
     this.perceptionEvents = new RingBuffer(PERCEPTIVE_WIZARD.perceptionEventCapacity);
     this.perceptionEventDropped = 0;
+    this.soundEventHistory = new RingBuffer(MOVEMENT_SOUND.historyCapacity);
+    this.soundEventHistoryDropped = 0;
+    this.soundEventMetrics = {
+      emittedFootsteps: 0,
+      emittedFireballImpacts: 0,
+      heardFootsteps: 0,
+      heardFireballImpacts: 0,
+      listenerChecks: 0,
+    };
     this.investigationEventMetrics = {
       projectileObservations: 0,
       heardExplosions: 0,
+      heardFootsteps: 0,
       acceptedRedirects: 0,
       deduplicated: 0,
       priorityRejected: 0,
@@ -642,6 +692,8 @@ export class Simulation {
     this.commandLogGameplayProfile = this.gameplayProfile;
     this.commandLogEnemyAiProfile = this.enemyAiProfile;
     this.commandLogDeadBodyProfile = this.deadBodyProfile;
+    this.commandLogMovementSoundProfile = this.movementSoundProfile;
+    this.commandLogSoundEventCapacity = this.soundEvents.capacity;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
     this.commandLogDynamicDeadBodyCapacity = this.dynamicDeadBodies.capacity;
@@ -683,6 +735,16 @@ export class Simulation {
       maximumHealth: COMBAT.maximumHealth,
       damageFreeTicks: 0,
       lastDamageTick: 0,
+      movementMode: PLAYER_MOVEMENT_IDLE,
+      movementTargetDistance: 0,
+      movementDirectionX: 1,
+      movementDirectionZ: 0,
+      runningStrideProgress: 0,
+      runningNextFootstepDistance: MOVEMENT_SOUND.firstFootstepMeters,
+      lastFootstepHeadingX: 1,
+      lastFootstepHeadingZ: 0,
+      lastFootstepTick: 0,
+      runningStartTick: 0,
     };
     this.contacts = {
       count: 0,
@@ -744,8 +806,10 @@ export class Simulation {
     this.combatEventDropped = 0;
     this.perceptionEvents.clear();
     this.perceptionEventDropped = 0;
+    this.#clearSoundEventHistory();
     this.investigationEventMetrics.projectileObservations = 0;
     this.investigationEventMetrics.heardExplosions = 0;
+    this.investigationEventMetrics.heardFootsteps = 0;
     this.investigationEventMetrics.acceptedRedirects = 0;
     this.investigationEventMetrics.deduplicated = 0;
     this.investigationEventMetrics.priorityRejected = 0;
@@ -764,6 +828,8 @@ export class Simulation {
       this.commandLogGameplayProfile = this.gameplayProfile;
       this.commandLogEnemyAiProfile = this.enemyAiProfile;
       this.commandLogDeadBodyProfile = this.deadBodyProfile;
+      this.commandLogMovementSoundProfile = this.movementSoundProfile;
+      this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
       this.commandLogDynamicDeadBodyCapacity = this.dynamicDeadBodies.capacity;
@@ -780,6 +846,7 @@ export class Simulation {
     this.enemies.reset();
     this.dynamicDeadBodies.reset();
     this.inertDeadBodies.reset();
+    this.soundEvents.reset();
     this.navigationField.reset(this.map);
     this.destinationFields.reset(this.map);
     this.reachability.reset(this.map);
@@ -806,6 +873,16 @@ export class Simulation {
       maximumHealth: COMBAT.maximumHealth,
       damageFreeTicks: 0,
       lastDamageTick: 0,
+      movementMode: PLAYER_MOVEMENT_IDLE,
+      movementTargetDistance: 0,
+      movementDirectionX: 1,
+      movementDirectionZ: 0,
+      runningStrideProgress: 0,
+      runningNextFootstepDistance: MOVEMENT_SOUND.firstFootstepMeters,
+      lastFootstepHeadingX: 1,
+      lastFootstepHeadingZ: 0,
+      lastFootstepTick: 0,
+      runningStartTick: 0,
     });
     this.levelState = "running";
     this.defeatedTicksRemaining = 0;
@@ -844,6 +921,7 @@ export class Simulation {
   /** @param {unknown} input */
   tick(input) {
     const command = canonicalizeCommand(input);
+    this.soundEvents.beginTick();
     this.contacts.count = 0;
     const startedDefeated = this.levelState === "defeated";
     this.#applyActions(command.actions, startedDefeated);
@@ -870,12 +948,13 @@ export class Simulation {
       this.#perceptionSystem(simulationTick);
     }
     this.#navigationSystem();
-    this.#prepareMovement(command.move, SIMULATION.dt);
+    this.#prepareMovement(command.move, SIMULATION.dt, simulationTick);
     this.#prepareEnemyMovement(SIMULATION.dt, simulationTick);
     if (usesPerceptionProfile(this.enemyAiProfile)) {
       this.#facingSystem(simulationTick);
     }
     this.#bodyPhysicsSystem(SIMULATION.dt);
+    this.#movementSoundSystem(simulationTick);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
         this.spellCooldowns[spell.code],
@@ -896,6 +975,9 @@ export class Simulation {
     this.#castSystem(command.cast);
     this.#enemyCastSystem(simulationTick);
     this.#projectileSystem(SIMULATION.dt);
+    if (this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1) {
+      this.#deliverQueuedSoundEvents();
+    }
     this.#advanceDeadBodyLifecycle(simulationTick);
     this.#transferDeadEnemies(simulationTick);
     this.#particleSystem(SIMULATION.dt);
@@ -933,6 +1015,7 @@ export class Simulation {
           this.combatEventDropped = 0;
           this.perceptionEvents.clear();
           this.perceptionEventDropped = 0;
+          this.#clearSoundEventHistory();
         } else if (action.type === "setTile") {
           if (!this.#setTile(action.cx, action.cz, action.tile)) {
             throw new RangeError("Tile would overlap an authored or active body");
@@ -954,6 +1037,7 @@ export class Simulation {
           this.combatEventDropped = 0;
           this.perceptionEvents.clear();
           this.perceptionEventDropped = 0;
+          this.#clearSoundEventHistory();
         } else if (action.type === "placeRock") {
           if (!this.canPlaceRock(action.archetype, action.x, action.z)) {
             throw new RangeError("Rock placement is invalid or overlaps another body");
@@ -1097,6 +1181,16 @@ export class Simulation {
     this.combatEvents.push(event);
   }
 
+  #clearSoundEventHistory() {
+    this.soundEventHistory.clear();
+    this.soundEventHistoryDropped = 0;
+    this.soundEventMetrics.emittedFootsteps = 0;
+    this.soundEventMetrics.emittedFireballImpacts = 0;
+    this.soundEventMetrics.heardFootsteps = 0;
+    this.soundEventMetrics.heardFireballImpacts = 0;
+    this.soundEventMetrics.listenerChecks = 0;
+  }
+
   /** @param {string} type @param {number} index @param {number} tick @param {Record<string,any>} [details] */
   #recordPerceptionEvent(type, index, tick, details = {}) {
     if (this.perceptionEvents.length === this.perceptionEvents.capacity) {
@@ -1146,6 +1240,9 @@ export class Simulation {
     pool.investigationAcceptedTick[index] = 0;
     pool.investigationEffectId[index] = 0;
     pool.investigationProjectileId[index] = 0;
+    pool.investigationSoundEventId[index] = 0;
+    pool.investigationSoundKind[index] = SOUND_EVENT_KIND.none;
+    pool.investigationSoundRadius[index] = 0;
     pool.investigationProjectileX[index] = Number.NaN;
     pool.investigationProjectileZ[index] = Number.NaN;
     pool.investigationProjectileVx[index] = 0;
@@ -1183,6 +1280,7 @@ export class Simulation {
       observationTick: pool.investigationObservationTick[index],
       effectId: pool.investigationEffectId[index],
       projectileId: pool.investigationProjectileId[index],
+      soundEventId: pool.investigationSoundEventId[index],
     };
     let arbitration = arbitrateInvestigationClue(current, clue);
     if (
@@ -1204,6 +1302,7 @@ export class Simulation {
         source: KNOWLEDGE_SOURCE_NAMES[clue.source] ?? "none",
         effectId: Number(clue.effectId) >>> 0 || null,
         projectileId: Number(clue.projectileId) >>> 0 || null,
+        soundEventId: Number(clue.soundEventId) >>> 0 || null,
       });
       return arbitration;
     }
@@ -1219,6 +1318,7 @@ export class Simulation {
           : pool.investigationPriority[index],
         effectId: Number(clue.effectId) >>> 0 || null,
         projectileId: Number(clue.projectileId) >>> 0 || null,
+        soundEventId: Number(clue.soundEventId) >>> 0 || null,
       });
       return arbitration;
     }
@@ -1244,6 +1344,9 @@ export class Simulation {
     pool.investigationAcceptedTick[index] = tick;
     pool.investigationEffectId[index] = Number(clue.effectId) >>> 0;
     pool.investigationProjectileId[index] = Number(clue.projectileId) >>> 0;
+    pool.investigationSoundEventId[index] = Number(clue.soundEventId) >>> 0;
+    pool.investigationSoundKind[index] = Number(clue.soundKind) || SOUND_EVENT_KIND.none;
+    pool.investigationSoundRadius[index] = Math.max(0, Number(clue.soundRadius) || 0);
     pool.investigationProjectileX[index] = Number.NaN;
     pool.investigationProjectileZ[index] = Number.NaN;
     pool.investigationProjectileVx[index] = 0;
@@ -1291,6 +1394,7 @@ export class Simulation {
       observationTick: Number(clue.observationTick) >>> 0,
       effectId: Number(clue.effectId) >>> 0 || null,
       projectileId: Number(clue.projectileId) >>> 0 || null,
+      soundEventId: Number(clue.soundEventId) >>> 0 || null,
     });
     return arbitration;
   }
@@ -3131,19 +3235,53 @@ export class Simulation {
     }
   }
 
-  /** @param {{x:number,z:number}|null} target @param {number} dt */
-  #prepareMovement(target, dt) {
+  /** @param {{x:number,z:number}|null} target @param {number} dt @param {number} simulationTick */
+  #prepareMovement(target, dt, simulationTick) {
     const player = this.player;
     let desiredVx = 0;
     let desiredVz = 0;
+    let movementMode = PLAYER_MOVEMENT_IDLE;
+    let targetDistance = 0;
+    let directionX = player.movementDirectionX;
+    let directionZ = player.movementDirectionZ;
     if (target) {
       const dx = target.x - player.x;
       const dz = target.z - player.z;
       const length = Math.hypot(dx, dz);
+      targetDistance = length;
       if (length > 1e-5) {
-        desiredVx = (dx / length) * PLAYER.desiredSpeed;
-        desiredVz = (dz / length) * PLAYER.desiredSpeed;
+        directionX = dx / length;
+        directionZ = dz / length;
+        movementMode = this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1
+          && length <= MOVEMENT_SOUND.walkTargetRadiusMeters
+          ? PLAYER_MOVEMENT_WALKING
+          : PLAYER_MOVEMENT_RUNNING;
+        const desiredSpeed = movementMode === PLAYER_MOVEMENT_WALKING
+          ? MOVEMENT_SOUND.walkSpeedMetersPerSecond
+          : PLAYER.desiredSpeed;
+        desiredVx = directionX * desiredSpeed;
+        desiredVz = directionZ * desiredSpeed;
       }
+    }
+    const previousMode = player.movementMode;
+    player.movementMode = movementMode;
+    player.movementTargetDistance = targetDistance;
+    player.movementDirectionX = directionX;
+    player.movementDirectionZ = directionZ;
+    if (movementMode !== PLAYER_MOVEMENT_RUNNING) {
+      player.runningStrideProgress = 0;
+      player.runningNextFootstepDistance = MOVEMENT_SOUND.firstFootstepMeters;
+      player.lastFootstepHeadingX = directionX;
+      player.lastFootstepHeadingZ = directionZ;
+      player.lastFootstepTick = 0;
+      player.runningStartTick = 0;
+    } else if (previousMode !== PLAYER_MOVEMENT_RUNNING) {
+      player.runningStrideProgress = 0;
+      player.runningNextFootstepDistance = MOVEMENT_SOUND.firstFootstepMeters;
+      player.lastFootstepHeadingX = directionX;
+      player.lastFootstepHeadingZ = directionZ;
+      player.lastFootstepTick = 0;
+      player.runningStartTick = simulationTick;
     }
     player.desiredVx = desiredVx;
     player.desiredVz = desiredVz;
@@ -3160,6 +3298,96 @@ export class Simulation {
       player.locomotionVx += (deltaVx / deltaLength) * maximumDelta;
       player.locomotionVz += (deltaVz / deltaLength) * maximumDelta;
     }
+  }
+
+  /** @param {number} simulationTick */
+  #movementSoundSystem(simulationTick) {
+    if (
+      this.movementSoundProfile !== MOVEMENT_SOUND_PROFILE_V1
+      || this.player.movementMode !== PLAYER_MOVEMENT_RUNNING
+    ) {
+      return;
+    }
+    const player = this.player;
+    const locomotionSpeed = Math.min(
+      PLAYER.desiredSpeed,
+      Math.hypot(player.locomotionVx, player.locomotionVz),
+    );
+    player.runningStrideProgress += locomotionSpeed * SIMULATION.dt;
+    const headingDot = player.lastFootstepHeadingX * player.movementDirectionX
+      + player.lastFootstepHeadingZ * player.movementDirectionZ;
+    const gateTick = player.lastFootstepTick || player.runningStartTick;
+    const turnFootstep = locomotionSpeed > 1e-5
+      && headingDot <= Math.cos(MOVEMENT_SOUND.turnThresholdRadians) + 1e-9
+      && simulationTick - gateTick >= MOVEMENT_SOUND.turnCooldownTicks;
+    let reason = SOUND_EVENT_REASON.none;
+    if (turnFootstep) {
+      reason = SOUND_EVENT_REASON.turn;
+      player.runningStrideProgress = 0;
+    } else if (
+      player.runningStrideProgress + 1e-9
+      >= player.runningNextFootstepDistance
+    ) {
+      reason = SOUND_EVENT_REASON.stride;
+      player.runningStrideProgress = Math.max(
+        0,
+        player.runningStrideProgress - player.runningNextFootstepDistance,
+      );
+    }
+    if (reason === SOUND_EVENT_REASON.none) return;
+    player.runningNextFootstepDistance = MOVEMENT_SOUND.runningStrideMeters;
+    player.lastFootstepHeadingX = player.movementDirectionX;
+    player.lastFootstepHeadingZ = player.movementDirectionZ;
+    player.lastFootstepTick = simulationTick;
+    this.#queueSoundEvent({
+      tick: simulationTick,
+      kind: SOUND_EVENT_KIND.footstep,
+      reason,
+      sourceKind: PROJECTILE_OWNER_KIND.player,
+      sourceId: player.id,
+      sourceTeam: ACTOR_TEAM.player,
+      x: player.x,
+      z: player.z,
+      radius: MOVEMENT_SOUND.footstepHearingMeters,
+    });
+  }
+
+  /** @param {{tick:number,kind:number,reason:number,sourceKind:number,sourceId:number,sourceTeam:number,x:number,z:number,radius:number,effectId?:number,projectileId?:number}} value */
+  #queueSoundEvent(value) {
+    const id = this.soundEvents.push(value);
+    if (id === 0) return 0;
+    const index = this.soundEvents.activeCount - 1;
+    if (this.soundEventHistory.length === this.soundEventHistory.capacity) {
+      this.soundEventHistoryDropped += 1;
+    }
+    this.soundEventHistory.push(this.#soundEventSnapshot(index));
+    if (value.kind === SOUND_EVENT_KIND.footstep) {
+      this.soundEventMetrics.emittedFootsteps += 1;
+    } else if (value.kind === SOUND_EVENT_KIND.fireballImpact) {
+      this.soundEventMetrics.emittedFireballImpacts += 1;
+    }
+    return id;
+  }
+
+  /** @param {number} index */
+  #soundEventSnapshot(index) {
+    const pool = this.soundEvents;
+    return {
+      id: pool.id[index],
+      tick: pool.tick[index],
+      kind: SOUND_EVENT_KIND_NAMES[pool.kind[index]] ?? "unknown",
+      reason: SOUND_EVENT_REASON_NAMES[pool.reason[index]] ?? "none",
+      source: {
+        kind: ownerKindName(pool.sourceKind[index]),
+        id: pool.sourceId[index],
+        team: teamName(pool.sourceTeam[index]),
+      },
+      x: pool.x[index],
+      z: pool.z[index],
+      radius: pool.radius[index],
+      effectId: pool.effectId[index] || null,
+      projectileId: pool.projectileId[index] || null,
+    };
   }
 
   /** @param {number} dt */
@@ -4440,7 +4668,26 @@ export class Simulation {
           hitZ,
         );
         this.#applyExplosion(event);
-        this.#deliverFireballExplosionHearing(event, pool.ownerTeam[index]);
+        if (
+          this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1
+          && event.spellId === FIREBALL_SPELL_ID
+        ) {
+          this.#queueSoundEvent({
+            tick: Number(event.tick),
+            kind: SOUND_EVENT_KIND.fireballImpact,
+            reason: SOUND_EVENT_REASON.impact,
+            sourceKind: pool.ownerKind[index],
+            sourceId: pool.ownerId[index],
+            sourceTeam: pool.ownerTeam[index],
+            x: Number(event.originX),
+            z: Number(event.originZ),
+            radius: PERCEPTIVE_WIZARD.fireballHearingMeters,
+            effectId: Number(event.effectId) >>> 0,
+            projectileId: Number(event.projectileId) >>> 0,
+          });
+        } else {
+          this.#deliverFireballExplosionHearing(event, pool.ownerTeam[index]);
+        }
         this.impactEvents.push(event);
         this.#emitParticles(event);
         pool.removeSwap(index);
@@ -4450,6 +4697,80 @@ export class Simulation {
       pool.x[index] = startX + deltaX;
       pool.z[index] = startZ + deltaZ;
       index += 1;
+    }
+  }
+
+  #deliverQueuedSoundEvents() {
+    if (this.enemyAiProfile !== ENEMY_AI_PROFILE_INVESTIGATIVE) return;
+    for (let eventIndex = 0; eventIndex < this.soundEvents.activeCount; eventIndex += 1) {
+      this.#deliverSoundEvent(eventIndex);
+    }
+  }
+
+  /** @param {number} eventIndex */
+  #deliverSoundEvent(eventIndex) {
+    const sounds = this.soundEvents;
+    const x = sounds.x[eventIndex];
+    const z = sounds.z[eventIndex];
+    const radius = sounds.radius[eventIndex];
+    const kind = sounds.kind[eventIndex];
+    const soundEventId = sounds.id[eventIndex];
+    const tick = sounds.tick[eventIndex];
+    const candidateCount = this.broadphase.queryEnemies(
+      x - radius,
+      z - radius,
+      x + radius,
+      z + radius,
+    );
+    for (let candidate = 0; candidate < candidateCount; candidate += 1) {
+      const index = this.broadphase.enemyCandidates[candidate];
+      if (!(this.enemies.health[index] > 0)) continue;
+      this.soundEventMetrics.listenerChecks += 1;
+      const hearing = soundHearingCheck(
+        this.enemies.x[index],
+        this.enemies.z[index],
+        ACTOR_TEAM.enemy,
+        x,
+        z,
+        sounds.sourceTeam[eventIndex],
+        radius,
+      );
+      if (!hearing.heard) continue;
+      const isFootstep = kind === SOUND_EVENT_KIND.footstep;
+      if (isFootstep) {
+        this.soundEventMetrics.heardFootsteps += 1;
+        this.investigationEventMetrics.heardFootsteps += 1;
+      } else {
+        this.soundEventMetrics.heardFireballImpacts += 1;
+        this.investigationEventMetrics.heardExplosions += 1;
+      }
+      this.#recordPerceptionEvent(
+        isFootstep ? "footstep-heard" : "explosion-heard",
+        index,
+        tick,
+        {
+          soundEventId,
+          soundKind: SOUND_EVENT_KIND_NAMES[kind] ?? "unknown",
+          soundReason: SOUND_EVENT_REASON_NAMES[sounds.reason[eventIndex]] ?? "none",
+          sound: { x, z },
+          ...(isFootstep ? { footstep: { x, z } } : { impact: { x, z } }),
+          distance: hearing.distance,
+          radius,
+          effectId: sounds.effectId[eventIndex] || null,
+          projectileId: sounds.projectileId[eventIndex] || null,
+        },
+      );
+      this.#acceptInvestigationClue(index, tick, {
+        source: KNOWLEDGE_SOURCE.sound,
+        priority: INVESTIGATION_PRIORITY.sound,
+        anchor: { x, z },
+        observationTick: tick,
+        effectId: sounds.effectId[eventIndex],
+        projectileId: sounds.projectileId[eventIndex],
+        soundEventId,
+        soundKind: kind,
+        soundRadius: radius,
+      });
     }
   }
 
@@ -5673,6 +5994,7 @@ export class Simulation {
       schemaVersion: snapshot.schemaVersion,
       gameplayProfile: snapshot.gameplayProfile,
       enemyAiProfile: snapshot.enemyAiProfile,
+      movementSoundProfile: snapshot.movementSoundProfile,
       tick: snapshot.tick,
       level: cloneUnknown(snapshot.level),
       encounter: cloneUnknown(snapshot.encounter),
@@ -5682,6 +6004,7 @@ export class Simulation {
         health: snapshot.player.health,
         maximumHealth: snapshot.player.maximumHealth,
         regeneration: cloneUnknown(snapshot.player.regeneration),
+        movement: cloneUnknown(snapshot.player.movement),
       },
       enemies: snapshot.enemies.map((enemy) => ({
         id: enemy.id,
@@ -5732,6 +6055,8 @@ export class Simulation {
       combatEventMetrics: { ...snapshot.combatEventMetrics },
       recentPerceptionEvents: snapshot.recentPerceptionEvents.map(cloneUnknown),
       perceptionEventMetrics: { ...snapshot.perceptionEventMetrics },
+      soundEvents: cloneUnknown(snapshot.soundEvents),
+      soundEventMetrics: { ...snapshot.soundEventMetrics },
       ...(snapshot.investigationEventMetrics
         ? { investigationEventMetrics: { ...snapshot.investigationEventMetrics } }
         : {}),
@@ -5933,6 +6258,16 @@ export class Simulation {
             acceptedTick: pool.investigationAcceptedTick[index] || null,
             effectId: pool.investigationEffectId[index] || null,
             projectileId: pool.investigationProjectileId[index] || null,
+            sound: pool.investigationSource[index] === KNOWLEDGE_SOURCE.sound
+              ? {
+                eventId: pool.investigationSoundEventId[index] || null,
+                kind: pool.investigationSoundKind[index] > SOUND_EVENT_KIND.none
+                  ? SOUND_EVENT_KIND_NAMES[pool.investigationSoundKind[index]] ?? "unknown"
+                  : "fireball-impact",
+                radius: pool.investigationSoundRadius[index]
+                  || PERCEPTIVE_WIZARD.fireballHearingMeters,
+              }
+              : null,
             projectileObservation: Number.isFinite(pool.investigationProjectileX[index])
               && Number.isFinite(pool.investigationProjectileZ[index])
               ? {
@@ -5996,9 +6331,12 @@ export class Simulation {
       schemaVersion: snapshot.schemaVersion,
       tick: snapshot.tick,
       enemyAiProfile: snapshot.enemyAiProfile,
+      movementSoundProfile: snapshot.movementSoundProfile,
       navigation: cloneUnknown(snapshot.navigation),
       recentPerceptionEvents: snapshot.recentPerceptionEvents.map(cloneUnknown),
       perceptionEventMetrics: { ...snapshot.perceptionEventMetrics },
+      soundEvents: cloneUnknown(snapshot.soundEvents),
+      soundEventMetrics: { ...snapshot.soundEventMetrics },
       ...(snapshot.investigationEventMetrics
         ? { investigationEventMetrics: { ...snapshot.investigationEventMetrics } }
         : {}),
@@ -6255,6 +6593,13 @@ export class Simulation {
     const recentPerceptionEvents = this.perceptionEvents
       .toArray(PERCEPTIVE_WIZARD.perceptionSnapshotEventCount)
       .map(cloneUnknown);
+    const currentSoundEvents = new Array(this.soundEvents.activeCount);
+    for (let index = 0; index < currentSoundEvents.length; index += 1) {
+      currentSoundEvents[index] = this.#soundEventSnapshot(index);
+    }
+    const recentSoundEvents = this.soundEventHistory
+      .toArray(MOVEMENT_SOUND.snapshotEventCount)
+      .map(cloneUnknown);
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
@@ -6263,6 +6608,7 @@ export class Simulation {
       gameplayProfile: this.gameplayProfile,
       enemyAiProfile: this.enemyAiProfile,
       deadBodyProfile: this.deadBodyProfile,
+      movementSoundProfile: this.movementSoundProfile,
       navigation: usesPerceptionProfile(this.enemyAiProfile)
         ? this.destinationFields.diagnostics(this.mapRevision)
         : {
@@ -6311,6 +6657,22 @@ export class Simulation {
         kind: "player",
         index: 0,
         ...this.player,
+        movementMode: PLAYER_MOVEMENT_MODE_NAMES[this.player.movementMode] ?? "idle",
+        movementModeCode: this.player.movementMode,
+        movement: {
+          mode: PLAYER_MOVEMENT_MODE_NAMES[this.player.movementMode] ?? "idle",
+          targetDistanceMeters: this.player.movementTargetDistance,
+          walkTargetRadiusMeters: MOVEMENT_SOUND.walkTargetRadiusMeters,
+          walkSpeedMetersPerSecond: MOVEMENT_SOUND.walkSpeedMetersPerSecond,
+          runSpeedMetersPerSecond: PLAYER.desiredSpeed,
+          strideProgressMeters: this.player.runningStrideProgress,
+          nextFootstepDistanceMeters: Math.max(
+            0,
+            this.player.runningNextFootstepDistance
+              - this.player.runningStrideProgress,
+          ),
+          lastFootstepTick: this.player.lastFootstepTick || null,
+        },
         regeneration: {
           delayTicks: COMBAT.regenerationDelayTicks,
           damageFreeTicks: this.player.damageFreeTicks,
@@ -6351,6 +6713,10 @@ export class Simulation {
       recentEvents,
       recentCombatEvents,
       recentPerceptionEvents,
+      soundEvents: {
+        current: currentSoundEvents,
+        recent: recentSoundEvents,
+      },
       combatEventMetrics: {
         retained: this.combatEvents.length,
         capacity: this.combatEvents.capacity,
@@ -6360,6 +6726,14 @@ export class Simulation {
         retained: this.perceptionEvents.length,
         capacity: this.perceptionEvents.capacity,
         dropped: this.perceptionEventDropped,
+      },
+      soundEventMetrics: {
+        ...this.soundEventMetrics,
+        retained: this.soundEventHistory.length,
+        historyCapacity: this.soundEventHistory.capacity,
+        historyDropped: this.soundEventHistoryDropped,
+        queueDropped: this.soundEvents.dropped,
+        maximumEventsPerTick: this.soundEvents.maximumEventsPerTick,
       },
       ...(this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
         ? { investigationEventMetrics: { ...this.investigationEventMetrics } }
@@ -6394,6 +6768,12 @@ export class Simulation {
           active: this.projectiles.activeCount,
           capacity: this.projectiles.capacity,
           dropped: this.projectiles.dropped,
+        },
+        soundEvents: {
+          active: this.soundEvents.activeCount,
+          capacity: this.soundEvents.capacity,
+          dropped: this.soundEvents.dropped,
+          maximumPerTick: this.soundEvents.maximumEventsPerTick,
         },
         particles: {
           active: this.particles.activeCount,
@@ -6544,6 +6924,17 @@ export class Simulation {
       castSequences: Object.fromEntries(
         this.spells.list().map((spell) => [spell.id, this.castSequences[spell.code]]),
       ),
+      movement: {
+        mode: PLAYER_MOVEMENT_MODE_NAMES[this.player.movementMode] ?? "idle",
+        targetDistanceMeters: this.player.movementTargetDistance,
+        strideProgressMeters: this.player.runningStrideProgress,
+        nextFootstepDistanceMeters: Math.max(
+          0,
+          this.player.runningNextFootstepDistance
+            - this.player.runningStrideProgress,
+        ),
+        lastFootstepTick: this.player.lastFootstepTick || null,
+      },
       cell: null,
       age: null,
       lifetime: null,
@@ -6819,6 +7210,8 @@ export class Simulation {
         gameplayProfile: this.commandLogGameplayProfile,
         enemyAiProfile: this.commandLogEnemyAiProfile,
         deadBodyProfile: this.commandLogDeadBodyProfile,
+        movementSoundProfile: this.commandLogMovementSoundProfile,
+        soundEventCapacity: this.commandLogSoundEventCapacity,
         dynamicDeadBodyCapacity: this.commandLogDynamicDeadBodyCapacity,
         inertDeadBodyCapacity: this.commandLogInertDeadBodyCapacity,
       },
@@ -6833,7 +7226,7 @@ export class Simulation {
   /** @param {Record<string, any>} recording */
   static replay(recording) {
     const recordingSchema = Number(recording.schemaVersion);
-    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 10) {
+    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 11) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
     const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
@@ -6855,6 +7248,8 @@ export class Simulation {
     let gameplayProfile = GAMEPLAY_PROFILE_PRE_COMBAT;
     let enemyAiProfile = ENEMY_AI_PROFILE_NONE;
     let deadBodyProfile = DEAD_BODY_PROFILE_NONE;
+    let movementSoundProfile = MOVEMENT_SOUND_PROFILE_NONE;
+    let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
     if (recordingSchema === 6) {
@@ -6906,7 +7301,11 @@ export class Simulation {
       ) {
         throw new TypeError("Schema-v8 recording has invalid enemy capacity metadata");
       }
-    } else if (recordingSchema === 9 || recordingSchema === 10) {
+    } else if (
+      recordingSchema === 9
+      || recordingSchema === 10
+      || recordingSchema === 11
+    ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
       const validProfiles = (
@@ -6933,7 +7332,7 @@ export class Simulation {
           `Schema-v${recordingSchema} recording has invalid enemy capacity metadata`,
         );
       }
-      if (recordingSchema === 10) {
+      if (recordingSchema >= 10) {
         deadBodyProfile = String(recording.configuration?.deadBodyProfile ?? "");
         dynamicDeadBodyCapacity = Number(
           recording.configuration?.dynamicDeadBodyCapacity,
@@ -6943,7 +7342,7 @@ export class Simulation {
         );
         if (deadBodyProfile !== DEAD_BODY_PROFILE_V1) {
           throw new TypeError(
-            "Schema-v10 recording has invalid or missing dead-body profile",
+            `Schema-v${recordingSchema} recording has invalid or missing dead-body profile`,
           );
         }
         if (
@@ -6954,7 +7353,26 @@ export class Simulation {
           || inertDeadBodyCapacity <= 0
           || inertDeadBodyCapacity > DEAD_BODY.maximumInertCapacity
         ) {
-          throw new TypeError("Schema-v10 recording has invalid dead-body capacities");
+          throw new TypeError(
+            `Schema-v${recordingSchema} recording has invalid dead-body capacities`,
+          );
+        }
+      }
+      if (recordingSchema === 11) {
+        movementSoundProfile = String(
+          recording.configuration?.movementSoundProfile ?? "",
+        );
+        if (movementSoundProfile !== MOVEMENT_SOUND_PROFILE_V1) {
+          throw new TypeError(
+            "Schema-v11 recording has invalid or missing movement-sound profile",
+          );
+        }
+        soundEventCapacity = Number(recording.configuration?.soundEventCapacity);
+        if (
+          !Number.isInteger(soundEventCapacity)
+          || soundEventCapacity <= 0
+        ) {
+          throw new TypeError("Schema-v11 recording has invalid sound-event capacity");
         }
       }
     }
@@ -6986,6 +7404,8 @@ export class Simulation {
       gameplayProfile,
       enemyAiProfile,
       deadBodyProfile,
+      movementSoundProfile,
+      soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,
     });

@@ -10,6 +10,8 @@ import {
   ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
+  MOVEMENT_SOUND_PROFILE_NONE,
+  MOVEMENT_SOUND_PROFILE_V1,
   PROJECTILE,
   SCHEMA_VERSION,
 } from "../src/config.js";
@@ -39,11 +41,11 @@ function withoutBroadphase(snapshot) {
   return value;
 }
 
-test("schema-v10 recording stores investigative and dead-body profile metadata and replays exactly", () => {
+test("schema-v11 recording stores investigative, dead-body, and movement-sound profiles and replays exactly", () => {
   const source = new Simulation({ seed: 0x0800_f17e, particleBurstCount: 0 });
   runFixture(source);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 10);
+  assert.equal(recording.schemaVersion, 11);
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
   assert.equal(
@@ -52,6 +54,8 @@ test("schema-v10 recording stores investigative and dead-body profile metadata a
   );
   assert.equal(recording.configuration.projectileCapacity, PROJECTILE.capacity);
   assert.equal(recording.configuration.deadBodyProfile, DEAD_BODY_PROFILE_V1);
+  assert.equal(recording.configuration.movementSoundProfile, MOVEMENT_SOUND_PROFILE_V1);
+  assert.equal(recording.configuration.soundEventCapacity, PROJECTILE.capacity + 1);
   assert.equal(
     recording.configuration.dynamicDeadBodyCapacity,
     DEAD_BODY.dynamicCapacity,
@@ -72,6 +76,7 @@ test("schema-v8 recording selects the frozen perceptive profile", () => {
     particleBurstCount: 0,
     enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
     deadBodyProfile: DEAD_BODY_PROFILE_NONE,
+    movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
   });
   runFixture(source);
   const recording = source.exportCommandLog();
@@ -81,11 +86,29 @@ test("schema-v8 recording selects the frozen perceptive profile", () => {
   assert.deepEqual(withoutBroadphase(replay.snapshot()), withoutBroadphase(source.snapshot()));
 });
 
+test("schema-v10 keeps full-speed silent movement and direct Fireball hearing", () => {
+  const source = new Simulation({
+    seed: 0x1000_f17e,
+    particleBurstCount: 0,
+    movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
+  });
+  runFixture(source);
+  const recording = source.exportCommandLog();
+  recording.schemaVersion = 10;
+  delete recording.configuration.movementSoundProfile;
+  delete recording.configuration.soundEventCapacity;
+  const replay = Simulation.replay(recording);
+  assert.equal(replay.movementSoundProfile, MOVEMENT_SOUND_PROFILE_NONE);
+  assert.equal(replay.soundEventMetrics.emittedFootsteps, 0);
+  assert.deepEqual(withoutBroadphase(replay.snapshot()), withoutBroadphase(source.snapshot()));
+});
+
 test("schema-v7 and v6 replay construct historical four-entry pools and frozen profiles", () => {
   const tacticalSource = new Simulation({
     seed: 0x0700_f17e,
     enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
     deadBodyProfile: DEAD_BODY_PROFILE_NONE,
+    movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
     projectileCapacity: PROJECTILE.legacyCapacity,
     particleBurstCount: 0,
   });
@@ -119,7 +142,7 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
   source.tick(null);
   const recording = source.exportCommandLog();
   recording.schemaVersion = 8;
-  assert.equal(SCHEMA_VERSION, 10);
+  assert.equal(SCHEMA_VERSION, 11);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),
@@ -142,11 +165,11 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
   );
 });
 
-test("schema-v10 rejects perceptive profile metadata at the new boundary", () => {
+test("schema-v11 rejects perceptive profile metadata at the new boundary", () => {
   const source = new Simulation({ particleBurstCount: 0 });
   source.tick(null);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 10);
+  assert.equal(recording.schemaVersion, 11);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),
@@ -156,6 +179,16 @@ test("schema-v10 rejects perceptive profile metadata at the new boundary", () =>
       },
     }),
     /invalid or missing gameplay profiles/,
+  );
+  assert.throws(
+    () => Simulation.replay({
+      ...structuredClone(recording),
+      configuration: {
+        ...structuredClone(recording.configuration),
+        movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
+      },
+    }),
+    /invalid or missing movement-sound profile/,
   );
 });
 
@@ -319,6 +352,7 @@ test("schema-v8 replay retains the af58a3d perceptive golden trace", () => {
     seed: 0x0800_f17e,
     particleBurstCount: 0,
     enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+    movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
   });
   runFixture(source);
   const recording = source.exportCommandLog();
@@ -430,6 +464,7 @@ test("schema-v7 replay retains the 2727c2e omniscient tactical golden trace", ()
     seed: 0x7000_0700,
     particleBurstCount: 0,
     enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
+    movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
     projectileCapacity: PROJECTILE.legacyCapacity,
   });
   for (let ordinal = 0; ordinal < 240; ordinal += 1) {

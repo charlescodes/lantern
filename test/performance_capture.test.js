@@ -76,6 +76,15 @@ test("ten-second capture resets histories, observes unscripted workload, and rep
           pools: {
             dynamicDeadBodies: { capacity: 16, forcedSettles: 2 },
             inertDeadBodies: { capacity: 100, overwritten: 7 },
+            soundEvents: { capacity: 257 },
+          },
+          soundEventMetrics: {
+            maximumEventsPerTick: 3,
+            queueDropped: 2,
+            emittedFootsteps: 12,
+            heardFootsteps: 5,
+            emittedFireballImpacts: 4,
+            heardFireballImpacts: 3,
           },
           contacts: Array(3),
         },
@@ -109,7 +118,7 @@ test("ten-second capture resets histories, observes unscripted workload, and rep
   assert.equal(gpuEnds, 1);
   assert.equal(report.actualDurationMs, 10_000);
   assert.equal(report.reportVersion, PERFORMANCE_REPORT_VERSION);
-  assert.equal(PERFORMANCE_REPORT_VERSION, 3);
+  assert.equal(PERFORMANCE_REPORT_VERSION, 4);
   assert.equal(report.workloadMaxima.maxParticles, 224);
   assert.equal(report.workloadMaxima.maxActiveLights, 15);
   assert.equal(report.workloadMaxima.maxTrueSightRays, 96);
@@ -121,6 +130,13 @@ test("ten-second capture resets histories, observes unscripted workload, and rep
     maximumInert: 81,
     forcedSettles: 2,
     overwrites: 7,
+  });
+  assert.deepEqual(report.soundEvents, {
+    capacity: 257,
+    maximumPerTick: 3,
+    dropped: 2,
+    emitted: { footsteps: 12, fireballImpacts: 4 },
+    heard: { footsteps: 5, fireballImpacts: 3 },
   });
   assert.deepEqual(report.trueSight.maxima, {
     rays: 96,

@@ -191,6 +191,15 @@ test("clue arbitration pins priority, freshness ties, and same-effect deduplicat
     effectId: 40,
     projectileId: 7,
   }).decision, INVESTIGATION_DECISION.deduplicate);
+  assert.equal(arbitrateInvestigationClue({
+    priority: INVESTIGATION_PRIORITY.sound,
+    observationTick: 20,
+    soundEventId: 4,
+  }, {
+    priority: INVESTIGATION_PRIORITY.sound,
+    observationTick: 20,
+    soundEventId: 5,
+  }).reason, "same-tick-sound");
 });
 
 test("a visible non-threatening Fireball redirects anonymously to its reconstructed origin", () => {
@@ -553,7 +562,7 @@ test("investigation uses the existing 480-tick search and returns to guard", () 
   assert.equal(enemy.investigation.active, false);
 });
 
-test("pool reset and swap-move cover every v9 investigation component", () => {
+test("pool reset and swap-move cover every investigation component", () => {
   const pool = new EnemyWizardPool(4);
   for (let index = 0; index < 3; index += 1) {
     pool.spawn({
@@ -576,6 +585,9 @@ test("pool reset and swap-move cover every v9 investigation component", () => {
     "investigationAcceptedTick",
     "investigationEffectId",
     "investigationProjectileId",
+    "investigationSoundEventId",
+    "investigationSoundKind",
+    "investigationSoundRadius",
     "investigationProjectileX",
     "investigationProjectileZ",
     "investigationProjectileVx",
@@ -604,6 +616,9 @@ test("pool reset and swap-move cover every v9 investigation component", () => {
   });
   assert.equal(pool.investigationPriority[0], INVESTIGATION_PRIORITY.none);
   assert.equal(pool.investigationSource[0], KNOWLEDGE_SOURCE.none);
+  assert.equal(pool.investigationSoundEventId[0], 0);
+  assert.equal(pool.investigationSoundKind[0], 0);
+  assert.equal(pool.investigationSoundRadius[0], 0);
   assert.equal(Number.isNaN(pool.investigationAnchorX[0]), true);
   assert.equal(Number.isNaN(pool.investigationProjectileX[0]), true);
 });

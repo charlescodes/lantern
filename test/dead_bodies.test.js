@@ -345,7 +345,7 @@ test("both teams' Fireballs hit dynamic bodies while inert bodies remain entirel
   assert.equal(inertOnly.snapshot().deadBodies.inert[0].x, 8);
 });
 
-test("schema 10 captures body configuration while schema 9 forces corpse-free behavior", () => {
+test("schema 11 captures body configuration while schema 9 forces corpse-free behavior", () => {
   const definition = cloneFireballDefinition(DEFAULT_FIREBALL_DEFINITION);
   definition.cast.cooldown = 0;
   definition.projectile.speed = 40;
@@ -366,7 +366,7 @@ test("schema 10 captures body configuration while schema 9 forces corpse-free be
     source.tick({ move: target, cast: target });
   }
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 10);
+  assert.equal(recording.schemaVersion, 11);
   assert.equal(recording.configuration.deadBodyProfile, DEAD_BODY_PROFILE_V1);
   assert.equal(recording.configuration.dynamicDeadBodyCapacity, 3);
   assert.equal(recording.configuration.inertDeadBodyCapacity, 7);

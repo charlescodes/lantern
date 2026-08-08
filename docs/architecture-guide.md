@@ -365,11 +365,11 @@ If a presentation-only change starts touching `src/sim`, or an AI change starts 
 
 ## Recommended refactoring sequence
 
-Do this after the current schema-v10 dead-body checkpoint, in behavior-preserving slices. Do not combine it with a new spell, actor type, networking, or perception feature.
+Do this after the current schema-v11 movement-sound checkpoint, in behavior-preserving slices. Do not combine it with a new spell, actor type, networking, or perception feature.
 
 ### Stage 0: freeze the current behavior
 
-- Retain the v2-v10 replay fixtures and broadphase-versus-brute-force oracles.
+- Retain the v2-v11 replay fixtures and broadphase-versus-brute-force oracles.
 - Add a simple import-boundary test for `src/sim`, `src/spells`, and `src/core`.
 - Record representative snapshot fixtures at a few ticks rather than snapshotting every implementation detail everywhere.
 - Keep Canvas2D and Three.js acceptance as separate human gates.

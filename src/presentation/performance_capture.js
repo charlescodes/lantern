@@ -4,7 +4,7 @@ import { percentile } from "../core/ring_buffer.js";
 import { APPLICATION_VERSION } from "../config.js";
 
 export const PERFORMANCE_CAPTURE_DURATION_MS = 10_000;
-export const PERFORMANCE_REPORT_VERSION = 3;
+export const PERFORMANCE_REPORT_VERSION = 4;
 
 /** @param {number[]} values */
 export function summarizeGpuSamples(values) {
@@ -135,6 +135,33 @@ export class PerformanceCapture {
     this.workload.inertDeadBodyCapacity = Number(
       snapshot.pools?.inertDeadBodies?.capacity ?? 0,
     );
+    this.workload.soundEventCapacity = Number(
+      snapshot.pools?.soundEvents?.capacity ?? 0,
+    );
+    this.workload.maxSoundEventsPerTick = Math.max(
+      this.workload.maxSoundEventsPerTick,
+      Number(snapshot.soundEventMetrics?.maximumEventsPerTick ?? 0),
+    );
+    this.workload.soundEventDrops = Math.max(
+      this.workload.soundEventDrops,
+      Number(snapshot.soundEventMetrics?.queueDropped ?? 0),
+    );
+    this.workload.footstepsEmitted = Math.max(
+      this.workload.footstepsEmitted,
+      Number(snapshot.soundEventMetrics?.emittedFootsteps ?? 0),
+    );
+    this.workload.footstepsHeard = Math.max(
+      this.workload.footstepsHeard,
+      Number(snapshot.soundEventMetrics?.heardFootsteps ?? 0),
+    );
+    this.workload.fireballSoundsEmitted = Math.max(
+      this.workload.fireballSoundsEmitted,
+      Number(snapshot.soundEventMetrics?.emittedFireballImpacts ?? 0),
+    );
+    this.workload.fireballSoundsHeard = Math.max(
+      this.workload.fireballSoundsHeard,
+      Number(snapshot.soundEventMetrics?.heardFireballImpacts ?? 0),
+    );
     this.workload.maxContacts = Math.max(
       this.workload.maxContacts,
       Number(snapshot.contacts?.length ?? 0),
@@ -194,6 +221,13 @@ export class PerformanceCapture {
       deadBodyOverwrites: 0,
       dynamicDeadBodyCapacity: 0,
       inertDeadBodyCapacity: 0,
+      soundEventCapacity: 0,
+      maxSoundEventsPerTick: 0,
+      soundEventDrops: 0,
+      footstepsEmitted: 0,
+      footstepsHeard: 0,
+      fireballSoundsEmitted: 0,
+      fireballSoundsHeard: 0,
       maxContacts: 0,
       maxActiveLights: 0,
       maxResidentLights: 0,
@@ -270,6 +304,19 @@ export class PerformanceCapture {
           maximumInert: this.workload.maxInertDeadBodies,
           forcedSettles: this.workload.deadBodyForcedSettles,
           overwrites: this.workload.deadBodyOverwrites,
+        },
+        soundEvents: {
+          capacity: this.workload.soundEventCapacity,
+          maximumPerTick: this.workload.maxSoundEventsPerTick,
+          dropped: this.workload.soundEventDrops,
+          emitted: {
+            footsteps: this.workload.footstepsEmitted,
+            fireballImpacts: this.workload.fireballSoundsEmitted,
+          },
+          heard: {
+            footsteps: this.workload.footstepsHeard,
+            fireballImpacts: this.workload.fireballSoundsHeard,
+          },
         },
         trueSight: {
           atEnd: presentation.trueSight ?? null,

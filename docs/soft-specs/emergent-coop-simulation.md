@@ -100,7 +100,7 @@ This story probes a shared actor foundation without requiring every actor to pay
 
 The present engine already protects several foundations described by the [platform contract](../platform.md): fixed 60 Hz simulation authority, commands, copied snapshots, replay versions, stable entity identity, bounded typed-array pools, deterministic AI inputs, shared navigation infrastructure, broadphase queries, versioned spell data, and renderer independence.
 
-The shipped [0.9.0 Fireball Investigation AI](../milestones/0.9.0-fireball-investigation-ai.md) is a narrow first slice of this direction. Wizards can anonymously infer a visible Fireball's launch point or hear its impact, arbitrate that clue against personal memory and damage, and run a bounded search. This is deliberately not yet a general sound system or a broad personality model.
+The shipped [0.9.0 Fireball Investigation AI](../milestones/0.9.0-fireball-investigation-ai.md) and current [schema-v11 movement-sound checkpoint](../notes/proximity-walking-movement-sound.md) are narrow first slices of this direction. Wizards can anonymously infer a visible Fireball's launch point, hear its impact, or hear a running footstep, arbitrate that clue against personal memory and damage, and run a bounded search. The shared typed queue proves bounded transient sound facts, but this is deliberately not yet the proposed surface/footwear acoustics system or a broad personality model.
 
 The current world and navigation data are intentionally narrower than this north star:
 

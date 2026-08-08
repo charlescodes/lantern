@@ -8,6 +8,7 @@ import {
   COMBAT,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
+  MOVEMENT_SOUND_PROFILE_NONE,
   PROJECTILE_OWNER_KIND,
 } from "../src/config.js";
 import {
@@ -82,6 +83,7 @@ test("four tactical wizards withstand dense threats, map edits, and retreat cycl
     seed: 0x0700_a170,
     particleBurstCount: 0,
     enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
+    movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
   });
   simulation.tick(null);
   fillEnemyPool(simulation);

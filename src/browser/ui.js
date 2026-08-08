@@ -42,6 +42,7 @@ export class ArenaUi {
     this.dynamicDeadBodyPool = required("dynamic-dead-body-pool");
     this.inertDeadBodyPool = required("inert-dead-body-pool");
     this.projectilePool = required("projectile-pool");
+    this.soundEventPool = required("sound-event-pool");
     this.particlePool = required("particle-pool");
     this.rockBar = /** @type {HTMLElement} */ (required("rock-bar"));
     this.enemyBar = /** @type {HTMLElement} */ (required("enemy-bar"));
@@ -50,6 +51,7 @@ export class ArenaUi {
     );
     this.inertDeadBodyBar = /** @type {HTMLElement} */ (required("inert-dead-body-bar"));
     this.projectileBar = /** @type {HTMLElement} */ (required("projectile-bar"));
+    this.soundEventBar = /** @type {HTMLElement} */ (required("sound-event-bar"));
     this.particleBar = /** @type {HTMLElement} */ (required("particle-bar"));
     this.error = required("error-output");
     this.toast = required("toast");
@@ -180,6 +182,8 @@ export class ArenaUi {
       `log       ${snapshot.commandLog.retained}/${snapshot.commandLog.capacity}  dropped ${snapshot.commandLog.dropped}`,
       `contacts  ${snapshot.contacts.length}  dropped ${snapshot.contactMetrics.dropped}`,
       `combat    ${snapshot.combatEventMetrics.retained}/${snapshot.combatEventMetrics.capacity}  dropped ${snapshot.combatEventMetrics.dropped}`,
+      `movement  ${snapshot.player.movement.mode}  target ${number(snapshot.player.movement.targetDistanceMeters)}m  next step ${number(snapshot.player.movement.nextFootstepDistanceMeters)}m`,
+      `sound     recent ${snapshot.soundEventMetrics.retained}/${snapshot.soundEventMetrics.historyCapacity}  footsteps ${snapshot.soundEventMetrics.emittedFootsteps}/${snapshot.soundEventMetrics.heardFootsteps} emitted/heard`,
     ].join("\n");
     this.rockPool.textContent = `${snapshot.pools.rocks.active} / ${snapshot.pools.rocks.capacity}  ·  dropped ${snapshot.pools.rocks.dropped}  ·  caps ${snapshot.pools.rocks.speedClamped}`;
     this.enemyPool.textContent = `${snapshot.pools.enemies.active} / ${snapshot.pools.enemies.capacity}  ·  dropped ${snapshot.pools.enemies.dropped}`;
@@ -195,6 +199,12 @@ export class ArenaUi {
       `overwritten ${snapshot.pools.inertDeadBodies.overwritten}`,
     ].join("  ·  ");
     this.projectilePool.textContent = `${snapshot.pools.projectiles.active} / ${snapshot.pools.projectiles.capacity}  ·  dropped ${snapshot.pools.projectiles.dropped}`;
+    this.soundEventPool.textContent = [
+      `${snapshot.pools.soundEvents.active} / ${snapshot.pools.soundEvents.capacity}`,
+      `max ${snapshot.pools.soundEvents.maximumPerTick}`,
+      `dropped ${snapshot.pools.soundEvents.dropped}`,
+      `fireballs ${snapshot.soundEventMetrics.emittedFireballImpacts}/${snapshot.soundEventMetrics.heardFireballImpacts}`,
+    ].join("  ·  ");
     this.particlePool.textContent = [
       `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}`,
       `dropped ${snapshot.pools.particles.dropped}`,
@@ -207,6 +217,7 @@ export class ArenaUi {
     this.dynamicDeadBodyBar.style.width = `${(snapshot.pools.dynamicDeadBodies.active / snapshot.pools.dynamicDeadBodies.capacity) * 100}%`;
     this.inertDeadBodyBar.style.width = `${(snapshot.pools.inertDeadBodies.active / snapshot.pools.inertDeadBodies.capacity) * 100}%`;
     this.projectileBar.style.width = `${(snapshot.pools.projectiles.active / snapshot.pools.projectiles.capacity) * 100}%`;
+    this.soundEventBar.style.width = `${(snapshot.pools.soundEvents.active / snapshot.pools.soundEvents.capacity) * 100}%`;
     this.particleBar.style.width = `${(snapshot.pools.particles.active / snapshot.pools.particles.capacity) * 100}%`;
     const inspected = view.pinnedHidden ? null : view.inspected ?? view.hover;
     this.inspector.textContent = view.pinnedHidden

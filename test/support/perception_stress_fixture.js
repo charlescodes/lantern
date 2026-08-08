@@ -134,6 +134,9 @@ function clearPerceptionState(pool, index) {
   pool.investigationAcceptedTick[index] = 0;
   pool.investigationEffectId[index] = 0;
   pool.investigationProjectileId[index] = 0;
+  pool.investigationSoundEventId[index] = 0;
+  pool.investigationSoundKind[index] = 0;
+  pool.investigationSoundRadius[index] = 0;
   pool.investigationProjectileX[index] = Number.NaN;
   pool.investigationProjectileZ[index] = Number.NaN;
   pool.investigationProjectileVx[index] = 0;
