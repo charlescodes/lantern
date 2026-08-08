@@ -164,16 +164,22 @@ export class Camera3D {
 
   /** @param {number} viewportX @param {number} viewportY @param {number} factor */
   zoomAtViewport(viewportX, viewportY, factor) {
-    if (!Number.isFinite(factor) || factor <= 0) return false;
     const before = this.viewportToWorld(viewportX, viewportY);
+    if (!this.zoomByFactor(factor)) return false;
+    const after = this.viewportToWorld(viewportX, viewportY);
+    this.centerX += before.x - after.x;
+    this.centerZ += before.z - after.z;
+    return true;
+  }
+
+  /** @param {number} factor */
+  zoomByFactor(factor) {
+    if (!Number.isFinite(factor) || factor <= 0) return false;
     this.visibleHeightMeters = clamp(
       this.visibleHeightMeters / factor,
       this.minimumVisibleHeightMeters,
       this.maximumVisibleHeightMeters,
     );
-    const after = this.viewportToWorld(viewportX, viewportY);
-    this.centerX += before.x - after.x;
-    this.centerZ += before.z - after.z;
     return true;
   }
 

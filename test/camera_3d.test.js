@@ -72,6 +72,22 @@ test("3D cursor-anchored zoom retains the ground point and metric bounds", () =>
   assert.equal(camera.zoomAtViewport(anchor.x, anchor.y, 0), false);
 });
 
+test("3D centered zoom changes coverage without moving the ground target", () => {
+  const camera = new Camera3D({ centerX: 10, centerZ: 20 });
+
+  assert.equal(camera.zoomByFactor(2), true);
+  assert.equal(camera.visibleHeightMeters, 12);
+  assert.equal(camera.centerX, 10);
+  assert.equal(camera.centerZ, 20);
+
+  camera.zoomByFactor(1_000);
+  assert.equal(camera.visibleHeightMeters, 4);
+  camera.zoomByFactor(0.000_001);
+  assert.equal(camera.visibleHeightMeters, 64);
+  assert.equal(camera.zoomByFactor(0), false);
+  assert.equal(camera.visibleHeightMeters, 64);
+});
+
 test("3D camera pan, focus, and backend-neutral render pose use world meters", () => {
   const camera = new Camera3D({ centerX: 5, centerZ: 7 });
   camera.resize(800, 400);

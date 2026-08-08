@@ -1,6 +1,6 @@
-# Lantern 0.8.1 / Playtest Mode and Developer Toolbox
+# Lantern 0.8.2 / Player-Follow Camera
 
-A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and enemy wizards that see, remember, hunt, search, and return to guard posts. The live pool is sized for 64 enemies while the authored encounter still caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, AI diagnostics, and TrueSight frame. The application now boots into a clean, full-viewport playtest mode; press `;` to toggle the developer toolbox.
+A browser-first fixed-step X/Z combat simulation with replay-safe shared Fireball authoring, one scenario-authored obelisk, and enemy wizards that see, remember, hunt, search, and return to guard posts. The live pool is sized for 64 enemies while the authored encounter still caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js 3D vertical consumes the same read-only snapshots, spell table, health state, AI diagnostics, and TrueSight frame. The application boots into a clean, full-viewport playtest mode with the camera locked smoothly to the player's local render pose; press `;` to toggle the developer toolbox.
 
 ## Run
 
@@ -49,7 +49,7 @@ mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.1` adds [Playtest Mode and the Developer Toolbox](./docs/milestones/0.8.1-playtest-developer-toolbox.md) without changing simulation truth or serialization. Release `0.8.0` remains the [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) schema-v8 boundary. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
+Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.8.2` adds the presentation-only [Player-Follow Camera](./docs/milestones/0.8.2-player-follow-camera.md). Release `0.8.1` added [Playtest Mode and the Developer Toolbox](./docs/milestones/0.8.1-playtest-developer-toolbox.md), while `0.8.0` remains the [Visual Perception and Hunting](./docs/milestones/0.8.0-visual-perception-hunting.md) schema-v8 boundary. Scenario JSON remains v3, map v1, Fireball definition v1, and performance-report v2. Schema-v7 replay retains the exact omniscient tactical wizard and schema-v6 retains the frozen basic wizard.
 
 ## Playtest controls and developer toolbox
 
@@ -58,8 +58,8 @@ Start with the [documentation index](./docs/README.md). It separates mutable [so
 - Press `;` to reveal or hide the developer toolbox. The top controls, right-side instruments, bottom coordinate/help rail, authoring windows, debug overlays, and developer shortcuts remain behind this presentation-only gate. Closing the toolbox while editing returns to play mode.
 - Open **Spell Lab** from the toolbox while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed. **Collapse** removes the window from the arena and returns its launcher to the toolbox.
 - While the toolbox is open, press `Space` to pause, `.` to pause and advance one tick, `R` to reset the current seed, and `Shift+R` to choose a new seed.
-- While the toolbox is open, press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state; `F` focuses the player.
-- Use the wheel to zoom and MMB drag to pan in either mode. Toolbox-open hover inspects transiently, and click pins or unpins an entity by stable ID.
+- While the toolbox is open, press `E` to enter the paused scenario editor. Leaving edit mode restores the previous paused/running state; `F` recenters its free camera on the player.
+- Use the wheel to zoom. Play zoom stays centered on the player and MMB cannot detach the camera. In edit mode, wheel zoom remains cursor-anchored and MMB drag pans. Toolbox-open hover inspects transiently, and click pins or unpins an entity by stable ID.
 - Use **Spark walls** to bypass or enable particle/map sweeps. **Ground bounce** defaults on and independently controls the single ground rebound.
 - At zero health, movement and casting freeze for 90 fixed ticks (1.5 seconds), then the same seed restarts automatically. Reset and Spell Lab actions remain available during defeat.
 
@@ -67,7 +67,7 @@ Start with the [documentation index](./docs/README.md). It separates mutable [so
 
 Simulation truth uses meters, seconds, and kilograms. Player, rock, projectile, blast, and particle measurements are continuous metric values. The static collision map is a separate `1m × 1m` occupancy grid; entities are circles moving continuously across it rather than pixel- or cell-locked bodies.
 
-Both presentation cameras store a visible world height, defaulting to `24m` with a `4-64m` zoom range. Their world-to-viewport scale is derived from the current canvas bounds, so window size and device-pixel ratio do not alter simulation scale. The 3D camera uses 45 degree yaw and 55 degree downward pitch; pointer rays intersect `Y=0`, preserving X/Z commands for movement, casting, editing, and selection. Canvas backing pixels, fixed-screen debug strokes, text size, and pointer click tolerance remain isolated presentation concerns.
+Both presentation cameras store a visible world height, defaulting to `24m` with a `4-64m` zoom range. During play, their ground target is updated every rendered frame from the same local fixed-tick pose used to draw the player, with no spring, prediction, or network buffer. Edit mode retains a free camera. World-to-viewport scale is derived from the current canvas bounds, so window size and device-pixel ratio do not alter simulation scale. The 3D camera uses 45 degree yaw and 55 degree downward pitch; pointer rays intersect `Y=0`, preserving X/Z commands for movement, casting, editing, and selection. Canvas backing pixels, fixed-screen debug strokes, text size, and pointer click tolerance remain isolated presentation concerns.
 
 There is no component-mask or ECS dispatch layer yet. Systems explicitly process the player and bounded typed-array pools. A future lighting field should declare its own metric cell size and consume explicit light/occluder data; it should not inherit either the collision grid resolution or the canvas raster resolution.
 

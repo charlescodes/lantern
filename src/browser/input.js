@@ -38,6 +38,7 @@ export class InputController {
   }
 
   sampleCommand() {
+    this.refreshPointerWorld();
     const cast = this.pendingCast;
     this.pendingCast = null;
     return {
@@ -50,9 +51,20 @@ export class InputController {
   setMode(mode) {
     this.mode = mode;
     this.rightHeld = false;
+    this.panning = false;
     this.paintButton = -1;
     this.pointerDown.button = -1;
     this.lastPaintedCell = "";
+  }
+
+  refreshPointerWorld() {
+    const world = this.camera.viewportToWorld(
+      this.lastPointer.x,
+      this.lastPointer.y,
+    );
+    this.mouseWorld.x = world.x;
+    this.mouseWorld.z = world.z;
+    return this.mouseWorld;
   }
 
   /** @param {string} tool */
@@ -115,7 +127,7 @@ export class InputController {
       );
     }
     this.lastPointer = point;
-    this.mouseWorld = this.camera.viewportToWorld(point.x, point.y);
+    this.refreshPointerWorld();
     if (
       this.mode === "edit" &&
       this.paintButton >= 0 &&
@@ -142,9 +154,9 @@ export class InputController {
     const point = this.#viewportPoint(event);
     this.lastPointer = point;
     if (event.button === 0) this.pointerDown = { ...point, button: event.button };
-    this.mouseWorld = this.camera.viewportToWorld(point.x, point.y);
+    this.refreshPointerWorld();
     if (event.button === 1) {
-      this.panning = true;
+      this.panning = this.mode === "edit";
       event.preventDefault();
       return;
     }
@@ -203,11 +215,16 @@ export class InputController {
     event.preventDefault();
     const bounds = this.canvas.getBoundingClientRect();
     const factor = Math.exp(-event.deltaY * 0.0015);
-    this.camera.zoomAtViewport(
-      event.clientX - bounds.left,
-      event.clientY - bounds.top,
-      factor,
-    );
+    if (this.mode === "play") {
+      this.camera.zoomByFactor(factor);
+    } else {
+      this.camera.zoomAtViewport(
+        event.clientX - bounds.left,
+        event.clientY - bounds.top,
+        factor,
+      );
+    }
+    this.refreshPointerWorld();
   }
 
   /** @param {KeyboardEvent} event */

@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.8.1` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.8.2` is the current application release. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -31,6 +31,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 - [0.7.0 Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) — shared bounded navigation, deterministic strafe/intercept/dodge/retreat behavior, schema-v7 diagnostics, and frozen schema-v6 basic replay.
 - [0.8.0 Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) — geometry-only vision, personal memory/search/guard behavior, bounded 50-mob infrastructure, schema-v8 replay, and frozen schema-v7 tactical replay.
 - [0.8.1 Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) — clean full-viewport boot, one semicolon-gated developer workspace, parked authoring windows, and presentation-only diagnostic suppression without a schema change.
+- [0.8.2 Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) — exact local render-pose following in play, free camera authoring in edit, and pointer-stable camera input without a schema change.
 - [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
 
 ## Open defects
@@ -56,12 +57,13 @@ These documents preserve future intent and candidate experiments. They are mutab
 | 0.7.0 | [Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) | Shared incremental navigation, strafe/lead/dodge/retreat tactics, diagnostics, and schema v7 |
 | 0.8.0 | [Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) | Vision, personal memory/search/return, destination cache, broadphase scaling, and schema v8 |
 | 0.8.1 | [Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) | Clean playtest boot, semicolon-gated developer chrome and diagnostics, parked Spell Lab, no schema change |
+| 0.8.2 | [Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) | Exact play-camera lock, free edit camera, centered play zoom, no schema change |
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.8.1`.
+- Application/package release: `0.8.2`.
 - Snapshot and command-recording schema: v8.
 - Scenario JSON schema: v3; legacy scenario v2 and map v1 remain importable.
 - Fireball definition format: v1.

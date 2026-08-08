@@ -8,6 +8,7 @@ import {
   healthBarRatio,
 } from "../presentation/combat_visuals.js";
 import { enemyFacingTriangle } from "../presentation/enemy_facing.js";
+import { interpolateRenderValue } from "../presentation/player_camera.js";
 import {
   FIREBALL_COLOR_CORE,
   FIREBALL_COLOR_IMPACT_LIGHT,
@@ -572,8 +573,8 @@ export class DebugRenderer {
   #drawPlayer(snapshot, alpha, developerToolsOpen) {
     const context = this.context;
     const player = snapshot.player;
-    const x = player.previousX + (player.x - player.previousX) * alpha;
-    const z = player.previousZ + (player.z - player.previousZ) * alpha;
+    const x = interpolateRenderValue(player.previousX, player.x, alpha);
+    const z = interpolateRenderValue(player.previousZ, player.z, alpha);
     const line = this.camera.viewportLengthToWorld(1);
     context.beginPath();
     context.arc(x, z, player.radius, 0, Math.PI * 2);

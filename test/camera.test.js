@@ -65,6 +65,22 @@ test("cursor-anchored zoom changes metric coverage and respects its bounds", () 
   assert.equal(camera.visibleHeightMeters, 64);
 });
 
+test("centered zoom changes coverage without moving the camera target", () => {
+  const camera = new Camera2D({ centerX: 10, centerZ: 20 });
+
+  assert.equal(camera.zoomByFactor(2), true);
+  assert.equal(camera.visibleHeightMeters, 12);
+  assert.equal(camera.centerX, 10);
+  assert.equal(camera.centerZ, 20);
+
+  camera.zoomByFactor(1_000);
+  assert.equal(camera.visibleHeightMeters, 4);
+  camera.zoomByFactor(0.000_001);
+  assert.equal(camera.visibleHeightMeters, 64);
+  assert.equal(camera.zoomByFactor(0), false);
+  assert.equal(camera.visibleHeightMeters, 64);
+});
+
 test("camera panning is expressed in world meters", () => {
   const camera = new Camera2D({ centerX: 5, centerZ: 7 });
   camera.panByWorld(-1.25, 2.5);

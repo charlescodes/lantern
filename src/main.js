@@ -8,6 +8,10 @@ import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
 import { createPresentation } from "./presentation/factory.js";
 import {
+  focusCameraOnPlayer,
+  syncPlayerCamera,
+} from "./presentation/player_camera.js";
+import {
   parsePresentationOptions,
   PresentationFlags,
 } from "./presentation/options.js";
@@ -99,6 +103,9 @@ const runtime = new FixedStepRuntime({
   render: (snapshot, alpha, metrics) => {
     if (snapshot.level.state === "defeated" && runtime.paused && mode === "play") {
       runtime.resume();
+    }
+    if (syncPlayerCamera(camera, snapshot.player, alpha, mode)) {
+      input.refreshPointerWorld();
     }
     sightFrame = trueSight.update(snapshot, alpha, { mode });
     const developerToolsOpen = developerToolbox.isOpen;
@@ -222,12 +229,35 @@ function toggleMode() {
     resumeAfterEdit = false;
   }
   input.setMode(mode);
+  if (syncPlayerCamera(
+    camera,
+    runtime.lastSnapshot.player,
+    runtime.metrics().alpha,
+    mode,
+  )) {
+    input.refreshPointerWorld();
+  }
   ui.setMode(mode);
   ui.announce(
     mode === "edit"
       ? "Edit mode paused: choose a wall or rock tool"
       : "Play mode: RMB move, LMB cast",
   );
+}
+
+function focusPlayer() {
+  focusCameraOnPlayer(
+    camera,
+    runtime.lastSnapshot.player,
+    runtime.metrics().alpha,
+  );
+  input?.refreshPointerWorld();
+}
+
+/** @param {number} x @param {number} z */
+function focusWorldPoint(x, z) {
+  camera.focus(x, z);
+  input?.refreshPointerWorld();
 }
 
 /** @param {number} x @param {number} z */
@@ -294,7 +324,7 @@ input = new InputController(canvas, camera, {
   reset,
   toggleMode,
   developerToolsOpen: () => developerToolbox.isOpen,
-  focusPlayer: () => camera.focus(simulation.player.x, simulation.player.z),
+  focusPlayer,
   pinAt,
   editAt,
   createCast: (x, z) => spellLab.createCast(x, z),
@@ -309,7 +339,7 @@ onButton("pause-button", togglePause);
 onButton("step-button", singleStep);
 onButton("reset-button", () => reset(false));
 onButton("mode-button", toggleMode);
-onButton("focus-button", () => camera.focus(simulation.player.x, simulation.player.z));
+onButton("focus-button", focusPlayer);
 onButton("restore-scenario-button", () => {
   trueSight.requestSnap("reset");
   injectMutation({ type: "restoreScenario" });
@@ -371,7 +401,7 @@ mapFileInput.addEventListener("change", async () => {
     const loadedScenario = ArenaScenario.fromJSON(json);
     injectMutation({ type: "loadScenario", json });
     pinned = null;
-    camera.focus(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
+    focusWorldPoint(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
     ui.clearError();
     ui.announce(`Loaded ${file.name}`);
   } catch (error) {
@@ -468,7 +498,7 @@ const probe = Object.freeze({
     const loadedScenario = ArenaScenario.fromJSON(json);
     const accepted = injectMutation({ type: "loadScenario", json });
     if (accepted) {
-      camera.focus(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
+      focusWorldPoint(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
     }
     return accepted;
   },
@@ -712,7 +742,7 @@ Object.defineProperty(window, "__lantern", {
 });
 ui.setMode(mode);
 ui.setEditorTool(editorTool);
-camera.focus(simulation.player.x, simulation.player.z);
+focusPlayer();
 runtime.start();
 ui.finishPresentationWarmup();
 window.dispatchEvent(new CustomEvent("lantern:ready", {

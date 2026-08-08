@@ -20,6 +20,7 @@ import {
 import { PresentationLightBudget } from "./light_budget.js";
 import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
+import { interpolateRenderValue } from "./player_camera.js";
 import { PresentationProfiler } from "./profiler.js";
 import { TrueSightTextureTransport } from "./true_sight_transport.js";
 import { PresentationWarmupStatus } from "./warmup.js";
@@ -917,8 +918,8 @@ export class ThreePresentation {
 
   /** @param {Record<string, any>} player @param {number} alpha */
   #updatePlayer(player, alpha) {
-    const x = player.previousX + (player.x - player.previousX) * alpha;
-    const z = player.previousZ + (player.z - player.previousZ) * alpha;
+    const x = interpolateRenderValue(player.previousX, player.x, alpha);
+    const z = interpolateRenderValue(player.previousZ, player.z, alpha);
     this.player.position.set(x, PLAYER_HEIGHT_METERS / 2, z);
     this.player.scale.set(player.radius * 2, PLAYER_HEIGHT_METERS, player.radius * 2);
   }
