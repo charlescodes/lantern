@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import * as THREE from "three/webgpu";
 
+import { DEAD_BODY } from "../src/config.js";
 import { DebugRenderer } from "../src/browser/renderer.js";
 import { Camera2D } from "../src/browser/camera.js";
 import {
@@ -12,6 +13,10 @@ import {
 } from "../src/presentation/combat_visuals.js";
 import { Camera3D } from "../src/presentation/camera_3d.js";
 import { enemyFacingTriangle } from "../src/presentation/enemy_facing.js";
+import {
+  ENEMY_BODY_HEIGHT_METERS,
+  enemyDeadBodyPose,
+} from "../src/presentation/dead_body_pose.js";
 import {
   parsePresentationOptions,
   PresentationFlags,
@@ -36,6 +41,8 @@ function fakeThreeCanvas() {
 
 function fakeCanvas2d() {
   const fillRects = [];
+  const filledPaths = [];
+  let currentPath = [];
   const context = {
     fillStyle: "#000000",
     strokeStyle: "#000000",
@@ -47,12 +54,32 @@ function fakeCanvas2d() {
     lineJoin: "round",
     imageSmoothingEnabled: true,
     setTransform() {},
-    beginPath() {},
-    closePath() {},
-    moveTo() {},
-    lineTo() {},
-    arc() {},
-    fill() {},
+    beginPath() {
+      currentPath = [];
+    },
+    closePath() {
+      currentPath.push({ type: "close" });
+    },
+    moveTo(x, y) {
+      currentPath.push({ type: "move", x, y });
+    },
+    lineTo(x, y) {
+      currentPath.push({ type: "line", x, y });
+    },
+    arc(x, y, radius, start, end, counterclockwise = false) {
+      currentPath.push({
+        type: "arc",
+        x,
+        y,
+        radius,
+        start,
+        end,
+        counterclockwise,
+      });
+    },
+    fill() {
+      filledPaths.push({ color: this.fillStyle, path: [...currentPath] });
+    },
     stroke() {},
     strokeRect() {},
     setLineDash() {},
@@ -77,7 +104,7 @@ function fakeCanvas2d() {
       return { width: 960, height: 640 };
     },
   };
-  return { canvas, context, fillRects };
+  return { canvas, context, fillRects, filledPaths };
 }
 
 function threePresentation(snapshot) {
@@ -178,7 +205,57 @@ test("Canvas2D draws 0.10m by 0.90m tracks and bottom-up health fills", () => {
   ) < 1e-12);
 });
 
-test("Three preallocates 64 enemies and facing markers plus 65 health instances", () => {
+test("Canvas2D draws a fallen enemy body as the shared oriented capsule", () => {
+  const simulation = new Simulation({ particleBurstCount: 0 });
+  simulation.dynamicDeadBodies.spawn({
+    id: 99,
+    spawnSequence: 4,
+    deathTick: simulation.tickCount,
+    x: 8,
+    z: 9,
+    vx: 0,
+    vz: 0,
+    facingX: 1,
+    facingZ: 0,
+    radius: 0.3,
+    massKg: 75,
+  });
+  const snapshot = simulation.snapshot();
+  snapshot.deadBodies.dynamic[0].ageTicks = DEAD_BODY.fallTicks;
+  snapshot.debugFlags.gridCoordinates = false;
+  snapshot.debugFlags.velocityVectors = false;
+  snapshot.debugFlags.contacts = false;
+  snapshot.debugFlags.explosionForces = false;
+  const { canvas, filledPaths } = fakeCanvas2d();
+  const camera = new Camera2D();
+  camera.focus(snapshot.player.x, snapshot.player.z);
+  const renderer = new DebugRenderer(canvas, camera, 1);
+  const previousWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    renderer.render(snapshot, 0, {
+      mouseWorld: { x: 0, z: 0 },
+      mouseInside: false,
+      hover: null,
+      selected: null,
+      mode: "play",
+      editorTool: "wall",
+      placementValid: true,
+    });
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+
+  const bodyFill = filledPaths.find((entry) => entry.color === "#583237");
+  assert.ok(bodyFill);
+  const arcs = bodyFill.path.filter((entry) => entry.type === "arc");
+  assert.equal(arcs.length, 2);
+  assert.ok(Math.abs(Math.abs(arcs[0].x - arcs[1].x) - 1) < 1e-6);
+  assert.ok(arcs.every((arc) => Math.abs(arc.radius - 0.3) < 1e-6));
+});
+
+test("Three preallocates bounded combat pools without recreating resident instances", () => {
   const simulation = new Simulation({ particleBurstCount: 0 });
   simulation.tick(null);
   const snapshot = simulation.snapshot();
@@ -200,10 +277,12 @@ test("Three preallocates 64 enemies and facing markers plus 65 health instances"
   assert.equal(presentation.healthTrackMesh.instanceMatrix.count, 65);
   assert.equal(presentation.healthFillMesh.instanceMatrix.count, 65);
   assert.equal(presentation.healthFillMesh.instanceColor.count, 65);
+  assert.equal(presentation.deadBodyMesh.instanceMatrix.count, 116);
   assert.equal(presentation.enemyMesh.count, 1);
   assert.equal(presentation.enemyFacingMesh.count, 1);
   assert.equal(presentation.healthTrackMesh.count, 2);
   assert.equal(presentation.healthFillMesh.count, 2);
+  assert.equal(presentation.deadBodyMesh.count, 0);
   assert.equal(presentation.obeliskGroup.visible, true);
   assert.equal(presentation.healthTrackMaterial.transparent, true);
   assert.equal(presentation.healthFillMaterial.transparent, true);
@@ -246,6 +325,93 @@ test("Three preallocates 64 enemies and facing markers plus 65 health instances"
   assert.equal(presentation.healthFillMesh, identities.fills);
   assert.equal(presentation.obeliskGroup, identities.obelisk);
   assert.ok(presentation.dynamicLights.every((light, index) => light === identities.lights[index]));
+});
+
+test("shared dead-body pose and Three instances fall toward facing around a fixed XZ center", () => {
+  const standing = enemyDeadBodyPose({
+    ageTicks: 0,
+    x: 5,
+    z: 7,
+    previousX: 4,
+    previousZ: 6,
+    facing: { x: 3, z: 4 },
+    radius: 0.3,
+  }, 0);
+  assert.deepEqual(standing.facing, { x: 0.6, z: 0.8 });
+  assert.equal(standing.angleRadians, 0);
+  assert.equal(standing.centerY, ENEMY_BODY_HEIGHT_METERS / 2);
+  assert.equal(standing.footprintWidth, 0.6);
+  const reusablePose = { facing: { x: 0, z: 0 } };
+  assert.equal(enemyDeadBodyPose({
+    ageTicks: 0,
+    x: 5,
+    z: 7,
+    facing: { x: 3, z: 4 },
+    radius: 0.3,
+  }, 0, reusablePose), reusablePose);
+
+  const fallen = enemyDeadBodyPose({
+    ageTicks: DEAD_BODY.fallTicks,
+    x: 5,
+    z: 7,
+    previousX: 5,
+    previousZ: 7,
+    facing: { x: 1, z: 0 },
+    radius: 0.3,
+  }, 0);
+  assert.ok(Math.abs(fallen.angleRadians - Math.PI / 2) < 1e-12);
+  assert.ok(Math.abs(fallen.centerY - 0.3) < 1e-12);
+  assert.ok(Math.abs(fallen.footprintLength - ENEMY_BODY_HEIGHT_METERS) < 1e-12);
+
+  const simulation = new Simulation({ particleBurstCount: 0 });
+  simulation.tick(null);
+  simulation.dynamicDeadBodies.spawn({
+    id: 99,
+    spawnSequence: 4,
+    deathTick: simulation.tickCount,
+    x: 8,
+    z: 9,
+    vx: 0,
+    vz: 0,
+    facingX: 1,
+    facingZ: 0,
+    radius: 0.3,
+    massKg: 75,
+  });
+  const snapshot = simulation.snapshot();
+  const { presentation, sightFrame } = threePresentation(snapshot);
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  const identity = presentation.deadBodyMesh;
+  assert.equal(identity.geometry, presentation.actorGeometry);
+  assert.equal(identity.count, 1);
+
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const axis = new THREE.Vector3();
+  identity.getMatrixAt(0, matrix);
+  matrix.decompose(position, quaternion, scale);
+  axis.set(0, 1, 0).applyQuaternion(quaternion).normalize();
+  assert.ok(Math.abs(axis.y - 1) < 1e-6);
+  assert.ok(Math.abs(position.x - 8) < 1e-6);
+  assert.ok(Math.abs(position.z - 9) < 1e-6);
+
+  snapshot.deadBodies.dynamic[0].ageTicks = DEAD_BODY.fallTicks;
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  assert.equal(presentation.deadBodyMesh, identity);
+  identity.getMatrixAt(0, matrix);
+  matrix.decompose(position, quaternion, scale);
+  axis.set(0, 1, 0).applyQuaternion(quaternion).normalize();
+  assert.ok(Math.abs(axis.x - 1) < 1e-6);
+  assert.ok(Math.abs(axis.y) < 1e-6);
+  assert.ok(Math.abs(position.y - 0.3) < 1e-6);
+  assert.ok(Math.abs(position.x - 8) < 1e-6);
+  assert.ok(Math.abs(position.z - 9) < 1e-6);
+  assert.deepEqual(presentation.diagnostics().combatInstances.deadBodies, {
+    active: 1,
+    capacity: 116,
+  });
 });
 
 test("Three actor cylinders match circular collision bounds and expose the facing marker", () => {
@@ -304,6 +470,7 @@ test("enemy, obelisk, health, hostile effects, and emissive materials share True
   presentation.render(snapshot, 0, view(snapshot, sightFrame));
   const maskedMaterials = [
     presentation.enemyMaterial,
+    presentation.deadBodyMaterial,
     presentation.enemyFacingMaterial,
     presentation.healthTrackMaterial,
     presentation.healthFillMaterial,

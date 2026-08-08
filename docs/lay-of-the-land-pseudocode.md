@@ -1,6 +1,7 @@
 # Lantern: Lay of the Land in Pseudocode
 
-> **Descriptive snapshot:** Lantern 0.8.0, snapshot/recording schema v8.
+> **Descriptive snapshot:** Lantern 0.9.0 development runtime,
+> snapshot/recording schema v10.
 >
 > This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.
 
@@ -62,7 +63,7 @@ TrueSight never gives knowledge to AI
 
 ```text
 FUNCTION boot()
-    simulation      := new Simulation(default scenario, schema-v8 profiles)
+    simulation      := new Simulation(default scenario, schema-v10 profiles)
     initialSnapshot := simulation.snapshot()
 
     options   := parse renderer/backend/visual flags from URL
@@ -122,6 +123,8 @@ STATE Simulation
     entities :=
         player singleton
         bounded EnemyWizardPool
+        bounded DynamicDeadBodyPool
+        bounded InertDeadBodyRing     // FIFO scenery; no per-tick interaction
         bounded RockPool
         bounded ProjectilePool
         bounded ParticlePool        // deterministic visuals; no gameplay effect
@@ -149,21 +152,22 @@ FUNCTION Simulation.tick(rawInput)
     nextTick := tickCount + 1
 
     encounterSystem(nextTick)                  // bounded obelisk spawns
-    IF enemy profile == perceptive-wizard-v1
-        perceptionSystem(nextTick)             // v8 geometry-only awareness
+    IF enemy profile == investigative-wizard-v1
+        investigativePerceptionSystem(nextTick) // v10 retains v9 behavior
     navigationSystem()                         // bounded incremental work
 
     preparePlayerMovement(command.move)
     prepareEnemyMovement(nextTick)
-    IF enemy profile == perceptive-wizard-v1
+    IF enemy profile uses facing perception
         facingSystem(nextTick)
-    bodyPhysicsSystem()                         // actors, rocks, grid, contacts
+    bodyPhysicsSystem()                         // actors, rocks, dynamic bodies, grid
 
     decrease cooldowns
     castPlayerSpell(command.cast)
     castEnemySpells(nextTick)
-    advanceProjectiles()                        // hits -> explosions -> damage
-    removeDeadEnemies()
+    advanceProjectiles()                        // bodies intercept; blast moves them
+    settleExistingDeadBodies(nextTick)
+    transferNewlyDeadEnemies(nextTick)          // AI row -> compact body row
     advanceParticles()
     regenerateHealth(nextTick)
     pruneUnreferencedSpellRevisions()
@@ -185,7 +189,7 @@ stable ID travels with the copied row
 pool index is temporary and must never become external identity
 ```
 
-Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded scheduler; [`src/sim/pools.js`](../src/sim/pools.js) owns bounded storage.
+Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded scheduler; [`src/sim/pools.js`](../src/sim/pools.js) and [`src/sim/dead_body_pool.js`](../src/sim/dead_body_pool.js) own bounded storage.
 
 ## Fireball and combat vertical
 
@@ -204,12 +208,14 @@ ON successful cast(caster, target)
 END
 
 EACH tick FOR each projectile
-    sweep X/Z path against grid/obelisk, rocks, and opposing actors
+    sweep X/Z path against grid/obelisk, rocks, dynamic dead bodies,
+    and opposing living actors
 
     IF hit
         create explosion from captured spell revision
         apply grid-occluded radial impulse to nearby bodies
-        apply fixed team-aware combat damage to opposing actors
+        apply fixed team-aware combat damage to opposing living actors
+        apply impulse-only response to dynamic dead bodies
         give an unseen mob only the impact-point clue, never attacker identity
         emit deterministic visual particles
         retain bounded diagnostics
@@ -222,6 +228,40 @@ END
 Spell Lab affects future casts only. Existing projectiles, impacts, particles, and lights keep the revision captured at spawn.
 
 Code: the orchestration is in [`src/sim/simulation.js`](../src/sim/simulation.js); data/validation lives in [`src/spells`](../src/spells).
+
+## Enemy dead-body lifecycle
+
+```text
+ON enemy health exhausted after projectile processing
+    remove full enemy AI/caster row immediately
+    append compact dynamic body := identity + X/Z body + velocity + facing
+
+    IF dynamic pool was full
+        settle oldest body first, tie-breaking by stable ID
+END
+
+EACH tick FOR each dynamic body
+    collide as a centered X/Z circle with map, actors, rocks, and bodies
+    accept either team's Fireball collision and grid-occluded blast impulse
+
+    IF age >= 180 ticks
+        settle(reason = timeout)
+    ELSE IF fall finished AND quiet for 30 uninterrupted ticks
+        settle(reason = quiet)
+END
+
+FUNCTION settle(body, reason)
+    append cold fields to inert FIFO ring
+    overwrite oldest inert row when the ring is full
+    swap-remove dynamic row
+END
+
+inert bodies are snapshot scenery only; no simulation system queries them
+```
+
+The fall is presentation state derived from age and facing. Three.js tilts the
+resident cylinder while Canvas2D grows an oriented capsule; neither changes the
+authoritative circle. See the [checkpoint contract](./notes/enemy-dead-body-lifecycle.md).
 
 ## Perceptive wizard vertical
 
@@ -364,6 +404,7 @@ src/runtime/fixed_step_runtime.js
 src/sim/simulation.js
     -> current schedule and cross-system orchestration
        -> pools.js
+       -> dead_body_pool.js
        -> collision.js + explosion.js
        -> perceptive_wizard.js + tactical_wizard.js
        -> navigation_field.js + destination_field_cache.js

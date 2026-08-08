@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   ACTOR_TEAM,
   COMBAT,
+  DEAD_BODY_PROFILE_NONE,
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
@@ -387,6 +388,7 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
     particleBurstCount: 0,
     projectileCapacity: PROJECTILE.legacyCapacity,
     enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
+    deadBodyProfile: DEAD_BODY_PROFILE_NONE,
   });
   for (let tick = 0; tick < 180; tick += 1) {
     live.tick({
@@ -408,6 +410,7 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
     seed: 0x6000_0006,
     particleBurstCount: 0,
     enemyAiProfile: ENEMY_AI_PROFILE_BASIC,
+    deadBodyProfile: DEAD_BODY_PROFILE_NONE,
     scenario: new ArenaScenario(basicMap, [{ kind: "obelisk", x: 11.5, z: 5.5 }]),
   });
   for (let tick = 0; tick < 90; tick += 1) {
@@ -421,5 +424,5 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
   const castEvent = replayed.combatEvents.toArray().find((event) => event.type === "cast");
   assert.ok(castEvent);
   assert.equal(Object.hasOwn(castEvent, "aim"), false);
-  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(SCHEMA_VERSION, 10);
 });

@@ -4,7 +4,7 @@ import { percentile } from "../core/ring_buffer.js";
 import { APPLICATION_VERSION } from "../config.js";
 
 export const PERFORMANCE_CAPTURE_DURATION_MS = 10_000;
-export const PERFORMANCE_REPORT_VERSION = 2;
+export const PERFORMANCE_REPORT_VERSION = 3;
 
 /** @param {number[]} values */
 export function summarizeGpuSamples(values) {
@@ -113,6 +113,28 @@ export class PerformanceCapture {
       this.workload.maxRocks,
       Number(snapshot.rocks?.length ?? 0),
     );
+    this.workload.maxDynamicDeadBodies = Math.max(
+      this.workload.maxDynamicDeadBodies,
+      Number(snapshot.deadBodies?.dynamic?.length ?? 0),
+    );
+    this.workload.maxInertDeadBodies = Math.max(
+      this.workload.maxInertDeadBodies,
+      Number(snapshot.deadBodies?.inert?.length ?? 0),
+    );
+    this.workload.deadBodyForcedSettles = Math.max(
+      this.workload.deadBodyForcedSettles,
+      Number(snapshot.pools?.dynamicDeadBodies?.forcedSettles ?? 0),
+    );
+    this.workload.deadBodyOverwrites = Math.max(
+      this.workload.deadBodyOverwrites,
+      Number(snapshot.pools?.inertDeadBodies?.overwritten ?? 0),
+    );
+    this.workload.dynamicDeadBodyCapacity = Number(
+      snapshot.pools?.dynamicDeadBodies?.capacity ?? 0,
+    );
+    this.workload.inertDeadBodyCapacity = Number(
+      snapshot.pools?.inertDeadBodies?.capacity ?? 0,
+    );
     this.workload.maxContacts = Math.max(
       this.workload.maxContacts,
       Number(snapshot.contacts?.length ?? 0),
@@ -166,6 +188,12 @@ export class PerformanceCapture {
       maxProjectiles: 0,
       maxParticles: 0,
       maxRocks: 0,
+      maxDynamicDeadBodies: 0,
+      maxInertDeadBodies: 0,
+      deadBodyForcedSettles: 0,
+      deadBodyOverwrites: 0,
+      dynamicDeadBodyCapacity: 0,
+      inertDeadBodyCapacity: 0,
       maxContacts: 0,
       maxActiveLights: 0,
       maxResidentLights: 0,
@@ -234,6 +262,14 @@ export class PerformanceCapture {
           residentAtEnd: presentation.residentLightCount,
           maximumActive: this.workload.maxActiveLights,
           maximumResident: this.workload.maxResidentLights,
+        },
+        deadBodies: {
+          dynamicCapacity: this.workload.dynamicDeadBodyCapacity,
+          inertCapacity: this.workload.inertDeadBodyCapacity,
+          maximumDynamic: this.workload.maxDynamicDeadBodies,
+          maximumInert: this.workload.maxInertDeadBodies,
+          forcedSettles: this.workload.deadBodyForcedSettles,
+          overwrites: this.workload.deadBodyOverwrites,
         },
         trueSight: {
           atEnd: presentation.trueSight ?? null,

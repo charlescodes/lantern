@@ -153,3 +153,49 @@ export function resolvePlayerDynamicBodyVelocity(
   player.vx = player.locomotionVx + player.externalVx;
   player.vz = player.locomotionVz + player.externalVz;
 }
+
+/**
+ * Resolves a passive-body pair without allocating or knowing pool layout.
+ * @param {{vx:number,vz:number,inverseMass:number}} left
+ * @param {{vx:number,vz:number,inverseMass:number}} right
+ * @param {number} nx contact normal from left toward right
+ * @param {number} nz contact normal from left toward right
+ * @param {number} restitution
+ * @param {number} friction
+ */
+export function resolveDynamicBodyPairVelocity(
+  left,
+  right,
+  nx,
+  nz,
+  restitution,
+  friction,
+) {
+  const inverseMassSum = left.inverseMass + right.inverseMass;
+  if (inverseMassSum <= 0) return;
+  let relativeVx = right.vx - left.vx;
+  let relativeVz = right.vz - left.vz;
+  const normalSpeed = relativeVx * nx + relativeVz * nz;
+  if (normalSpeed >= -CONTACT_VELOCITY_EPSILON) return;
+  const impulse = (-(1 + restitution) * normalSpeed) / inverseMassSum;
+  const impulseX = impulse * nx;
+  const impulseZ = impulse * nz;
+  left.vx -= impulseX * left.inverseMass;
+  left.vz -= impulseZ * left.inverseMass;
+  right.vx += impulseX * right.inverseMass;
+  right.vz += impulseZ * right.inverseMass;
+
+  relativeVx = right.vx - left.vx;
+  relativeVz = right.vz - left.vz;
+  const tangentSpeed = relativeVx * -nz + relativeVz * nx;
+  const tangentImpulse = clampMagnitude(
+    -tangentSpeed / inverseMassSum,
+    impulse * friction,
+  );
+  const frictionX = -nz * tangentImpulse;
+  const frictionZ = nx * tangentImpulse;
+  left.vx -= frictionX * left.inverseMass;
+  left.vz -= frictionZ * left.inverseMass;
+  right.vx += frictionX * right.inverseMass;
+  right.vz += frictionZ * right.inverseMass;
+}

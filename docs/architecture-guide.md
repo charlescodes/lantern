@@ -103,7 +103,7 @@ This is one of the strongest seams in the project and should remain boring.
 ### Authoritative simulation
 
 - [`src/sim/simulation.js`](../src/sim/simulation.js) currently owns state construction, the tick schedule, system integration, editor actions, queries, diagnostics, snapshots, recording, and replay.
-- [`src/sim/pools.js`](../src/sim/pools.js) contains bounded dense SoA pools for enemy wizards, rocks, projectiles, and particles.
+- [`src/sim/pools.js`](../src/sim/pools.js) contains bounded dense SoA pools for enemy wizards, rocks, projectiles, and particles; [`dead_body_pool.js`](../src/sim/dead_body_pool.js) owns the compact dynamic body pool and inert FIFO ring.
 - [`src/sim/grid_map.js`](../src/sim/grid_map.js) and [`scenario.js`](../src/sim/scenario.js) own versioned map and authored scenario data.
 - [`src/sim/collision.js`](../src/sim/collision.js), [`explosion.js`](../src/sim/explosion.js), and [`dynamic_body_velocity.js`](../src/sim/dynamic_body_velocity.js) contain reusable geometry/response calculations.
 - [`src/sim/tactical_wizard.js`](../src/sim/tactical_wizard.js) and [`perceptive_wizard.js`](../src/sim/perceptive_wizard.js) contain deterministic AI calculations. State-machine orchestration still lives in `Simulation`.
@@ -124,7 +124,7 @@ This is the most mature data-driven vertical. It is still a one-spell registry: 
 - [`src/presentation/factory.js`](../src/presentation/factory.js) chooses a Canvas2D or Three.js adapter.
 - [`src/presentation/canvas_presentation.js`](../src/presentation/canvas_presentation.js) wraps the original Canvas renderer.
 - [`src/presentation/three_presentation.js`](../src/presentation/three_presentation.js) translates snapshots into resident Three.js resources.
-- Shared helpers such as [`ai_view_model.js`](../src/presentation/ai_view_model.js), [`combat_visuals.js`](../src/presentation/combat_visuals.js), and [`enemy_facing.js`](../src/presentation/enemy_facing.js) reduce renderer disagreement.
+- Shared helpers such as [`ai_view_model.js`](../src/presentation/ai_view_model.js), [`combat_visuals.js`](../src/presentation/combat_visuals.js), [`enemy_facing.js`](../src/presentation/enemy_facing.js), and [`dead_body_pose.js`](../src/presentation/dead_body_pose.js) reduce renderer disagreement.
 
 The conceptual renderer seam is good, but the folder dependency direction is muddled: `presentation/factory.js` imports a camera from `browser`, `canvas_presentation.js` imports the renderer from `browser`, and `browser/renderer.js` imports shared helpers from `presentation`. There is no demonstrated runtime cycle, but file placement no longer communicates a clean one-way layer graph.
 
@@ -150,7 +150,7 @@ The conceptual renderer seam is good, but the folder dependency direction is mud
 9. Advance cooldowns.
 10. Cast player and enemy spells.
 11. Move projectiles and resolve hits, explosions, damage, and impulses.
-12. Remove dead enemies.
+12. Advance existing dead-body settlement, then transfer newly dead enemies out of AI.
 13. Advance particles.
 14. Regenerate health and prune unused spell revisions.
 15. Increment the tick and record the canonical command.
@@ -186,6 +186,8 @@ The current major pools are homogeneous:
 - every active rock occupies the same rock columns;
 - every active particle occupies the same particle columns;
 - every active enemy wizard occupies the same enemy columns.
+- every dynamic dead enemy occupies compact physics columns, while settled
+  bodies move to a cold FIFO ring with no per-tick system participation.
 
 The player is a singleton object because one row does not benefit from a dense pool. Maps, registries, event histories, and snapshots use other representations appropriate to their access patterns. This mixture is healthy; “data-oriented” does not mean every value must be a `Float32Array`.
 
@@ -269,7 +271,7 @@ Fixed ticks, canonical commands, captured spell revisions, stable IDs, enemy-loc
 
 ### 3. It makes resource limits explicit
 
-Projectile, particle, actor, event, command, navigation, and presentation resources have declared capacities or budgets. Excess work drops, waits, falls back, or reports telemetry rather than growing silently. This is exactly the kind of operational thinking that transfers well from infrastructure engineering.
+Projectile, particle, actor, dead-body, event, command, navigation, and presentation resources have declared capacities or budgets. Excess work drops, waits, settles early, overwrites FIFO history, falls back, or reports telemetry rather than growing silently. This is exactly the kind of operational thinking that transfers well from infrastructure engineering.
 
 ### 4. It separates hot and cold representations
 
@@ -283,7 +285,7 @@ The suite preserves exact replay boundaries, tick timing, candidate ordering, fi
 
 ### 1. `Simulation` has too many reasons to change
 
-At this review point it is about 5,500 lines with about 85 private methods. It owns:
+At this review point it is over 6,000 lines and owns:
 
 - command interpretation and editor actions;
 - encounter spawning;
@@ -292,6 +294,7 @@ At this review point it is about 5,500 lines with about 85 private methods. It o
 - navigation requests;
 - player and body physics;
 - every body-pair collision resolver;
+- dynamic-to-inert dead-body lifecycle and overflow policy;
 - casting, projectiles, explosions, damage, and regeneration;
 - particle emission and lifecycle;
 - spell revision retention;
@@ -309,7 +312,7 @@ A declarative field registry or small code-generated schema could own allocation
 
 ### 3. Historical replay branches live beside current behavior
 
-Preserving schemas v2–v8 is a real strength, but `enemyAiProfile` is referenced dozens of times throughout `Simulation`. Frozen legacy behavior and live behavior increasingly share the same orchestration methods with branches.
+Preserving schemas v2–v9 is a real strength, but profile and schema selection are referenced throughout `Simulation`. Frozen legacy behavior and live behavior increasingly share the same orchestration methods with branches.
 
 Compatibility should remain, but profile selection can move toward explicit strategies or versioned construction adapters so the current tick path does not become a permanent ladder of release checks.
 
@@ -362,11 +365,11 @@ If a presentation-only change starts touching `src/sim`, or an AI change starts 
 
 ## Recommended refactoring sequence
 
-Do this after the current 0.8.0 human review and release checkpoint, in behavior-preserving slices. Do not combine it with a new spell, actor type, networking, or perception feature.
+Do this after the current schema-v10 dead-body checkpoint, in behavior-preserving slices. Do not combine it with a new spell, actor type, networking, or perception feature.
 
 ### Stage 0: freeze the current behavior
 
-- Retain the v2–v8 replay fixtures and broadphase-versus-brute-force oracle.
+- Retain the v2-v10 replay fixtures and broadphase-versus-brute-force oracles.
 - Add a simple import-boundary test for `src/sim`, `src/spells`, and `src/core`.
 - Record representative snapshot fixtures at a few ticks rather than snapshotting every implementation detail everywhere.
 - Keep Canvas2D and Three.js acceptance as separate human gates.

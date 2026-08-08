@@ -1,5 +1,11 @@
 // @ts-check
 
+const EMPTY_POOL = Object.freeze({
+  activeCount: 0,
+  x: new Float32Array(0),
+  z: new Float32Array(0),
+});
+
 /**
  * Preallocated center-cell broadphase. Candidate lists are deduplicated and
  * sorted by pool index so narrow-phase resolution keeps historical ordering.
@@ -7,7 +13,7 @@
 export class MapCellBroadphase {
   /**
    * @param {{width:number,height:number}} map
-   * @param {{enemyCapacity:number,rockCapacity:number,projectileCapacity:number,enabled?:boolean}} capacities
+   * @param {{enemyCapacity:number,rockCapacity:number,projectileCapacity:number,deadBodyCapacity?:number,enabled?:boolean}} capacities
    */
   constructor(map, capacities) {
     this.width = map.width;
@@ -17,21 +23,27 @@ export class MapCellBroadphase {
     this.activeEnemies = 0;
     this.activeRocks = 0;
     this.activeProjectiles = 0;
+    this.activeDeadBodies = 0;
     this.enemyHeads = new Int16Array(this.cellCount);
     this.rockHeads = new Int16Array(this.cellCount);
     this.projectileHeads = new Int16Array(this.cellCount);
+    this.deadBodyHeads = new Int16Array(this.cellCount);
     this.enemyNext = new Int16Array(capacities.enemyCapacity);
     this.rockNext = new Int16Array(capacities.rockCapacity);
     this.projectileNext = new Int16Array(capacities.projectileCapacity);
+    this.deadBodyNext = new Int16Array(capacities.deadBodyCapacity ?? 1);
     this.enemyMarks = new Uint32Array(capacities.enemyCapacity);
     this.rockMarks = new Uint32Array(capacities.rockCapacity);
     this.projectileMarks = new Uint32Array(capacities.projectileCapacity);
+    this.deadBodyMarks = new Uint32Array(capacities.deadBodyCapacity ?? 1);
     this.enemyCandidates = new Int16Array(capacities.enemyCapacity);
     this.rockCandidates = new Int16Array(capacities.rockCapacity);
     this.projectileCandidates = new Int16Array(capacities.projectileCapacity);
+    this.deadBodyCandidates = new Int16Array(capacities.deadBodyCapacity ?? 1);
     this.enemyCount = 0;
     this.rockCount = 0;
     this.projectileCount = 0;
+    this.deadBodyCount = 0;
     this.generation = 0;
     this.builds = 0;
     this.queries = 0;
@@ -48,19 +60,24 @@ export class MapCellBroadphase {
       this.enemyHeads = new Int16Array(this.cellCount);
       this.rockHeads = new Int16Array(this.cellCount);
       this.projectileHeads = new Int16Array(this.cellCount);
+      this.deadBodyHeads = new Int16Array(this.cellCount);
     }
     this.enemyHeads.fill(-1);
     this.rockHeads.fill(-1);
     this.projectileHeads.fill(-1);
+    this.deadBodyHeads.fill(-1);
     this.enemyNext.fill(-1);
     this.rockNext.fill(-1);
     this.projectileNext.fill(-1);
+    this.deadBodyNext.fill(-1);
     this.enemyMarks.fill(0);
     this.rockMarks.fill(0);
     this.projectileMarks.fill(0);
+    this.deadBodyMarks.fill(0);
     this.enemyCount = 0;
     this.rockCount = 0;
     this.projectileCount = 0;
+    this.deadBodyCount = 0;
     this.generation = 0;
     this.builds = 0;
     this.queries = 0;
@@ -78,11 +95,13 @@ export class MapCellBroadphase {
    * @param {{activeCount:number,x:Float32Array,z:Float32Array}} enemies
    * @param {{activeCount:number,x:Float32Array,z:Float32Array}} rocks
    * @param {{activeCount:number,x:Float32Array,z:Float32Array}} projectiles
+   * @param {{activeCount:number,x:Float32Array,z:Float32Array}} [deadBodies]
    */
-  rebuild(enemies, rocks, projectiles) {
+  rebuild(enemies, rocks, projectiles, deadBodies = EMPTY_POOL) {
     this.activeEnemies = enemies.activeCount;
     this.activeRocks = rocks.activeCount;
     this.activeProjectiles = projectiles.activeCount;
+    this.activeDeadBodies = deadBodies.activeCount;
     if (!this.enabled) {
       this.builds += 1;
       return;
@@ -90,6 +109,7 @@ export class MapCellBroadphase {
     this.enemyHeads.fill(-1);
     this.rockHeads.fill(-1);
     this.projectileHeads.fill(-1);
+    this.deadBodyHeads.fill(-1);
     for (let index = enemies.activeCount - 1; index >= 0; index -= 1) {
       const cell = this.#cellIndex(enemies.x[index], enemies.z[index]);
       this.enemyNext[index] = this.enemyHeads[cell];
@@ -105,6 +125,11 @@ export class MapCellBroadphase {
       this.projectileNext[index] = this.projectileHeads[cell];
       this.projectileHeads[cell] = index;
     }
+    for (let index = deadBodies.activeCount - 1; index >= 0; index -= 1) {
+      const cell = this.#cellIndex(deadBodies.x[index], deadBodies.z[index]);
+      this.deadBodyNext[index] = this.deadBodyHeads[cell];
+      this.deadBodyHeads[cell] = index;
+    }
     this.builds += 1;
   }
 
@@ -114,6 +139,7 @@ export class MapCellBroadphase {
       this.enemyMarks.fill(0);
       this.rockMarks.fill(0);
       this.projectileMarks.fill(0);
+      this.deadBodyMarks.fill(0);
       this.generation = 1;
     }
     return this.generation;
@@ -236,6 +262,30 @@ export class MapCellBroadphase {
       minimumIndex,
     );
     return this.projectileCount;
+  }
+
+  /** @param {number} minX @param {number} minZ @param {number} maxX @param {number} maxZ @param {number} [minimumIndex] */
+  queryDeadBodies(minX, minZ, maxX, maxZ, minimumIndex = 0) {
+    if (!this.enabled) {
+      this.deadBodyCount = 0;
+      for (let index = minimumIndex; index < this.activeDeadBodies; index += 1) {
+        this.deadBodyCandidates[this.deadBodyCount] = index;
+        this.deadBodyCount += 1;
+      }
+      return this.deadBodyCount;
+    }
+    this.deadBodyCount = this.#query(
+      this.deadBodyHeads,
+      this.deadBodyNext,
+      this.deadBodyMarks,
+      this.deadBodyCandidates,
+      minX,
+      minZ,
+      maxX,
+      maxZ,
+      minimumIndex,
+    );
+    return this.deadBodyCount;
   }
 
   diagnostics() {

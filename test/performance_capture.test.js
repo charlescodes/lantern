@@ -69,6 +69,14 @@ test("ten-second capture resets histories, observes unscripted workload, and rep
           projectiles: [{}, {}],
           particles: Array(224),
           rocks: Array(5),
+          deadBodies: {
+            dynamic: Array(6),
+            inert: Array(81),
+          },
+          pools: {
+            dynamicDeadBodies: { capacity: 16, forcedSettles: 2 },
+            inertDeadBodies: { capacity: 100, overwritten: 7 },
+          },
           contacts: Array(3),
         },
         runtime(),
@@ -101,11 +109,19 @@ test("ten-second capture resets histories, observes unscripted workload, and rep
   assert.equal(gpuEnds, 1);
   assert.equal(report.actualDurationMs, 10_000);
   assert.equal(report.reportVersion, PERFORMANCE_REPORT_VERSION);
-  assert.equal(PERFORMANCE_REPORT_VERSION, 2);
+  assert.equal(PERFORMANCE_REPORT_VERSION, 3);
   assert.equal(report.workloadMaxima.maxParticles, 224);
   assert.equal(report.workloadMaxima.maxActiveLights, 15);
   assert.equal(report.workloadMaxima.maxTrueSightRays, 96);
   assert.equal(report.workloadMaxima.maxTrueSightPolygonVertices, 18);
+  assert.deepEqual(report.deadBodies, {
+    dynamicCapacity: 16,
+    inertCapacity: 100,
+    maximumDynamic: 6,
+    maximumInert: 81,
+    forcedSettles: 2,
+    overwrites: 7,
+  });
   assert.deepEqual(report.trueSight.maxima, {
     rays: 96,
     polygonVertices: 18,

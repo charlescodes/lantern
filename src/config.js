@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.0";
@@ -12,6 +12,8 @@ export const ENEMY_AI_PROFILE_TACTICAL = "tactical-wizard-v1";
 export const ENEMY_AI_PROFILE_PERCEPTIVE = "perceptive-wizard-v1";
 export const ENEMY_AI_PROFILE_INVESTIGATIVE = "investigative-wizard-v1";
 export const ENEMY_AI_PROFILE_NONE = "none";
+export const DEAD_BODY_PROFILE_V1 = "enemy-dead-body-v1";
+export const DEAD_BODY_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
   player: 1,
@@ -67,6 +69,21 @@ export const ENEMY_WIZARD = Object.freeze({
   withdrawInsideMeters: 6,
   shotIntervalTicks: 75,
   spawnIntervalTicks: 1_800,
+});
+
+export const DEAD_BODY = Object.freeze({
+  dynamicCapacity: 16,
+  maximumDynamicCapacity: ENEMY_WIZARD.capacity,
+  inertCapacity: 100,
+  maximumInertCapacity: 1_000,
+  fallTicks: 36,
+  quietTicks: 30,
+  quietSpeed: 0.05,
+  maximumDynamicTicks: 180,
+  damping: PLAYER.externalDamping,
+  maxSpeed: 20,
+  wallRestitution: 0.18,
+  wallFriction: 0.2,
 });
 
 export const PERCEPTIVE_WIZARD = Object.freeze({

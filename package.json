@@ -11,6 +11,7 @@
     "test:soak:sight": "node --test test/true_sight_soak.test.js",
     "test:soak:spell": "node --test test/spell_soak.test.js",
     "test:soak:combat": "node --test test/combat_soak.test.js",
+    "test:soak:dead-bodies": "node --test test/dead_body_soak.test.js",
     "test:soak:ai": "node --test test/ai_soak.test.js",
     "test:soak:perception": "node --test test/perception_soak.test.js"
   },

@@ -3,6 +3,9 @@
 import {
   ACTOR_TEAM,
   COMBAT,
+  DEAD_BODY,
+  DEAD_BODY_PROFILE_NONE,
+  DEAD_BODY_PROFILE_V1,
   DEFAULT_DEBUG_FLAGS,
   DEFAULT_PARTICLE_PROFILE,
   DYNAMIC_PHYSICS,
@@ -59,7 +62,16 @@ import {
   sanitizePointAgainstGrid,
   sweepPointAgainstGrid,
 } from "./collision.js";
-import { resolvePlayerDynamicBodyVelocity } from "./dynamic_body_velocity.js";
+import {
+  resolveDynamicBodyPairVelocity,
+  resolvePlayerDynamicBodyVelocity,
+} from "./dynamic_body_velocity.js";
+import {
+  DEAD_BODY_SETTLE_REASON,
+  DEAD_BODY_SETTLE_REASON_NAMES,
+  DynamicDeadBodyPool,
+  InertDeadBodyRing,
+} from "./dead_body_pool.js";
 import { computeExplosionResponse } from "./explosion.js";
 import { DestinationFieldCache } from "./destination_field_cache.js";
 import { GridMap } from "./grid_map.js";
@@ -119,6 +131,7 @@ const BODY_PLAYER = 1;
 const BODY_ROCK = 2;
 const BODY_CELL = 3;
 const BODY_ENEMY_WIZARD = 4;
+const BODY_ENEMY_WIZARD_BODY = 5;
 const CONTACT_GRID = 1;
 const CONTACT_BODY = 2;
 const ENEMY_AI_HOLD = 0;
@@ -411,6 +424,7 @@ function bodyKindName(code) {
   if (code === BODY_PLAYER) return "player";
   if (code === BODY_ROCK) return "rock";
   if (code === BODY_ENEMY_WIZARD) return "enemyWizard";
+  if (code === BODY_ENEMY_WIZARD_BODY) return "enemyWizardBody";
   return "cell";
 }
 
@@ -444,7 +458,10 @@ export class Simulation {
    * spellBaseline?:Array<Record<string,any>>,
    * legacyFireballMode?:boolean,
    * gameplayProfile?:string,
-   * enemyAiProfile?:string
+   * enemyAiProfile?:string,
+   * deadBodyProfile?:string,
+   * dynamicDeadBodyCapacity?:number,
+   * inertDeadBodyCapacity?:number
    * }} [options]
    */
   constructor(options = {}) {
@@ -489,6 +506,13 @@ export class Simulation {
     )) {
       throw new RangeError("Gameplay and enemy AI profiles are incompatible");
     }
+    this.deadBodyProfile = options.deadBodyProfile ?? DEAD_BODY_PROFILE_V1;
+    if (
+      this.deadBodyProfile !== DEAD_BODY_PROFILE_V1
+      && this.deadBodyProfile !== DEAD_BODY_PROFILE_NONE
+    ) {
+      throw new RangeError(`Unsupported dead-body profile: ${this.deadBodyProfile}`);
+    }
     const rockCapacity = options.rockCapacity ?? ROCK.capacity;
     if (!Number.isInteger(rockCapacity) || rockCapacity <= 0) {
       throw new RangeError("Rock capacity must be a positive integer");
@@ -517,8 +541,32 @@ export class Simulation {
       throw new RangeError("Encounter maximum alive must fit the enemy pool");
     }
     this.encounterMaximumAlive = encounterMaximumAlive;
+    const dynamicDeadBodyCapacity = options.dynamicDeadBodyCapacity
+      ?? DEAD_BODY.dynamicCapacity;
+    if (
+      !Number.isInteger(dynamicDeadBodyCapacity)
+      || dynamicDeadBodyCapacity <= 0
+      || dynamicDeadBodyCapacity > DEAD_BODY.maximumDynamicCapacity
+    ) {
+      throw new RangeError(
+        `Dynamic dead-body capacity must be between 1 and ${DEAD_BODY.maximumDynamicCapacity}`,
+      );
+    }
+    const inertDeadBodyCapacity = options.inertDeadBodyCapacity
+      ?? DEAD_BODY.inertCapacity;
+    if (
+      !Number.isInteger(inertDeadBodyCapacity)
+      || inertDeadBodyCapacity <= 0
+      || inertDeadBodyCapacity > DEAD_BODY.maximumInertCapacity
+    ) {
+      throw new RangeError(
+        `Inert dead-body capacity must be between 1 and ${DEAD_BODY.maximumInertCapacity}`,
+      );
+    }
     this.rocks = new RockPool(rockCapacity);
     this.enemies = new EnemyWizardPool(enemyCapacity);
+    this.dynamicDeadBodies = new DynamicDeadBodyPool(dynamicDeadBodyCapacity);
+    this.inertDeadBodies = new InertDeadBodyRing(inertDeadBodyCapacity);
     this.mapRevision = 1;
     this.navigationField = new SharedNavigationField(this.map);
     this.destinationFields = new DestinationFieldCache(this.map);
@@ -528,6 +576,7 @@ export class Simulation {
       enemyCapacity,
       rockCapacity,
       projectileCapacity: this.projectiles.capacity,
+      deadBodyCapacity: dynamicDeadBodyCapacity,
       enabled: options.useBroadphase,
     });
     this.particles = new ParticlePool(options.particleCapacity ?? PARTICLE.capacity);
@@ -592,8 +641,11 @@ export class Simulation {
     this.commandLogSpellBaseline = this.spells.cloneBaseline();
     this.commandLogGameplayProfile = this.gameplayProfile;
     this.commandLogEnemyAiProfile = this.enemyAiProfile;
+    this.commandLogDeadBodyProfile = this.deadBodyProfile;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
+    this.commandLogDynamicDeadBodyCapacity = this.dynamicDeadBodies.capacity;
+    this.commandLogInertDeadBodyCapacity = this.inertDeadBodies.capacity;
     this.tickCount = 0;
     this.nextExplosionId = 1;
     this.levelState = "running";
@@ -659,6 +711,7 @@ export class Simulation {
     };
     this._bodyContact = { nx: 0, nz: 0, penetration: 0, x: 0, z: 0 };
     this._dynamicBodyVelocity = { vx: 0, vz: 0, inverseMass: 0 };
+    this._secondDynamicBodyVelocity = { vx: 0, vz: 0, inverseMass: 0 };
     this._enemyBodyVelocity = {
       vx: 0,
       vz: 0,
@@ -710,8 +763,11 @@ export class Simulation {
       this.commandLogSpellBaseline = this.spells.cloneBaseline();
       this.commandLogGameplayProfile = this.gameplayProfile;
       this.commandLogEnemyAiProfile = this.enemyAiProfile;
+      this.commandLogDeadBodyProfile = this.deadBodyProfile;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
+      this.commandLogDynamicDeadBodyCapacity = this.dynamicDeadBodies.capacity;
+      this.commandLogInertDeadBodyCapacity = this.inertDeadBodies.capacity;
     }
     this.lastError = null;
     this.lastSpellResult = null;
@@ -722,6 +778,8 @@ export class Simulation {
     this.particles.reset();
     this.rocks.reset();
     this.enemies.reset();
+    this.dynamicDeadBodies.reset();
+    this.inertDeadBodies.reset();
     this.navigationField.reset(this.map);
     this.destinationFields.reset(this.map);
     this.reachability.reset(this.map);
@@ -801,7 +859,12 @@ export class Simulation {
     const simulationTick = this.tickCount + 1;
     this.#encounterSystem(simulationTick);
     if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
-      this.broadphase.rebuild(this.enemies, this.rocks, this.projectiles);
+      this.broadphase.rebuild(
+        this.enemies,
+        this.rocks,
+        this.projectiles,
+        this.dynamicDeadBodies,
+      );
       this.#investigativePerceptionSystem(simulationTick);
     } else if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
       this.#perceptionSystem(simulationTick);
@@ -833,7 +896,8 @@ export class Simulation {
     this.#castSystem(command.cast);
     this.#enemyCastSystem(simulationTick);
     this.#projectileSystem(SIMULATION.dt);
-    this.#removeDeadEnemies();
+    this.#advanceDeadBodyLifecycle(simulationTick);
+    this.#transferDeadEnemies(simulationTick);
     this.#particleSystem(SIMULATION.dt);
     this.#healthRegenerationSystem(simulationTick);
     this.#pruneSpellRevisions();
@@ -992,6 +1056,20 @@ export class Simulation {
           this.enemies.x[index],
           this.enemies.z[index],
           this.enemies.radius[index],
+          this._gridContact,
+        )
+      ) {
+        this.map.set(cx, cz, previous);
+        return false;
+      }
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      if (
+        firstSolidContact(
+          this.map,
+          this.dynamicDeadBodies.x[index],
+          this.dynamicDeadBodies.z[index],
+          this.dynamicDeadBodies.radius[index],
           this._gridContact,
         )
       ) {
@@ -1965,6 +2043,16 @@ export class Simulation {
         return false;
       }
     }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      if (
+        Math.hypot(
+          x - this.dynamicDeadBodies.x[index],
+          z - this.dynamicDeadBodies.z[index],
+        ) < ENEMY_WIZARD.radius + this.dynamicDeadBodies.radius[index]
+      ) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -2696,7 +2784,12 @@ export class Simulation {
   /** @param {number} dt @param {number} simulationTick */
   #prepareEnemyMovement(dt, simulationTick) {
     if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
-      this.broadphase.rebuild(this.enemies, this.rocks, this.projectiles);
+      this.broadphase.rebuild(
+        this.enemies,
+        this.rocks,
+        this.projectiles,
+        this.dynamicDeadBodies,
+      );
       for (let index = 0; index < this.enemies.activeCount; index += 1) {
         this.#preparePerceptiveEnemyMovement(index, dt, simulationTick);
       }
@@ -2919,10 +3012,94 @@ export class Simulation {
     }
   }
 
-  #removeDeadEnemies() {
+  /** @param {number} simulationTick */
+  #advanceDeadBodyLifecycle(simulationTick) {
+    if (this.deadBodyProfile !== DEAD_BODY_PROFILE_V1) return;
+    const pool = this.dynamicDeadBodies;
+    let index = 0;
+    while (index < pool.activeCount) {
+      const ageTicks = simulationTick - pool.deathTick[index];
+      const speed = Math.hypot(pool.vx[index], pool.vz[index]);
+      if (
+        ageTicks >= DEAD_BODY.fallTicks
+        && speed <= DEAD_BODY.quietSpeed
+        && pool.touched[index] === 0
+      ) {
+        pool.quietTickCount[index] = Math.min(
+          0xffff,
+          pool.quietTickCount[index] + 1,
+        );
+      } else {
+        pool.quietTickCount[index] = 0;
+      }
+      if (ageTicks >= DEAD_BODY.maximumDynamicTicks) {
+        this.#settleDeadBody(index, DEAD_BODY_SETTLE_REASON.timeout, simulationTick);
+        continue;
+      }
+      if (pool.quietTickCount[index] >= DEAD_BODY.quietTicks) {
+        this.#settleDeadBody(index, DEAD_BODY_SETTLE_REASON.quiet, simulationTick);
+        continue;
+      }
+      index += 1;
+    }
+  }
+
+  /** @param {number} index @param {number} reason @param {number} simulationTick */
+  #settleDeadBody(index, reason, simulationTick) {
+    const pool = this.dynamicDeadBodies;
+    this.inertDeadBodies.push({
+      id: pool.id[index],
+      spawnSequence: pool.spawnSequence[index],
+      deathTick: pool.deathTick[index],
+      settledTick: simulationTick,
+      x: pool.x[index],
+      z: pool.z[index],
+      facingX: pool.facingX[index],
+      facingZ: pool.facingZ[index],
+      radius: pool.radius[index],
+      massKg: pool.massKg[index],
+      settleReason: reason,
+    });
+    if (reason === DEAD_BODY_SETTLE_REASON.quiet) pool.quietSettles += 1;
+    else if (reason === DEAD_BODY_SETTLE_REASON.timeout) pool.timeoutSettles += 1;
+    else if (reason === DEAD_BODY_SETTLE_REASON.capacity) pool.forcedSettles += 1;
+    pool.removeSwap(index);
+  }
+
+  /** @param {number} simulationTick */
+  #transferDeadEnemies(simulationTick) {
     let index = 0;
     while (index < this.enemies.activeCount) {
       if (this.enemies.health[index] <= 0) {
+        if (this.deadBodyProfile === DEAD_BODY_PROFILE_V1) {
+          if (this.dynamicDeadBodies.activeCount >= this.dynamicDeadBodies.capacity) {
+            this.#settleDeadBody(
+              this.dynamicDeadBodies.oldestIndex(),
+              DEAD_BODY_SETTLE_REASON.capacity,
+              simulationTick,
+            );
+          }
+          const facingLength = Math.hypot(
+            this.enemies.facingX[index],
+            this.enemies.facingZ[index],
+          );
+          const bodyIndex = this.dynamicDeadBodies.spawn({
+            id: this.enemies.id[index],
+            spawnSequence: this.enemies.spawnSequence[index],
+            deathTick: simulationTick,
+            x: this.enemies.x[index],
+            z: this.enemies.z[index],
+            vx: this.enemies.locomotionVx[index] + this.enemies.externalVx[index],
+            vz: this.enemies.locomotionVz[index] + this.enemies.externalVz[index],
+            facingX: facingLength > 1e-9 ? this.enemies.facingX[index] : 1,
+            facingZ: facingLength > 1e-9 ? this.enemies.facingZ[index] : 0,
+            radius: this.enemies.radius[index],
+            massKg: this.enemies.massKg[index],
+          });
+          if (bodyIndex < 0) {
+            throw new Error("Dynamic dead-body capacity invariant violated");
+          }
+        }
         this.enemies.removeSwap(index);
       } else {
         index += 1;
@@ -2989,6 +3166,7 @@ export class Simulation {
   #bodyPhysicsSystem(dt) {
     const player = this.player;
     const enemies = this.enemies;
+    const deadBodies = this.dynamicDeadBodies;
     player.previousX = player.x;
     player.previousZ = player.z;
     for (let index = 0; index < enemies.activeCount; index += 1) {
@@ -2998,6 +3176,11 @@ export class Simulation {
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       this.rocks.previousX[index] = this.rocks.x[index];
       this.rocks.previousZ[index] = this.rocks.z[index];
+    }
+    for (let index = 0; index < deadBodies.activeCount; index += 1) {
+      deadBodies.previousX[index] = deadBodies.x[index];
+      deadBodies.previousZ[index] = deadBodies.z[index];
+      deadBodies.touched[index] = 0;
     }
 
     const playerDamping = Math.exp(-PLAYER.externalDamping * dt);
@@ -3010,6 +3193,7 @@ export class Simulation {
       this.#syncEnemyVelocity(index);
     }
     const rockDamping = Math.exp(-ROCK.damping * dt);
+    const deadBodyDamping = Math.exp(-DEAD_BODY.damping * dt);
     let maximumSpeed = Math.hypot(
       player.locomotionVx + player.externalVx,
       player.locomotionVz + player.externalVz,
@@ -3034,6 +3218,21 @@ export class Simulation {
       }
       minimumRadius = Math.min(minimumRadius, this.rocks.radius[index]);
     }
+    for (let index = 0; index < deadBodies.activeCount; index += 1) {
+      deadBodies.vx[index] *= deadBodyDamping;
+      deadBodies.vz[index] *= deadBodyDamping;
+      const speed = Math.hypot(deadBodies.vx[index], deadBodies.vz[index]);
+      if (speed > DEAD_BODY.maxSpeed) {
+        const scale = DEAD_BODY.maxSpeed / speed;
+        deadBodies.vx[index] *= scale;
+        deadBodies.vz[index] *= scale;
+        deadBodies.speedClamped += 1;
+        maximumSpeed = Math.max(maximumSpeed, DEAD_BODY.maxSpeed);
+      } else {
+        maximumSpeed = Math.max(maximumSpeed, speed);
+      }
+      minimumRadius = Math.min(minimumRadius, deadBodies.radius[index]);
+    }
 
     const maximumTravel = Math.max(0.001, minimumRadius * DYNAMIC_PHYSICS.travelRadiusFraction);
     const substeps = Math.min(
@@ -3054,6 +3253,10 @@ export class Simulation {
         this.rocks.x[index] += this.rocks.vx[index] * stepDt;
         this.rocks.z[index] += this.rocks.vz[index] * stepDt;
       }
+      for (let index = 0; index < deadBodies.activeCount; index += 1) {
+        deadBodies.x[index] += deadBodies.vx[index] * stepDt;
+        deadBodies.z[index] += deadBodies.vz[index] * stepDt;
+      }
 
       this.#resolvePlayerGrid(substep === 0);
       for (let index = 0; index < enemies.activeCount; index += 1) {
@@ -3062,9 +3265,17 @@ export class Simulation {
       for (let index = 0; index < this.rocks.activeCount; index += 1) {
         this.#resolveRockGrid(index, substep === 0);
       }
+      for (let index = 0; index < deadBodies.activeCount; index += 1) {
+        this.#resolveDeadBodyGrid(index, substep === 0);
+      }
       for (let pass = 0; pass < DYNAMIC_PHYSICS.solverIterations; pass += 1) {
         const record = substep === 0 && pass === 0;
-        this.broadphase.rebuild(enemies, this.rocks, this.projectiles);
+        this.broadphase.rebuild(
+          enemies,
+          this.rocks,
+          this.projectiles,
+          this.dynamicDeadBodies,
+        );
         const playerRockRange = player.radius + MAX_ROCK_RADIUS
           + BROADPHASE_CORRECTION_MARGIN;
         const playerRockCount = this.broadphase.queryRocks(
@@ -3134,12 +3345,81 @@ export class Simulation {
             this.#resolveRockRock(left, this.broadphase.rockCandidates[candidate], record);
           }
         }
+        const playerDeadBodyRange = player.radius + ENEMY_WIZARD.radius
+          + BROADPHASE_CORRECTION_MARGIN;
+        const playerDeadBodyCount = this.broadphase.queryDeadBodies(
+          player.x - playerDeadBodyRange,
+          player.z - playerDeadBodyRange,
+          player.x + playerDeadBodyRange,
+          player.z + playerDeadBodyRange,
+        );
+        for (let candidate = 0; candidate < playerDeadBodyCount; candidate += 1) {
+          this.#resolvePlayerDeadBody(
+            this.broadphase.deadBodyCandidates[candidate],
+            record,
+          );
+        }
+        for (let enemyIndex = 0; enemyIndex < enemies.activeCount; enemyIndex += 1) {
+          const range = enemies.radius[enemyIndex] + ENEMY_WIZARD.radius
+            + BROADPHASE_CORRECTION_MARGIN;
+          const count = this.broadphase.queryDeadBodies(
+            enemies.x[enemyIndex] - range,
+            enemies.z[enemyIndex] - range,
+            enemies.x[enemyIndex] + range,
+            enemies.z[enemyIndex] + range,
+          );
+          for (let candidate = 0; candidate < count; candidate += 1) {
+            this.#resolveEnemyDeadBody(
+              enemyIndex,
+              this.broadphase.deadBodyCandidates[candidate],
+              record,
+            );
+          }
+        }
+        for (let rockIndex = 0; rockIndex < this.rocks.activeCount; rockIndex += 1) {
+          const range = this.rocks.radius[rockIndex] + ENEMY_WIZARD.radius
+            + BROADPHASE_CORRECTION_MARGIN;
+          const count = this.broadphase.queryDeadBodies(
+            this.rocks.x[rockIndex] - range,
+            this.rocks.z[rockIndex] - range,
+            this.rocks.x[rockIndex] + range,
+            this.rocks.z[rockIndex] + range,
+          );
+          for (let candidate = 0; candidate < count; candidate += 1) {
+            this.#resolveRockDeadBody(
+              rockIndex,
+              this.broadphase.deadBodyCandidates[candidate],
+              record,
+            );
+          }
+        }
+        for (let left = 0; left < deadBodies.activeCount; left += 1) {
+          const range = deadBodies.radius[left] + ENEMY_WIZARD.radius
+            + BROADPHASE_CORRECTION_MARGIN;
+          const count = this.broadphase.queryDeadBodies(
+            deadBodies.x[left] - range,
+            deadBodies.z[left] - range,
+            deadBodies.x[left] + range,
+            deadBodies.z[left] + range,
+            left + 1,
+          );
+          for (let candidate = 0; candidate < count; candidate += 1) {
+            this.#resolveDeadBodyDeadBody(
+              left,
+              this.broadphase.deadBodyCandidates[candidate],
+              record,
+            );
+          }
+        }
         this.#resolvePlayerGrid(false);
         for (let index = 0; index < enemies.activeCount; index += 1) {
           this.#resolveEnemyGrid(index, false);
         }
         for (let index = 0; index < this.rocks.activeCount; index += 1) {
           this.#resolveRockGrid(index, false);
+        }
+        for (let index = 0; index < deadBodies.activeCount; index += 1) {
+          this.#resolveDeadBodyGrid(index, false);
         }
       }
     }
@@ -3277,6 +3557,42 @@ export class Simulation {
           tangentZ * (1 - ROCK.wallFriction) - normalSpeed * ROCK.wallRestitution * contact.nz;
       }
       if (record) this.#recordGridContact(BODY_ROCK, pool.id[index], contact);
+    }
+  }
+
+  /** @param {number} index @param {boolean} record */
+  #resolveDeadBodyGrid(index, record) {
+    const pool = this.dynamicDeadBodies;
+    for (let pass = 0; pass < 8; pass += 1) {
+      if (
+        !firstSolidContact(
+          this.map,
+          pool.x[index],
+          pool.z[index],
+          pool.radius[index],
+          this._gridContact,
+        )
+      ) {
+        break;
+      }
+      const contact = this._gridContact;
+      const correction = contact.penetration + 1e-6;
+      pool.x[index] += contact.nx * correction;
+      pool.z[index] += contact.nz * correction;
+      const normalSpeed = pool.vx[index] * contact.nx + pool.vz[index] * contact.nz;
+      if (normalSpeed < 0) {
+        const tangentX = pool.vx[index] - normalSpeed * contact.nx;
+        const tangentZ = pool.vz[index] - normalSpeed * contact.nz;
+        pool.vx[index] =
+          tangentX * (1 - DEAD_BODY.wallFriction)
+          - normalSpeed * DEAD_BODY.wallRestitution * contact.nx;
+        pool.vz[index] =
+          tangentZ * (1 - DEAD_BODY.wallFriction)
+          - normalSpeed * DEAD_BODY.wallRestitution * contact.nz;
+      }
+      if (record) {
+        this.#recordGridContact(BODY_ENEMY_WIZARD_BODY, pool.id[index], contact);
+      }
     }
   }
 
@@ -3602,6 +3918,246 @@ export class Simulation {
     }
   }
 
+  /** @param {number} bodyIndex @param {boolean} record */
+  #resolvePlayerDeadBody(bodyIndex, record) {
+    const player = this.player;
+    const bodies = this.dynamicDeadBodies;
+    if (
+      !circleCircleContact(
+        player.x,
+        player.z,
+        player.radius,
+        bodies.x[bodyIndex],
+        bodies.z[bodyIndex],
+        bodies.radius[bodyIndex],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = player.inverseMass + bodies.inverseMass[bodyIndex];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    player.x -= contact.nx * correction * player.inverseMass;
+    player.z -= contact.nz * correction * player.inverseMass;
+    bodies.x[bodyIndex] += contact.nx * correction * bodies.inverseMass[bodyIndex];
+    bodies.z[bodyIndex] += contact.nz * correction * bodies.inverseMass[bodyIndex];
+
+    const body = this._dynamicBodyVelocity;
+    body.vx = bodies.vx[bodyIndex];
+    body.vz = bodies.vz[bodyIndex];
+    body.inverseMass = bodies.inverseMass[bodyIndex];
+    resolvePlayerDynamicBodyVelocity(
+      player,
+      body,
+      contact.nx,
+      contact.nz,
+      DYNAMIC_PHYSICS.bodyRestitution,
+      DYNAMIC_PHYSICS.bodyFriction,
+    );
+    bodies.vx[bodyIndex] = body.vx;
+    bodies.vz[bodyIndex] = body.vz;
+    bodies.touched[bodyIndex] = 1;
+    if (record) {
+      this.#recordBodyContact(
+        BODY_PLAYER,
+        player.id,
+        BODY_ENEMY_WIZARD_BODY,
+        bodies.id[bodyIndex],
+        contact,
+      );
+    }
+  }
+
+  /** @param {number} enemyIndex @param {number} bodyIndex @param {boolean} record */
+  #resolveEnemyDeadBody(enemyIndex, bodyIndex, record) {
+    const enemies = this.enemies;
+    const bodies = this.dynamicDeadBodies;
+    if (
+      !circleCircleContact(
+        enemies.x[enemyIndex],
+        enemies.z[enemyIndex],
+        enemies.radius[enemyIndex],
+        bodies.x[bodyIndex],
+        bodies.z[bodyIndex],
+        bodies.radius[bodyIndex],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = enemies.inverseMass[enemyIndex] + bodies.inverseMass[bodyIndex];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    enemies.x[enemyIndex] -= contact.nx * correction * enemies.inverseMass[enemyIndex];
+    enemies.z[enemyIndex] -= contact.nz * correction * enemies.inverseMass[enemyIndex];
+    bodies.x[bodyIndex] += contact.nx * correction * bodies.inverseMass[bodyIndex];
+    bodies.z[bodyIndex] += contact.nz * correction * bodies.inverseMass[bodyIndex];
+
+    const actor = this._enemyBodyVelocity;
+    actor.vx = enemies.vx[enemyIndex];
+    actor.vz = enemies.vz[enemyIndex];
+    actor.desiredVx = enemies.desiredVx[enemyIndex];
+    actor.desiredVz = enemies.desiredVz[enemyIndex];
+    actor.locomotionVx = enemies.locomotionVx[enemyIndex];
+    actor.locomotionVz = enemies.locomotionVz[enemyIndex];
+    actor.externalVx = enemies.externalVx[enemyIndex];
+    actor.externalVz = enemies.externalVz[enemyIndex];
+    actor.inverseMass = enemies.inverseMass[enemyIndex];
+    const body = this._dynamicBodyVelocity;
+    body.vx = bodies.vx[bodyIndex];
+    body.vz = bodies.vz[bodyIndex];
+    body.inverseMass = bodies.inverseMass[bodyIndex];
+    resolvePlayerDynamicBodyVelocity(
+      actor,
+      body,
+      contact.nx,
+      contact.nz,
+      DYNAMIC_PHYSICS.bodyRestitution,
+      DYNAMIC_PHYSICS.bodyFriction,
+    );
+    enemies.locomotionVx[enemyIndex] = actor.locomotionVx;
+    enemies.locomotionVz[enemyIndex] = actor.locomotionVz;
+    enemies.externalVx[enemyIndex] = actor.externalVx;
+    enemies.externalVz[enemyIndex] = actor.externalVz;
+    enemies.vx[enemyIndex] = actor.vx;
+    enemies.vz[enemyIndex] = actor.vz;
+    bodies.vx[bodyIndex] = body.vx;
+    bodies.vz[bodyIndex] = body.vz;
+    bodies.touched[bodyIndex] = 1;
+    if (record) {
+      this.#recordBodyContact(
+        BODY_ENEMY_WIZARD,
+        enemies.id[enemyIndex],
+        BODY_ENEMY_WIZARD_BODY,
+        bodies.id[bodyIndex],
+        contact,
+      );
+    }
+  }
+
+  /** @param {number} rockIndex @param {number} bodyIndex @param {boolean} record */
+  #resolveRockDeadBody(rockIndex, bodyIndex, record) {
+    const rocks = this.rocks;
+    const bodies = this.dynamicDeadBodies;
+    if (
+      !circleCircleContact(
+        rocks.x[rockIndex],
+        rocks.z[rockIndex],
+        rocks.radius[rockIndex],
+        bodies.x[bodyIndex],
+        bodies.z[bodyIndex],
+        bodies.radius[bodyIndex],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = rocks.inverseMass[rockIndex] + bodies.inverseMass[bodyIndex];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    rocks.x[rockIndex] -= contact.nx * correction * rocks.inverseMass[rockIndex];
+    rocks.z[rockIndex] -= contact.nz * correction * rocks.inverseMass[rockIndex];
+    bodies.x[bodyIndex] += contact.nx * correction * bodies.inverseMass[bodyIndex];
+    bodies.z[bodyIndex] += contact.nz * correction * bodies.inverseMass[bodyIndex];
+
+    const left = this._dynamicBodyVelocity;
+    left.vx = rocks.vx[rockIndex];
+    left.vz = rocks.vz[rockIndex];
+    left.inverseMass = rocks.inverseMass[rockIndex];
+    const right = this._secondDynamicBodyVelocity;
+    right.vx = bodies.vx[bodyIndex];
+    right.vz = bodies.vz[bodyIndex];
+    right.inverseMass = bodies.inverseMass[bodyIndex];
+    resolveDynamicBodyPairVelocity(
+      left,
+      right,
+      contact.nx,
+      contact.nz,
+      DYNAMIC_PHYSICS.bodyRestitution,
+      DYNAMIC_PHYSICS.bodyFriction,
+    );
+    rocks.vx[rockIndex] = left.vx;
+    rocks.vz[rockIndex] = left.vz;
+    bodies.vx[bodyIndex] = right.vx;
+    bodies.vz[bodyIndex] = right.vz;
+    bodies.touched[bodyIndex] = 1;
+    if (record) {
+      this.#recordBodyContact(
+        BODY_ROCK,
+        rocks.id[rockIndex],
+        BODY_ENEMY_WIZARD_BODY,
+        bodies.id[bodyIndex],
+        contact,
+      );
+    }
+  }
+
+  /** @param {number} leftIndex @param {number} rightIndex @param {boolean} record */
+  #resolveDeadBodyDeadBody(leftIndex, rightIndex, record) {
+    const bodies = this.dynamicDeadBodies;
+    if (
+      !circleCircleContact(
+        bodies.x[leftIndex],
+        bodies.z[leftIndex],
+        bodies.radius[leftIndex],
+        bodies.x[rightIndex],
+        bodies.z[rightIndex],
+        bodies.radius[rightIndex],
+        this._bodyContact,
+      )
+    ) {
+      return;
+    }
+    const contact = this._bodyContact;
+    const inverseMassSum = bodies.inverseMass[leftIndex] + bodies.inverseMass[rightIndex];
+    const correction =
+      (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
+        * DYNAMIC_PHYSICS.positionCorrection) / inverseMassSum;
+    bodies.x[leftIndex] -= contact.nx * correction * bodies.inverseMass[leftIndex];
+    bodies.z[leftIndex] -= contact.nz * correction * bodies.inverseMass[leftIndex];
+    bodies.x[rightIndex] += contact.nx * correction * bodies.inverseMass[rightIndex];
+    bodies.z[rightIndex] += contact.nz * correction * bodies.inverseMass[rightIndex];
+
+    const left = this._dynamicBodyVelocity;
+    left.vx = bodies.vx[leftIndex];
+    left.vz = bodies.vz[leftIndex];
+    left.inverseMass = bodies.inverseMass[leftIndex];
+    const right = this._secondDynamicBodyVelocity;
+    right.vx = bodies.vx[rightIndex];
+    right.vz = bodies.vz[rightIndex];
+    right.inverseMass = bodies.inverseMass[rightIndex];
+    resolveDynamicBodyPairVelocity(
+      left,
+      right,
+      contact.nx,
+      contact.nz,
+      DYNAMIC_PHYSICS.bodyRestitution,
+      DYNAMIC_PHYSICS.bodyFriction,
+    );
+    bodies.vx[leftIndex] = left.vx;
+    bodies.vz[leftIndex] = left.vz;
+    bodies.vx[rightIndex] = right.vx;
+    bodies.vz[rightIndex] = right.vz;
+    bodies.touched[leftIndex] = 1;
+    bodies.touched[rightIndex] = 1;
+    if (record) {
+      this.#recordBodyContact(
+        BODY_ENEMY_WIZARD_BODY,
+        bodies.id[leftIndex],
+        BODY_ENEMY_WIZARD_BODY,
+        bodies.id[rightIndex],
+        contact,
+      );
+    }
+  }
+
   /**
    * @param {number} kind
    * @param {number} id
@@ -3749,7 +4305,12 @@ export class Simulation {
   /** @param {number} dt */
   #projectileSystem(dt) {
     const pool = this.projectiles;
-    this.broadphase.rebuild(this.enemies, this.rocks, this.projectiles);
+    this.broadphase.rebuild(
+      this.enemies,
+      this.rocks,
+      this.projectiles,
+      this.dynamicDeadBodies,
+    );
     let index = 0;
     while (index < pool.activeCount) {
       pool.previousX[index] = pool.x[index];
@@ -3783,9 +4344,17 @@ export class Simulation {
           Math.max(startZ, startZ + deltaZ) + enemyPadding,
         )
         : 0;
+      const deadBodyPadding = pool.radius[index] + ENEMY_WIZARD.radius;
+      const deadBodyCandidateCount = this.broadphase.queryDeadBodies(
+        Math.min(startX, startX + deltaX) - deadBodyPadding,
+        Math.min(startZ, startZ + deltaZ) - deadBodyPadding,
+        Math.max(startX, startX + deltaX) + deadBodyPadding,
+        Math.max(startZ, startZ + deltaZ) + deadBodyPadding,
+      );
       let hitKind = "";
       let hitRockIndex = -1;
       let hitActorIndex = -1;
+      let hitDeadBodyIndex = -1;
       let hitX = startX;
       let hitZ = startZ;
       for (let step = 0; step <= steps; step += 1) {
@@ -3809,6 +4378,22 @@ export class Simulation {
           ) {
             hitKind = "rock";
             hitRockIndex = rockIndex;
+            hitX = testX;
+            hitZ = testZ;
+            break;
+          }
+        }
+        if (hitKind) break;
+        for (let candidate = 0; candidate < deadBodyCandidateCount; candidate += 1) {
+          const bodyIndex = this.broadphase.deadBodyCandidates[candidate];
+          if (
+            Math.hypot(
+              testX - this.dynamicDeadBodies.x[bodyIndex],
+              testZ - this.dynamicDeadBodies.z[bodyIndex],
+            ) <= pool.radius[index] + this.dynamicDeadBodies.radius[bodyIndex]
+          ) {
+            hitKind = "enemyWizardBody";
+            hitDeadBodyIndex = bodyIndex;
             hitX = testX;
             hitZ = testZ;
             break;
@@ -3850,6 +4435,7 @@ export class Simulation {
           hitKind,
           hitRockIndex,
           hitActorIndex,
+          hitDeadBodyIndex,
           hitX,
           hitZ,
         );
@@ -3921,10 +4507,19 @@ export class Simulation {
    * @param {string} hitKind
    * @param {number} rockIndex
    * @param {number} actorIndex
+   * @param {number} deadBodyIndex
    * @param {number} hitX
    * @param {number} hitZ
    */
-  #createExplosionEvent(projectileIndex, hitKind, rockIndex, actorIndex, hitX, hitZ) {
+  #createExplosionEvent(
+    projectileIndex,
+    hitKind,
+    rockIndex,
+    actorIndex,
+    deadBodyIndex,
+    hitX,
+    hitZ,
+  ) {
     const pool = this.projectiles;
     const spellCode = pool.spellCode[projectileIndex];
     const definitionRevision = pool.definitionRevision[projectileIndex];
@@ -3954,15 +4549,26 @@ export class Simulation {
       contactX = this.rocks.x[rockIndex] + nx * this.rocks.radius[rockIndex];
       contactZ = this.rocks.z[rockIndex] + nz * this.rocks.radius[rockIndex];
       hit = { kind: "rock", id: this.rocks.id[rockIndex] };
-    } else if (hitKind === "player" || hitKind === "enemyWizard") {
+    } else if (
+      hitKind === "player"
+      || hitKind === "enemyWizard"
+      || hitKind === "enemyWizardBody"
+    ) {
       const body = hitKind === "player"
         ? this.player
-        : {
-          id: this.enemies.id[actorIndex],
-          x: this.enemies.x[actorIndex],
-          z: this.enemies.z[actorIndex],
-          radius: this.enemies.radius[actorIndex],
-        };
+        : hitKind === "enemyWizard"
+          ? {
+            id: this.enemies.id[actorIndex],
+            x: this.enemies.x[actorIndex],
+            z: this.enemies.z[actorIndex],
+            radius: this.enemies.radius[actorIndex],
+          }
+          : {
+            id: this.dynamicDeadBodies.id[deadBodyIndex],
+            x: this.dynamicDeadBodies.x[deadBodyIndex],
+            z: this.dynamicDeadBodies.z[deadBodyIndex],
+            radius: this.dynamicDeadBodies.radius[deadBodyIndex],
+          };
       const dx = hitX - body.x;
       const dz = hitZ - body.z;
       const distance = Math.hypot(dx, dz);
@@ -4035,6 +4641,9 @@ export class Simulation {
     }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       this.#applyExplosionToRock(event, index);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#applyExplosionToDeadBody(event, index);
     }
     this.#syncPlayerVelocity();
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
@@ -4367,6 +4976,64 @@ export class Simulation {
         this.rocks.id[index],
         this.rocks.x[index],
         this.rocks.z[index],
+        blocked,
+        response,
+      ),
+    );
+  }
+
+  /** @param {Record<string, any>} event @param {number} index */
+  #applyExplosionToDeadBody(event, index) {
+    const pool = this.dynamicDeadBodies;
+    let response = computeExplosionResponse({
+      originX: event.originX,
+      originZ: event.originZ,
+      bodyX: pool.x[index],
+      bodyZ: pool.z[index],
+      bodyRadius: pool.radius[index],
+      massKg: pool.massKg[index],
+      blastRadius: event.radius,
+      pressureImpulse: event.pressureImpulse,
+      fallbackNx: -event.nx,
+      fallbackNz: -event.nz,
+    });
+    const directHit = event.hit?.kind === "enemyWizardBody"
+      && Number(event.hit.id) === pool.id[index];
+    if (!response && !directHit) return;
+    const hasBlastResponse = Boolean(response);
+    response ??= zeroImpulseResponse(
+      event,
+      pool.x[index],
+      pool.z[index],
+      pool.radius[index],
+    );
+    const blocked = hasBlastResponse
+      ? gridRayBlocked(
+        this.map,
+        event.originX,
+        event.originZ,
+        pool.x[index],
+        pool.z[index],
+      )
+      : false;
+    if (hasBlastResponse && !blocked) {
+      pool.vx[index] += response.deltaVx;
+      pool.vz[index] += response.deltaVz;
+      const speed = Math.hypot(pool.vx[index], pool.vz[index]);
+      if (speed > DEAD_BODY.maxSpeed) {
+        const scale = DEAD_BODY.maxSpeed / speed;
+        pool.vx[index] *= scale;
+        pool.vz[index] *= scale;
+        pool.speedClamped += 1;
+      }
+    }
+    pool.touched[index] = 1;
+    event.responses.push(
+      this.#describeExplosionResponse(
+        "enemyWizardBody",
+        pool.id[index],
+        pool.x[index],
+        pool.z[index],
         blocked,
         response,
       ),
@@ -5430,6 +6097,65 @@ export class Simulation {
       };
     }
 
+    const dynamicDeadBodies = new Array(this.dynamicDeadBodies.activeCount);
+    for (let index = 0; index < dynamicDeadBodies.length; index += 1) {
+      dynamicDeadBodies[index] = {
+        kind: "enemyWizardBody",
+        id: this.dynamicDeadBodies.id[index],
+        index,
+        spawnSequence: this.dynamicDeadBodies.spawnSequence[index],
+        phase: "dynamic",
+        interacting: true,
+        deathTick: this.dynamicDeadBodies.deathTick[index],
+        settledTick: null,
+        settleReason: null,
+        ageTicks: this.tickCount - this.dynamicDeadBodies.deathTick[index],
+        x: this.dynamicDeadBodies.x[index],
+        z: this.dynamicDeadBodies.z[index],
+        previousX: this.dynamicDeadBodies.previousX[index],
+        previousZ: this.dynamicDeadBodies.previousZ[index],
+        vx: this.dynamicDeadBodies.vx[index],
+        vz: this.dynamicDeadBodies.vz[index],
+        facing: {
+          x: this.dynamicDeadBodies.facingX[index],
+          z: this.dynamicDeadBodies.facingZ[index],
+        },
+        radius: this.dynamicDeadBodies.radius[index],
+        massKg: this.dynamicDeadBodies.massKg[index],
+        quietTickCount: this.dynamicDeadBodies.quietTickCount[index],
+      };
+    }
+    const inertDeadBodies = new Array(this.inertDeadBodies.length);
+    for (let ordinal = 0; ordinal < inertDeadBodies.length; ordinal += 1) {
+      const index = this.inertDeadBodies.storageIndex(ordinal);
+      inertDeadBodies[ordinal] = {
+        kind: "enemyWizardBody",
+        id: this.inertDeadBodies.id[index],
+        index: ordinal,
+        spawnSequence: this.inertDeadBodies.spawnSequence[index],
+        phase: "inert",
+        interacting: false,
+        deathTick: this.inertDeadBodies.deathTick[index],
+        settledTick: this.inertDeadBodies.settledTick[index],
+        settleReason:
+          DEAD_BODY_SETTLE_REASON_NAMES[this.inertDeadBodies.settleReason[index]] ?? null,
+        ageTicks: this.tickCount - this.inertDeadBodies.deathTick[index],
+        x: this.inertDeadBodies.x[index],
+        z: this.inertDeadBodies.z[index],
+        previousX: this.inertDeadBodies.x[index],
+        previousZ: this.inertDeadBodies.z[index],
+        vx: 0,
+        vz: 0,
+        facing: {
+          x: this.inertDeadBodies.facingX[index],
+          z: this.inertDeadBodies.facingZ[index],
+        },
+        radius: this.inertDeadBodies.radius[index],
+        massKg: this.inertDeadBodies.massKg[index],
+        quietTickCount: DEAD_BODY.quietTicks,
+      };
+    }
+
     const projectiles = new Array(this.projectiles.activeCount);
     for (let index = 0; index < projectiles.length; index += 1) {
       projectiles[index] = {
@@ -5536,6 +6262,7 @@ export class Simulation {
       tick: this.tickCount,
       gameplayProfile: this.gameplayProfile,
       enemyAiProfile: this.enemyAiProfile,
+      deadBodyProfile: this.deadBodyProfile,
       navigation: usesPerceptionProfile(this.enemyAiProfile)
         ? this.destinationFields.diagnostics(this.mapRevision)
         : {
@@ -5611,6 +6338,10 @@ export class Simulation {
       rocks,
       obelisks,
       enemies,
+      deadBodies: {
+        dynamic: dynamicDeadBodies,
+        inert: inertDeadBodies,
+      },
       projectiles,
       particles,
       contacts,
@@ -5645,6 +6376,19 @@ export class Simulation {
           active: this.enemies.activeCount,
           capacity: this.enemies.capacity,
           dropped: this.enemies.dropped,
+        },
+        dynamicDeadBodies: {
+          active: this.dynamicDeadBodies.activeCount,
+          capacity: this.dynamicDeadBodies.capacity,
+          forcedSettles: this.dynamicDeadBodies.forcedSettles,
+          quietSettles: this.dynamicDeadBodies.quietSettles,
+          timeoutSettles: this.dynamicDeadBodies.timeoutSettles,
+          speedClamped: this.dynamicDeadBodies.speedClamped,
+        },
+        inertDeadBodies: {
+          active: this.inertDeadBodies.length,
+          capacity: this.inertDeadBodies.capacity,
+          overwritten: this.inertDeadBodies.overwritten,
         },
         projectiles: {
           active: this.projectiles.activeCount,
@@ -6025,6 +6769,16 @@ export class Simulation {
         return false;
       }
     }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      if (
+        Math.hypot(
+          x - this.dynamicDeadBodies.x[index],
+          z - this.dynamicDeadBodies.z[index],
+        ) < definition.radius + this.dynamicDeadBodies.radius[index]
+      ) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -6064,6 +6818,9 @@ export class Simulation {
         spells: cloneUnknown(this.commandLogSpellBaseline),
         gameplayProfile: this.commandLogGameplayProfile,
         enemyAiProfile: this.commandLogEnemyAiProfile,
+        deadBodyProfile: this.commandLogDeadBodyProfile,
+        dynamicDeadBodyCapacity: this.commandLogDynamicDeadBodyCapacity,
+        inertDeadBodyCapacity: this.commandLogInertDeadBodyCapacity,
       },
       truncated: this.commandLogDropped > 0,
       commands: this.commandLog.toArray().map((entry) => ({
@@ -6076,7 +6833,7 @@ export class Simulation {
   /** @param {Record<string, any>} recording */
   static replay(recording) {
     const recordingSchema = Number(recording.schemaVersion);
-    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 9) {
+    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 10) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
     const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
@@ -6097,6 +6854,9 @@ export class Simulation {
     }
     let gameplayProfile = GAMEPLAY_PROFILE_PRE_COMBAT;
     let enemyAiProfile = ENEMY_AI_PROFILE_NONE;
+    let deadBodyProfile = DEAD_BODY_PROFILE_NONE;
+    let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
+    let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
     if (recordingSchema === 6) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -6146,7 +6906,7 @@ export class Simulation {
       ) {
         throw new TypeError("Schema-v8 recording has invalid enemy capacity metadata");
       }
-    } else if (recordingSchema === 9) {
+    } else if (recordingSchema === 9 || recordingSchema === 10) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
       const validProfiles = (
@@ -6157,7 +6917,9 @@ export class Simulation {
         && enemyAiProfile === ENEMY_AI_PROFILE_NONE
       );
       if (!validProfiles) {
-        throw new TypeError("Schema-v9 recording has invalid or missing gameplay profiles");
+        throw new TypeError(
+          `Schema-v${recordingSchema} recording has invalid or missing gameplay profiles`,
+        );
       }
       if (
         gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
@@ -6167,7 +6929,33 @@ export class Simulation {
             !== ENEMY_WIZARD.encounterMaximumAlive
         )
       ) {
-        throw new TypeError("Schema-v9 recording has invalid enemy capacity metadata");
+        throw new TypeError(
+          `Schema-v${recordingSchema} recording has invalid enemy capacity metadata`,
+        );
+      }
+      if (recordingSchema === 10) {
+        deadBodyProfile = String(recording.configuration?.deadBodyProfile ?? "");
+        dynamicDeadBodyCapacity = Number(
+          recording.configuration?.dynamicDeadBodyCapacity,
+        );
+        inertDeadBodyCapacity = Number(
+          recording.configuration?.inertDeadBodyCapacity,
+        );
+        if (deadBodyProfile !== DEAD_BODY_PROFILE_V1) {
+          throw new TypeError(
+            "Schema-v10 recording has invalid or missing dead-body profile",
+          );
+        }
+        if (
+          !Number.isInteger(dynamicDeadBodyCapacity)
+          || dynamicDeadBodyCapacity <= 0
+          || dynamicDeadBodyCapacity > DEAD_BODY.maximumDynamicCapacity
+          || !Number.isInteger(inertDeadBodyCapacity)
+          || inertDeadBodyCapacity <= 0
+          || inertDeadBodyCapacity > DEAD_BODY.maximumInertCapacity
+        ) {
+          throw new TypeError("Schema-v10 recording has invalid dead-body capacities");
+        }
       }
     }
     const enemyCapacity = recordingSchema >= 8
@@ -6197,6 +6985,9 @@ export class Simulation {
       legacyFireballMode: recordingSchema < 5,
       gameplayProfile,
       enemyAiProfile,
+      deadBodyProfile,
+      dynamicDeadBodyCapacity,
+      inertDeadBodyCapacity,
     });
     for (const entry of recording.commands) simulation.tick(entry.command);
     return simulation;

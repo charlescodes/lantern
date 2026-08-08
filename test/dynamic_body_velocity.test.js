@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolvePlayerDynamicBodyVelocity } from "../src/sim/dynamic_body_velocity.js";
+import {
+  resolveDynamicBodyPairVelocity,
+  resolvePlayerDynamicBodyVelocity,
+} from "../src/sim/dynamic_body_velocity.js";
 
 const RESTITUTION = 0.1;
 const FRICTION = 0.35;
@@ -144,4 +147,26 @@ test("angled friction stays in the velocity channel that produced the contact", 
   assertClose(impactedPlayer.externalVz, 0.385, "impacted external Z velocity");
   assertClose(incomingBody.vx, -0.9, "incoming body X velocity");
   assertClose(incomingBody.vz, 0.615, "incoming body Z velocity");
+});
+
+test("passive body pairs conserve momentum with restitution and bounded friction", () => {
+  const left = { vx: 1, vz: 1, inverseMass: 1 };
+  const right = { vx: 0, vz: 0, inverseMass: 1 };
+  resolveDynamicBodyPairVelocity(left, right, 1, 0, RESTITUTION, FRICTION);
+
+  assertClose(left.vx, 0.45, "left normal velocity");
+  assertClose(right.vx, 0.55, "right normal velocity");
+  assertClose(right.vx - left.vx, RESTITUTION, "separation speed");
+  assertClose(left.vx + right.vx, 1, "normal momentum");
+  assertClose(left.vz, 0.8075, "left tangent velocity");
+  assertClose(right.vz, 0.1925, "right tangent velocity");
+  assertClose(left.vz + right.vz, 1, "tangent momentum");
+});
+
+test("passive body pairs do not impulse separating contacts", () => {
+  const left = { vx: -1, vz: 0.5, inverseMass: 1 };
+  const right = { vx: 1, vz: -0.5, inverseMass: 1 };
+  resolveDynamicBodyPairVelocity(left, right, 1, 0, RESTITUTION, FRICTION);
+  assert.deepEqual(left, { vx: -1, vz: 0.5, inverseMass: 1 });
+  assert.deepEqual(right, { vx: 1, vz: -0.5, inverseMass: 1 });
 });

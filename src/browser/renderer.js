@@ -8,6 +8,7 @@ import {
   healthBarRatio,
 } from "../presentation/combat_visuals.js";
 import { enemyFacingTriangle } from "../presentation/enemy_facing.js";
+import { enemyDeadBodyPose } from "../presentation/dead_body_pose.js";
 import { interpolateRenderValue } from "../presentation/player_camera.js";
 import {
   FIREBALL_COLOR_CORE,
@@ -31,6 +32,8 @@ const COLORS = Object.freeze({
   playerEdge: "#fff2bd",
   enemy: "#b94852",
   enemyEdge: "#ff9b9e",
+  enemyBody: "#583237",
+  enemyBodyEdge: "#9a676c",
   obeliskBase: "#232a33",
   obelisk: "#7669a8",
   obeliskEdge: "#c8baff",
@@ -89,6 +92,7 @@ export class DebugRenderer {
     this.sightContext = null;
     this.sightImageData = null;
     this._fireColor = { r: 1, g: 1, b: 1 };
+    this._deadBodyPose = { facing: { x: 1, z: 0 } };
   }
 
   /** @param {number} value */
@@ -152,6 +156,7 @@ export class DebugRenderer {
     }
     this.#drawParticles(snapshot, colorVariation, developerToolsOpen);
     this.#drawRocks(snapshot, alpha, developerToolsOpen);
+    this.#drawDeadBodies(snapshot, alpha, developerToolsOpen);
     this.#drawProjectiles(snapshot, colorVariation);
     this.#drawEnemies(snapshot, alpha, developerToolsOpen);
     this.#drawPlayer(snapshot, alpha, developerToolsOpen);
@@ -644,6 +649,71 @@ export class DebugRenderer {
           z,
           enemy.externalVx * 0.3,
           enemy.externalVz * 0.3,
+          COLORS.externalVelocity,
+        );
+      }
+    }
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha @param {boolean} developerToolsOpen */
+  #drawDeadBodies(snapshot, alpha, developerToolsOpen) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1);
+    const inertBodies = snapshot.deadBodies?.inert ?? [];
+    const dynamicBodies = snapshot.deadBodies?.dynamic ?? [];
+    const bodyCount = inertBodies.length + dynamicBodies.length;
+    for (let index = 0; index < bodyCount; index += 1) {
+      const body = index < inertBodies.length
+        ? inertBodies[index]
+        : dynamicBodies[index - inertBodies.length];
+      const pose = enemyDeadBodyPose(body, alpha, this._deadBodyPose);
+      const radius = pose.footprintWidth / 2;
+      const halfSegment = Math.max(0, (pose.footprintLength - pose.footprintWidth) / 2);
+      const perpendicularX = -pose.facing.z;
+      const perpendicularZ = pose.facing.x;
+      const startX = pose.x - pose.facing.x * halfSegment;
+      const startZ = pose.z - pose.facing.z * halfSegment;
+      const endX = pose.x + pose.facing.x * halfSegment;
+      const endZ = pose.z + pose.facing.z * halfSegment;
+      const angle = Math.atan2(pose.facing.z, pose.facing.x);
+      context.beginPath();
+      context.moveTo(
+        startX + perpendicularX * radius,
+        startZ + perpendicularZ * radius,
+      );
+      context.lineTo(
+        endX + perpendicularX * radius,
+        endZ + perpendicularZ * radius,
+      );
+      context.arc(endX, endZ, radius, angle + Math.PI / 2, angle - Math.PI / 2, true);
+      context.lineTo(
+        startX - perpendicularX * radius,
+        startZ - perpendicularZ * radius,
+      );
+      context.arc(
+        startX,
+        startZ,
+        radius,
+        angle - Math.PI / 2,
+        angle + Math.PI / 2,
+        true,
+      );
+      context.closePath();
+      context.fillStyle = COLORS.enemyBody;
+      context.fill();
+      context.strokeStyle = COLORS.enemyBodyEdge;
+      context.lineWidth = line * 1.5;
+      context.stroke();
+      if (
+        developerToolsOpen
+        && body.interacting
+        && snapshot.debugFlags.velocityVectors
+      ) {
+        this.#drawArrow(
+          pose.x,
+          pose.z,
+          body.vx * 0.25,
+          body.vz * 0.25,
           COLORS.externalVelocity,
         );
       }

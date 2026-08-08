@@ -39,10 +39,16 @@ export class ArenaUi {
     this.events = required("events-output");
     this.rockPool = required("rock-pool");
     this.enemyPool = required("enemy-pool");
+    this.dynamicDeadBodyPool = required("dynamic-dead-body-pool");
+    this.inertDeadBodyPool = required("inert-dead-body-pool");
     this.projectilePool = required("projectile-pool");
     this.particlePool = required("particle-pool");
     this.rockBar = /** @type {HTMLElement} */ (required("rock-bar"));
     this.enemyBar = /** @type {HTMLElement} */ (required("enemy-bar"));
+    this.dynamicDeadBodyBar = /** @type {HTMLElement} */ (
+      required("dynamic-dead-body-bar")
+    );
+    this.inertDeadBodyBar = /** @type {HTMLElement} */ (required("inert-dead-body-bar"));
     this.projectileBar = /** @type {HTMLElement} */ (required("projectile-bar"));
     this.particleBar = /** @type {HTMLElement} */ (required("particle-bar"));
     this.error = required("error-output");
@@ -177,6 +183,17 @@ export class ArenaUi {
     ].join("\n");
     this.rockPool.textContent = `${snapshot.pools.rocks.active} / ${snapshot.pools.rocks.capacity}  ·  dropped ${snapshot.pools.rocks.dropped}  ·  caps ${snapshot.pools.rocks.speedClamped}`;
     this.enemyPool.textContent = `${snapshot.pools.enemies.active} / ${snapshot.pools.enemies.capacity}  ·  dropped ${snapshot.pools.enemies.dropped}`;
+    this.dynamicDeadBodyPool.textContent = [
+      `${snapshot.pools.dynamicDeadBodies.active} / ${snapshot.pools.dynamicDeadBodies.capacity}`,
+      `forced ${snapshot.pools.dynamicDeadBodies.forcedSettles}`,
+      `quiet ${snapshot.pools.dynamicDeadBodies.quietSettles}`,
+      `timeout ${snapshot.pools.dynamicDeadBodies.timeoutSettles}`,
+      `caps ${snapshot.pools.dynamicDeadBodies.speedClamped}`,
+    ].join("  ·  ");
+    this.inertDeadBodyPool.textContent = [
+      `${snapshot.pools.inertDeadBodies.active} / ${snapshot.pools.inertDeadBodies.capacity}`,
+      `overwritten ${snapshot.pools.inertDeadBodies.overwritten}`,
+    ].join("  ·  ");
     this.projectilePool.textContent = `${snapshot.pools.projectiles.active} / ${snapshot.pools.projectiles.capacity}  ·  dropped ${snapshot.pools.projectiles.dropped}`;
     this.particlePool.textContent = [
       `${snapshot.pools.particles.active} / ${snapshot.pools.particles.capacity}`,
@@ -187,6 +204,8 @@ export class ArenaUi {
     ].join("  ·  ");
     this.rockBar.style.width = `${(snapshot.pools.rocks.active / snapshot.pools.rocks.capacity) * 100}%`;
     this.enemyBar.style.width = `${(snapshot.pools.enemies.active / snapshot.pools.enemies.capacity) * 100}%`;
+    this.dynamicDeadBodyBar.style.width = `${(snapshot.pools.dynamicDeadBodies.active / snapshot.pools.dynamicDeadBodies.capacity) * 100}%`;
+    this.inertDeadBodyBar.style.width = `${(snapshot.pools.inertDeadBodies.active / snapshot.pools.inertDeadBodies.capacity) * 100}%`;
     this.projectileBar.style.width = `${(snapshot.pools.projectiles.active / snapshot.pools.projectiles.capacity) * 100}%`;
     this.particleBar.style.width = `${(snapshot.pools.particles.active / snapshot.pools.particles.capacity) * 100}%`;
     const inspected = view.pinnedHidden ? null : view.inspected ?? view.hover;

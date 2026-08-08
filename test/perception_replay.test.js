@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEAD_BODY,
+  DEAD_BODY_PROFILE_NONE,
+  DEAD_BODY_PROFILE_V1,
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_PERCEPTIVE,
@@ -36,11 +39,11 @@ function withoutBroadphase(snapshot) {
   return value;
 }
 
-test("schema-v9 recording stores investigative profile metadata and replays exactly", () => {
+test("schema-v10 recording stores investigative and dead-body profile metadata and replays exactly", () => {
   const source = new Simulation({ seed: 0x0800_f17e, particleBurstCount: 0 });
   runFixture(source);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 9);
+  assert.equal(recording.schemaVersion, 10);
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
   assert.equal(
@@ -48,6 +51,15 @@ test("schema-v9 recording stores investigative profile metadata and replays exac
     ENEMY_WIZARD.encounterMaximumAlive,
   );
   assert.equal(recording.configuration.projectileCapacity, PROJECTILE.capacity);
+  assert.equal(recording.configuration.deadBodyProfile, DEAD_BODY_PROFILE_V1);
+  assert.equal(
+    recording.configuration.dynamicDeadBodyCapacity,
+    DEAD_BODY.dynamicCapacity,
+  );
+  assert.equal(
+    recording.configuration.inertDeadBodyCapacity,
+    DEAD_BODY.inertCapacity,
+  );
   const replay = Simulation.replay(recording);
   assert.equal(replay.enemies.capacity, 64);
   assert.equal(replay.encounterMaximumAlive, 4);
@@ -59,6 +71,7 @@ test("schema-v8 recording selects the frozen perceptive profile", () => {
     seed: 0x0800_f17e,
     particleBurstCount: 0,
     enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
+    deadBodyProfile: DEAD_BODY_PROFILE_NONE,
   });
   runFixture(source);
   const recording = source.exportCommandLog();
@@ -72,6 +85,7 @@ test("schema-v7 and v6 replay construct historical four-entry pools and frozen p
   const tacticalSource = new Simulation({
     seed: 0x0700_f17e,
     enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
+    deadBodyProfile: DEAD_BODY_PROFILE_NONE,
     projectileCapacity: PROJECTILE.legacyCapacity,
     particleBurstCount: 0,
   });
@@ -105,7 +119,7 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
   source.tick(null);
   const recording = source.exportCommandLog();
   recording.schemaVersion = 8;
-  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(SCHEMA_VERSION, 10);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),
@@ -128,11 +142,11 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
   );
 });
 
-test("schema-v9 rejects perceptive profile metadata at the new boundary", () => {
+test("schema-v10 rejects perceptive profile metadata at the new boundary", () => {
   const source = new Simulation({ particleBurstCount: 0 });
   source.tick(null);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 9);
+  assert.equal(recording.schemaVersion, 10);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),

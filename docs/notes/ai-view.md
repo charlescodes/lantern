@@ -2,7 +2,7 @@
 
 > **Authority:** read-only presentation and developer diagnostics
 >
-> **Compatibility:** Off/Selected/All behavior and stable selection remain unchanged; Lantern 0.9.0 extends the copied schema-v9 snapshot without adding an AI command or mutation surface
+> **Compatibility:** Off/Selected/All behavior and stable selection remain unchanged; the schema-v10 snapshot adds dead bodies without making them AI View mobs or adding a command or mutation surface
 
 ## Purpose
 
@@ -26,7 +26,7 @@ identity rather than pool index.
 
 ## Displayed truth
 
-The renderer-neutral view model consumes the same copied schema-v9 snapshot as
+The renderer-neutral view model consumes the same copied schema-v10 snapshot as
 Canvas2D and Three.js. It labels **player sight** separately from **mob vision**:
 player sight is the presentation-only TrueSight result, while mob vision is the
 authoritative cone/range/grid-occlusion sample. Neither value is inferred from

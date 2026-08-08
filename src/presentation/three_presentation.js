@@ -12,6 +12,10 @@ import {
 } from "./combat_visuals.js";
 import { normalizedEnemyFacing } from "./enemy_facing.js";
 import {
+  ENEMY_BODY_HEIGHT_METERS,
+  enemyDeadBodyPose,
+} from "./dead_body_pose.js";
+import {
   completeInstancedPoolSubmission,
   createDynamicInstancedPool,
   publishInstancedPool,
@@ -34,7 +38,7 @@ import {
 import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
 const WALL_HEIGHT_METERS = 2.5;
-const PLAYER_HEIGHT_METERS = 1.6;
+const PLAYER_HEIGHT_METERS = ENEMY_BODY_HEIGHT_METERS;
 const FIREBALL_CHEST_HEIGHT_METERS = 0.9;
 const ACTOR_CYLINDER_RADIAL_SEGMENTS = 16;
 const ENEMY_FACING_MARKER_RADIUS_METERS = 0.11;
@@ -103,6 +107,7 @@ export class ThreePresentation {
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
+    this.deadBodyMesh = null;
     this.lightBudget = new PresentationLightBudget({ capacity: options.lights });
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(
@@ -253,6 +258,14 @@ export class ThreePresentation {
     this.enemyMesh.castShadow = true;
     this.enemyMesh.receiveShadow = true;
     this.scene.add(this.enemyMesh);
+
+    this.deadBodyMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x583237,
+      emissive: 0x140708,
+      emissiveIntensity: 0.18,
+      roughness: 0.84,
+      metalness: 0.01,
+    }));
 
     this.enemyFacingMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xff9b9e,
@@ -453,6 +466,9 @@ export class ThreePresentation {
     this._facingDirection = new THREE.Vector3();
     this._facingOrigin = new THREE.Vector3(0, 1, 0);
     this._facingQuaternion = new THREE.Quaternion();
+    this._deadBodyAxis = new THREE.Vector3();
+    this._deadBodyQuaternion = new THREE.Quaternion();
+    this._deadBodyPose = { facing: { x: 1, z: 0 } };
     this._bloomEnabled = false;
     this.renderPipeline = null;
     this.bloomOutput = null;
@@ -530,6 +546,7 @@ export class ThreePresentation {
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, alpha);
     this.#updateEnemies(snapshot, alpha);
+    this.#updateDeadBodies(snapshot, alpha);
     this.#updateHealthBars(snapshot, alpha);
     this.#updateRocks(snapshot, alpha);
     this.#updateProjectiles(snapshot, alpha);
@@ -647,6 +664,10 @@ export class ThreePresentation {
           active: this.enemyFacingMesh.count,
           capacity: this.enemyFacingMesh.userData.capacity,
         },
+        deadBodies: {
+          active: this.deadBodyMesh?.count ?? 0,
+          capacity: this.deadBodyMesh?.userData.capacity ?? 0,
+        },
         healthTracks: {
           active: this.healthTrackMesh.count,
           capacity: this.healthTrackMesh.userData.capacity,
@@ -692,6 +713,7 @@ export class ThreePresentation {
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, 0);
     this.#updateEnemies(snapshot, 0);
+    this.#updateDeadBodies(snapshot, 0);
     this.#updateHealthBars(snapshot, 0);
     this.#updateRocks(snapshot, 0);
     this.#updateProjectiles(snapshot, 0);
@@ -715,6 +737,7 @@ export class ThreePresentation {
       this.editRockPreview,
       this.enemyMesh,
       this.enemyFacingMesh,
+      ...(this.deadBodyMesh ? [this.deadBodyMesh] : []),
       this.healthTrackMesh,
       this.healthFillMesh,
       this.obeliskGroup,
@@ -971,6 +994,57 @@ export class ThreePresentation {
     }
     publishInstancedPool(this.enemyMesh, enemies.length);
     publishInstancedPool(this.enemyFacingMesh, enemies.length);
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #updateDeadBodies(snapshot, alpha) {
+    const capacity = Number(snapshot.pools?.dynamicDeadBodies?.capacity ?? 0)
+      + Number(snapshot.pools?.inertDeadBodies?.capacity ?? 0);
+    if (!this.deadBodyMesh) {
+      this.deadBodyMesh = createDynamicInstancedPool(
+        this.actorGeometry,
+        this.deadBodyMaterial,
+        Math.max(1, capacity),
+        "enemy-wizard-dead-bodies",
+      );
+      this.deadBodyMesh.castShadow = true;
+      this.deadBodyMesh.receiveShadow = true;
+      this.scene.add(this.deadBodyMesh);
+    } else if (this.deadBodyMesh.userData.capacity !== Math.max(1, capacity)) {
+      throw new Error("Dead-body presentation capacity changed after warmup");
+    }
+    const inertBodies = snapshot.deadBodies?.inert ?? [];
+    const dynamicBodies = snapshot.deadBodies?.dynamic ?? [];
+    const bodyCount = inertBodies.length + dynamicBodies.length;
+    for (let index = 0; index < bodyCount; index += 1) {
+      const body = index < inertBodies.length
+        ? inertBodies[index]
+        : dynamicBodies[index - inertBodies.length];
+      const pose = enemyDeadBodyPose(body, alpha, this._deadBodyPose);
+      const sin = Math.sin(pose.angleRadians);
+      this._deadBodyAxis.set(
+        pose.facing.x * sin,
+        Math.cos(pose.angleRadians),
+        pose.facing.z * sin,
+      ).normalize();
+      this._deadBodyQuaternion.setFromUnitVectors(
+        this._facingOrigin,
+        this._deadBodyAxis,
+      );
+      this._position.set(pose.x, pose.centerY, pose.z);
+      this._scale.set(
+        body.radius * 2,
+        ENEMY_BODY_HEIGHT_METERS,
+        body.radius * 2,
+      );
+      this._matrix.compose(
+        this._position,
+        this._deadBodyQuaternion,
+        this._scale,
+      );
+      this.deadBodyMesh.setMatrixAt(index, this._matrix);
+    }
+    publishInstancedPool(this.deadBodyMesh, bodyCount);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */

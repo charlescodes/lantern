@@ -838,7 +838,7 @@ test("manual reset during defeat ignores movement and casting and leaves a clean
   assert.equal(simulation.commandLog.length, 0);
 });
 
-test("snapshots, queries, diagnostics, ownership, and combat history expose bounded schema-v9 state", () => {
+test("snapshots, queries, diagnostics, ownership, and combat history expose bounded schema-v10 state", () => {
   const simulation = sandboxSimulation();
   const enemyId = spawnEnemy(simulation, 5.5, 4.5, { spawnSequence: 9 });
   for (let tick = 0; tick < 300; tick += 1) {
@@ -856,7 +856,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
     simulation.enemies.health[current] = 100;
   }
   const snapshot = simulation.snapshot();
-  assert.equal(snapshot.schemaVersion, 9);
+  assert.equal(snapshot.schemaVersion, 10);
   assert.equal(snapshot.player.maximumHealth, 100);
   assert.equal(snapshot.enemies[0].maximumHealth, 100);
   assert.equal(snapshot.pools.enemies.capacity, 4);
@@ -883,7 +883,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
   assert.equal(diagnostics.encounter.nextSpawnTick, 1);
 });
 
-test("schema-v9 replay is exact and schema-v2 through v5 force frozen pre-combat behavior", () => {
+test("schema-v10 replay is exact and schema-v2 through v5 force frozen pre-combat behavior", () => {
   const live = new Simulation({ seed: 0x7000_0007, particleBurstCount: 0 });
   for (let tick = 0; tick < 180; tick += 1) {
     live.tick({
@@ -892,7 +892,7 @@ test("schema-v9 replay is exact and schema-v2 through v5 force frozen pre-combat
     });
   }
   const recording = live.exportCommandLog();
-  assert.equal(recording.schemaVersion, 9);
+  assert.equal(recording.schemaVersion, 10);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());
