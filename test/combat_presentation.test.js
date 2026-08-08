@@ -248,6 +248,54 @@ test("Three preallocates 64 enemies and facing markers plus 65 health instances"
   assert.ok(presentation.dynamicLights.every((light, index) => light === identities.lights[index]));
 });
 
+test("Three actor cylinders match circular collision bounds and expose the facing marker", () => {
+  const simulation = new Simulation({ particleBurstCount: 0 });
+  simulation.tick(null);
+  const snapshot = simulation.snapshot();
+  snapshot.enemies[0].facing = { x: 1, z: 0 };
+  const enemy = snapshot.enemies[0];
+  const { presentation, sightFrame } = threePresentation(snapshot);
+  presentation.render(snapshot, 1, view(snapshot, sightFrame));
+
+  const actorParameters = presentation.actorGeometry.parameters;
+  assert.equal(presentation.player.geometry, presentation.actorGeometry);
+  assert.equal(presentation.enemyMesh.geometry, presentation.actorGeometry);
+  assert.equal(presentation.actorGeometry.type, "CylinderGeometry");
+  assert.equal(actorParameters.radiusTop, 0.5);
+  assert.equal(actorParameters.radiusBottom, 0.5);
+  assert.equal(actorParameters.height, 1);
+  assert.equal(actorParameters.radialSegments, 16);
+  assert.ok(Math.abs(
+    presentation.player.scale.x * actorParameters.radiusTop
+      - snapshot.player.radius,
+  ) < 1e-9);
+
+  const enemyMatrix = new THREE.Matrix4();
+  const enemyPosition = new THREE.Vector3();
+  const enemyQuaternion = new THREE.Quaternion();
+  const enemyScale = new THREE.Vector3();
+  presentation.enemyMesh.getMatrixAt(0, enemyMatrix);
+  enemyMatrix.decompose(enemyPosition, enemyQuaternion, enemyScale);
+  assert.ok(Math.abs(enemyScale.x * actorParameters.radiusTop - enemy.radius) < 1e-6);
+  assert.ok(Math.abs(enemyScale.z * actorParameters.radiusBottom - enemy.radius) < 1e-6);
+
+  const markerMatrix = new THREE.Matrix4();
+  const markerPosition = new THREE.Vector3();
+  const markerQuaternion = new THREE.Quaternion();
+  const markerScale = new THREE.Vector3();
+  presentation.enemyFacingMesh.getMatrixAt(0, markerMatrix);
+  markerMatrix.decompose(markerPosition, markerQuaternion, markerScale);
+  const markerCenterDistance = markerPosition.x - enemy.x;
+  const markerHalfLength = (
+    presentation.enemyFacingGeometry.parameters.height * markerScale.y / 2
+  );
+  const markerBaseDistance = markerCenterDistance - markerHalfLength;
+  const markerTipDistance = markerCenterDistance + markerHalfLength;
+  assert.ok(markerBaseDistance >= enemy.radius - 0.021);
+  assert.ok(markerBaseDistance < enemy.radius);
+  assert.ok(markerTipDistance > enemy.radius + 0.25);
+});
+
 test("enemy, obelisk, health, hostile effects, and emissive materials share TrueSight concealment", () => {
   const simulation = new Simulation({ particleBurstCount: 0 });
   simulation.tick(null);

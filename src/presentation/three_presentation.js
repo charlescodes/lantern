@@ -36,6 +36,10 @@ import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 const WALL_HEIGHT_METERS = 2.5;
 const PLAYER_HEIGHT_METERS = 1.6;
 const FIREBALL_CHEST_HEIGHT_METERS = 0.9;
+const ACTOR_CYLINDER_RADIAL_SEGMENTS = 16;
+const ENEMY_FACING_MARKER_RADIUS_METERS = 0.11;
+const ENEMY_FACING_MARKER_LENGTH_METERS = 0.34;
+const ENEMY_FACING_MARKER_OVERLAP_METERS = 0.02;
 
 /** @param {number} value @param {number} minimum @param {number} maximum */
 function clamp(value, minimum, maximum) {
@@ -212,8 +216,14 @@ export class ThreePresentation {
       vertexColors: true,
     }));
 
+    this.actorGeometry = new THREE.CylinderGeometry(
+      0.5,
+      0.5,
+      1,
+      ACTOR_CYLINDER_RADIAL_SEGMENTS,
+    );
     this.player = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
+      this.actorGeometry,
       this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
         color: 0xe2bc67,
         emissive: 0x211607,
@@ -222,7 +232,7 @@ export class ThreePresentation {
         metalness: 0.03,
       })),
     );
-    this.player.name = "player-block";
+    this.player.name = "player-cylinder";
     this.player.castShadow = true;
     this.player.receiveShadow = true;
     this.scene.add(this.player);
@@ -235,7 +245,7 @@ export class ThreePresentation {
       metalness: 0.03,
     }));
     this.enemyMesh = createDynamicInstancedPool(
-      this.player.geometry,
+      this.actorGeometry,
       this.enemyMaterial,
       ENEMY_WIZARD.capacity,
       "enemy-wizards",
@@ -251,7 +261,11 @@ export class ThreePresentation {
       roughness: 0.62,
       metalness: 0.02,
     }));
-    this.enemyFacingGeometry = new THREE.ConeGeometry(0.11, 0.30, 3);
+    this.enemyFacingGeometry = new THREE.ConeGeometry(
+      ENEMY_FACING_MARKER_RADIUS_METERS,
+      ENEMY_FACING_MARKER_LENGTH_METERS,
+      3,
+    );
     this.enemyFacingMesh = createDynamicInstancedPool(
       this.enemyFacingGeometry,
       this.enemyFacingMaterial,
@@ -936,17 +950,22 @@ export class ThreePresentation {
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.enemyMesh.setMatrixAt(index, this._matrix);
       const facing = normalizedEnemyFacing(enemy);
+      const markerScale = Math.max(0.5, enemy.radius / ENEMY_WIZARD.radius);
       this._facingDirection.set(facing.x, 0, facing.z).normalize();
       this._facingQuaternion.setFromUnitVectors(
         this._facingOrigin,
         this._facingDirection,
       );
-      this._position.set(
-        x + facing.x * enemy.radius * 0.78,
-        PLAYER_HEIGHT_METERS * 0.66,
-        z + facing.z * enemy.radius * 0.78,
+      const markerCenterDistance = enemy.radius + markerScale * (
+        ENEMY_FACING_MARKER_LENGTH_METERS / 2
+        - ENEMY_FACING_MARKER_OVERLAP_METERS
       );
-      this._scale.setScalar(Math.max(0.5, enemy.radius / ENEMY_WIZARD.radius));
+      this._position.set(
+        x + facing.x * markerCenterDistance,
+        PLAYER_HEIGHT_METERS * 0.66,
+        z + facing.z * markerCenterDistance,
+      );
+      this._scale.setScalar(markerScale);
       this._matrix.compose(this._position, this._facingQuaternion, this._scale);
       this.enemyFacingMesh.setMatrixAt(index, this._matrix);
     }
