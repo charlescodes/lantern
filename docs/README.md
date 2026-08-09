@@ -22,7 +22,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
-- [Near-player wall-cap relief](./notes/near-player-wall-cap-relief.md) — presentation-only 3D cutaways for ordinary wall caps near the player, plus the future authored-occluder boundary.
+- [Foreground wall fading](./notes/foreground-wall-fading.md) — camera-aware 33% opacity for nearby foreground walls while complete wall geometry and gameplay authority remain intact.
 - [0.3.0 renderer regression notes](./notes/0.3.0-renderer-regressions.md) — cold-pipeline and stale-instance symptoms that future renderer changes must not reintroduce.
 - [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) — current player/body response contract that prevents controller contact from storing external recoil.
 - [0.3.2 spark-light affinity regression](./notes/0.3.2-spark-light-affinity.md) — carrier leases, smooth tail fades, and keyed resident-light slots.

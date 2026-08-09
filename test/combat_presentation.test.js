@@ -23,10 +23,12 @@ import {
 } from "../src/presentation/options.js";
 import { ThreePresentation } from "../src/presentation/three_presentation.js";
 import {
-  shouldSuppressWallCap,
-  WALL_CAP_RELIEF_RADIUS_METERS,
+  shouldFadeWall,
+  WALL_FADED_OPACITY,
+  WALL_FADE_RADIUS_METERS,
   WALL_HEIGHT_METERS,
-} from "../src/presentation/wall_cap_relief.js";
+  WALL_OPACITY_ATTRIBUTE,
+} from "../src/presentation/wall_occlusion.js";
 import { Simulation } from "../src/sim/simulation.js";
 import { TrueSightSystem } from "../src/visibility/true_sight.js";
 
@@ -266,7 +268,7 @@ test("Three preallocates bounded combat pools without recreating resident instan
   const snapshot = simulation.snapshot();
   snapshot.player.health = 60;
   snapshot.enemies[0].health = 25;
-  const { presentation, sightFrame } = threePresentation(snapshot);
+  const { presentation, camera, sightFrame } = threePresentation(snapshot);
   const identities = {
     enemies: presentation.enemyMesh,
     facing: presentation.enemyFacingMesh,
@@ -325,7 +327,8 @@ test("Three preallocates bounded combat pools without recreating resident instan
   const solidCells = snapshot.map.cells.filter((cell) => cell === 1).length;
   assert.equal(presentation.wallMesh.count, solidCells - 1);
   const wallMesh = presentation.wallMesh;
-  const wallCapMesh = presentation.wallCapMesh;
+  const wallOpacityAttribute = presentation.wallOpacityAttribute;
+  const wallOpacityArray = wallOpacityAttribute.array;
   const wallCells = [];
   const obeliskCells = new Set(
     snapshot.obelisks.map(({ cell }) => `${cell.cx}:${cell.cz}`),
@@ -337,39 +340,111 @@ test("Three preallocates bounded combat pools without recreating resident instan
       wallCells.push({ cx, cz });
     }
   }
-  const expectedInitialCapCount = wallCells.filter(({ cx, cz }) => (
-    !shouldSuppressWallCap(snapshot.player.x, snapshot.player.z, cx, cz)
+  const forward = camera.groundForward;
+  const expectedInitialFadedCount = wallCells.filter(({ cx, cz }) => (
+    shouldFadeWall(
+      snapshot.player.x,
+      snapshot.player.z,
+      cx,
+      cz,
+      forward.x,
+      forward.z,
+    )
   )).length;
-  assert.equal(presentation.wallCapMesh.count, expectedInitialCapCount);
+  assert.equal(presentation.fadedWallCount, expectedInitialFadedCount);
   assert.equal(
-    presentation.wallCapMesh.userData.capacity,
+    presentation.wallOpacityAttribute.count,
     snapshot.map.width * snapshot.map.height,
   );
-  const capMatrix = new THREE.Matrix4();
-  const capPosition = new THREE.Vector3();
-  presentation.wallCapMesh.getMatrixAt(0, capMatrix);
-  capMatrix.decompose(capPosition, quaternion, new THREE.Vector3());
-  assert.ok(Math.abs(capPosition.y - WALL_HEIGHT_METERS) < 1e-9);
+  assert.equal(presentation.wallOpacityAttribute.usage, THREE.DynamicDrawUsage);
+  assert.equal(
+    presentation.wallGeometry.getAttribute(WALL_OPACITY_ATTRIBUTE),
+    presentation.wallOpacityAttribute,
+  );
+  const wallMatrix = new THREE.Matrix4();
+  const wallPosition = new THREE.Vector3();
+  presentation.wallMesh.getMatrixAt(0, wallMatrix);
+  wallMatrix.decompose(wallPosition, quaternion, new THREE.Vector3());
+  assert.ok(Math.abs(wallPosition.y - WALL_HEIGHT_METERS / 2) < 1e-9);
+
+  const wallPositions = presentation.wallGeometry.getAttribute("position");
+  const wallIndex = presentation.wallGeometry.index;
+  let topTriangleCount = 0;
+  for (let offset = 0; offset < wallIndex.count; offset += 3) {
+    const onTop = [0, 1, 2].every((triangleOffset) => (
+      Math.abs(
+        wallPositions.getY(wallIndex.getX(offset + triangleOffset))
+          - WALL_HEIGHT_METERS / 2,
+      ) < 1e-9
+    ));
+    if (onTop) topTriangleCount += 1;
+  }
+  assert.equal(topTriangleCount, 2);
 
   snapshot.player.x = 1.3;
   snapshot.player.previousX = 1.3;
   snapshot.player.z = 10.5;
   snapshot.player.previousZ = 10.5;
   presentation.render(snapshot, 0, view(snapshot, sightFrame));
-  const expectedNearbyCapCount = wallCells.filter(({ cx, cz }) => (
-    !shouldSuppressWallCap(snapshot.player.x, snapshot.player.z, cx, cz)
+  const expectedNearbyFadedCount = wallCells.filter(({ cx, cz }) => (
+    shouldFadeWall(
+      snapshot.player.x,
+      snapshot.player.z,
+      cx,
+      cz,
+      forward.x,
+      forward.z,
+    )
   )).length;
   assert.equal(presentation.wallMesh, wallMesh);
-  assert.equal(presentation.wallCapMesh, wallCapMesh);
+  assert.equal(presentation.wallOpacityAttribute, wallOpacityAttribute);
+  assert.equal(presentation.wallOpacityAttribute.array, wallOpacityArray);
   assert.equal(presentation.wallMesh.count, wallCells.length);
-  assert.equal(presentation.wallCapMesh.count, expectedNearbyCapCount);
-  assert.ok(presentation.wallCapMesh.count < presentation.wallMesh.count);
-  assert.deepEqual(presentation.diagnostics().wallCaps, {
-    visible: expectedNearbyCapCount,
-    suppressed: wallCells.length - expectedNearbyCapCount,
-    capacity: snapshot.map.width * snapshot.map.height,
-    reliefRadiusMeters: WALL_CAP_RELIEF_RADIUS_METERS,
+  assert.equal(presentation.fadedWallCount, expectedNearbyFadedCount);
+  assert.ok(expectedNearbyFadedCount > 0);
+  let measuredFadedCount = 0;
+  for (let index = 0; index < wallCells.length; index += 1) {
+    const opacity = presentation.wallOpacityAttribute.getX(index);
+    if (Math.abs(opacity - WALL_FADED_OPACITY) < 1e-6) {
+      measuredFadedCount += 1;
+    } else {
+      assert.equal(opacity, 1);
+    }
+  }
+  assert.equal(measuredFadedCount, expectedNearbyFadedCount);
+  assert.deepEqual(presentation.diagnostics().wallOcclusion, {
+    total: wallCells.length,
+    opaque: wallCells.length - expectedNearbyFadedCount,
+    faded: expectedNearbyFadedCount,
+    fadedOpacity: WALL_FADED_OPACITY,
+    proximityRadiusMeters: WALL_FADE_RADIUS_METERS,
   });
+
+  const unchangedVersion = presentation.wallOpacityAttribute.version;
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  assert.equal(presentation.wallOpacityAttribute.version, unchangedVersion);
+  camera.yawDegrees = 225;
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  assert.equal(presentation.wallOpacityAttribute.version, unchangedVersion + 1);
+  const rotatedForward = camera.groundForward;
+  let expectedRotatedFadedCount = 0;
+  for (let index = 0; index < wallCells.length; index += 1) {
+    const cell = wallCells[index];
+    const faded = shouldFadeWall(
+      snapshot.player.x,
+      snapshot.player.z,
+      cell.cx,
+      cell.cz,
+      rotatedForward.x,
+      rotatedForward.z,
+    );
+    if (faded) expectedRotatedFadedCount += 1;
+    assert.ok(Math.abs(
+      presentation.wallOpacityAttribute.getX(index)
+        - (faded ? WALL_FADED_OPACITY : 1),
+    ) < 1e-6);
+  }
+  assert.equal(presentation.fadedWallCount, expectedRotatedFadedCount);
   assert.equal(presentation.enemyMesh, identities.enemies);
   assert.equal(presentation.enemyFacingMesh, identities.facing);
   assert.equal(presentation.healthTrackMesh, identities.tracks);
