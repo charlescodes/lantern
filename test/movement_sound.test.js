@@ -98,7 +98,7 @@ test("RMB movement promotes walking to a latched run until release", () => {
   let snapshot = value.snapshot();
   assert.equal(snapshot.player.movement.mode, "walking");
   assert.equal(snapshot.player.desiredVx, MOVEMENT_SOUND.walkSpeedMetersPerSecond);
-  assert.equal(snapshot.player.movement.targetDistanceMeters, 0.375);
+  assert.equal(snapshot.player.movement.targetDistanceMeters, 0.75);
 
   const locomotionBeforePromotion = value.player.locomotionVx;
   value.tick({
@@ -121,6 +121,9 @@ test("RMB movement promotes walking to a latched run until release", () => {
   value.tick(null);
   assert.equal(value.snapshot().player.movement.mode, "idle");
   tickRelative(value, MOVEMENT_SOUND.walkTargetRadiusMeters, 0);
+  assert.equal(value.snapshot().player.movement.mode, "walking");
+  value.tick(null);
+  tickRelative(value, 0.5, 0.5);
   assert.equal(value.snapshot().player.movement.mode, "walking");
 
   const legacy = simulation({ movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE });
@@ -193,7 +196,7 @@ test("schema-v11 replay reproduces a latched RMB gesture without new command fie
   const value = simulation();
   tickRelative(value, 0.2, 0);
   tickRelative(value, 0.2, 0);
-  tickRelative(value, 0.5, 0);
+  tickRelative(value, 1, 0);
   tickRelative(value, 0.1, 0);
   value.tick(null);
   tickRelative(value, 0.2, 0);

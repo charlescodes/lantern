@@ -55,7 +55,7 @@ Start with the [documentation index](./docs/README.md). It separates mutable [so
 
 ## Playtest controls and developer toolbox
 
-- Begin an RMB hold inside the invisible `0.75m`-diameter circle around the player to walk silently at `2.25m/s`. Crossing outside that circle promotes the held gesture to a `4.5m/s` run; returning inside does not restore walking until RMB is released and pressed near the player again. Release RMB to brake.
+- Begin an RMB hold inside the invisible `0.75m`-radius circle around the player to walk silently at `2.25m/s`. From the center of a one-meter tile, this reaches into all eight neighboring tiles. Crossing outside that circle promotes the held gesture to a `4.5m/s` run; returning inside does not restore walking until RMB is released and pressed near the player again. Release RMB to brake.
 - Press LMB to cast the selected spell; Fireball is the only handler. Fireballs explode on the first opposing actor, dynamic enemy body, wall, rock, or obelisk they hit and pass through same-team living actors.
 - Press `;` to reveal or hide the developer toolbox. The top controls, right-side instruments, bottom coordinate/help rail, authoring windows, debug overlays, and developer shortcuts remain behind this presentation-only gate. Closing the toolbox while editing returns to play mode.
 - Open **Spell Lab** from the toolbox while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed. **Collapse** removes the window from the arena and returns its launcher to the toolbox.

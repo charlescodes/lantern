@@ -48,7 +48,7 @@ export const PLAYER = Object.freeze({
 });
 
 export const MOVEMENT_SOUND = Object.freeze({
-  walkTargetRadiusMeters: 0.375,
+  walkTargetRadiusMeters: 0.75,
   walkSpeedMetersPerSecond: 2.25,
   firstFootstepMeters: 0.75,
   runningStrideMeters: 1.5,

@@ -203,7 +203,7 @@ FUNCTION preparePlayerMovement(RMB target)
         latched mode := idle
     ELSE IF latched mode == running
         keep running
-    ELSE IF distance(player, target) > 0.375m
+    ELSE IF distance(player, target) > 0.75m
         latched mode := running
     ELSE IF latched mode == idle
         latched mode := walking

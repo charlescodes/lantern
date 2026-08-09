@@ -14,13 +14,14 @@ played, and presentation does not decide whether a mob heard an event.
 ## Movement and cadence
 
 On the first fixed tick of an RMB hold, the current player position is compared
-with the world target. A target at or inside the inclusive `0.375m` radius
-(`0.75m` diameter) selects walking at `2.25m/s`; a farther target selects the
-existing `4.5m/s` run. A walking hold promotes to running as soon as its target
-leaves the circle. Running then has priority for the rest of that hold, even if
-the target returns inside. Releasing RMB selects idle, clears the latch, and
-uses the existing locomotion braking; walking again requires a new near-player
-hold. Schema-v2 through v10 recordings force movement-sound profile `none`,
+with the world target. A target at or inside the inclusive `0.75m` radius
+(`1.5m` diameter) selects walking at `2.25m/s`; from the center of a one-meter
+cell, that circle reaches into all eight neighboring cells. A farther target
+selects the existing `4.5m/s` run. A walking hold promotes to running as soon
+as its target leaves the circle. Running then has priority for the rest of that
+hold, even if the target returns inside. Releasing RMB selects idle, clears the
+latch, and uses the existing locomotion braking; walking again requires a new
+near-player hold. Schema-v2 through v10 recordings force movement-sound profile `none`,
 preserving their original full-speed response for every nonzero movement target.
 
 Walking is absolutely silent. This includes locomotion left over while braking
