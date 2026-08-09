@@ -133,7 +133,7 @@ export class ArenaUi {
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
    * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinnedHidden?:boolean,mode:string,developerToolsOpen?:boolean}} view
-   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>}} presentation
+   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>,kineticFragments?:{active:number,capacity:number,dropped:number}}} presentation
    */
   update(snapshot, metrics, view, presentation) {
     const now = performance.now();
@@ -164,6 +164,11 @@ export class ArenaUi {
     const dominantMs = latestSpike && dominantPhase !== "none"
       ? latestSpike[dominantPhase]
       : 0;
+    const kineticFragments = presentation.kineticFragments ?? {
+      active: 0,
+      capacity: 0,
+      dropped: 0,
+    };
     this.pointerValue.textContent = `x ${number(view.mouseWorld.x)}  z ${number(view.mouseWorld.z)}  ·  cell ${cx},${cz}`;
     this.telemetry.textContent = [
       `fps       ${number(metrics.fps, 1)}`,
@@ -176,6 +181,7 @@ export class ArenaUi {
       `warmup    ${presentation.warmup.state}  ${number(presentation.warmup.durationMs, 1)} ms`,
       `present   ${presentation.requestedRenderer}/${presentation.activeBackend}  calls ${presentation.drawCalls}  tris ${presentation.triangles}`,
       `lights    ${presentation.activeLightCount}/${presentation.residentLightCount} active/resident`,
+      `fragments ${kineticFragments.active}/${kineticFragments.capacity} active  dropped ${kineticFragments.dropped}`,
       `pres cpu  ${number(presentationTotal.last)} / ${number(presentationTotal.max)} ms  last/max`,
       `spike     ${dominantPhase} ${number(dominantMs)} ms${latestSpike ? `  tick ${latestSpike.tick}` : ""}`,
       `queue     ${metrics.queuedCommands}  dropped ${metrics.droppedCommands}`,

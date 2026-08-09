@@ -11,6 +11,10 @@ import { enemyFacingTriangle } from "../presentation/enemy_facing.js";
 import { enemyDeadBodyPose } from "../presentation/dead_body_pose.js";
 import { interpolateRenderValue } from "../presentation/player_camera.js";
 import {
+  KINETIC_FRAGMENT_STYLE,
+  writeKineticFragmentTriangle,
+} from "../presentation/kinetic_fragments.js";
+import {
   SCORCH_STYLE,
   SCORCH_WALL_HEIGHT_METERS,
 } from "../presentation/scorch_marks.js";
@@ -98,6 +102,7 @@ export class DebugRenderer {
     this._fireColor = { r: 1, g: 1, b: 1 };
     this._deadBodyPose = { facing: { x: 1, z: 0 } };
     this._scorchPoint = { x: 0, z: 0 };
+    this._kineticFragmentTriangle = new Float32Array(9);
   }
 
   /** @param {number} value */
@@ -137,8 +142,16 @@ export class DebugRenderer {
    * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
    * @param {boolean} [colorVariation]
    * @param {import('../presentation/scorch_marks.js').ScorchMarkPool|null} [scorchMarks]
+   * @param {import('../presentation/kinetic_fragments.js').KineticFragmentPool|null} [kineticFragments]
    */
-  render(snapshot, alpha, view, colorVariation = true, scorchMarks = null) {
+  render(
+    snapshot,
+    alpha,
+    view,
+    colorVariation = true,
+    scorchMarks = null,
+    kineticFragments = null,
+  ) {
     this.resize();
     const context = this.context;
     const scale = this.camera.worldToViewportScale;
@@ -164,6 +177,7 @@ export class DebugRenderer {
       this.#drawExplosionForces(snapshot, colorVariation);
     }
     this.#drawParticles(snapshot, colorVariation, developerToolsOpen);
+    if (kineticFragments) this.#drawKineticFragments(kineticFragments, alpha);
     this.#drawRocks(snapshot, alpha, developerToolsOpen);
     this.#drawDeadBodies(snapshot, alpha, developerToolsOpen);
     this.#drawProjectiles(snapshot, colorVariation);
@@ -495,6 +509,44 @@ export class DebugRenderer {
       context.fill();
       context.globalAlpha = 1;
     }
+  }
+
+  /**
+   * @param {import('../presentation/kinetic_fragments.js').KineticFragmentPool} pool
+   * @param {number} alpha
+   */
+  #drawKineticFragments(pool, alpha) {
+    if (pool.activeCount === 0) return;
+    const context = this.context;
+    const triangle = this._kineticFragmentTriangle;
+    context.beginPath();
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      writeKineticFragmentTriangle(
+        pool,
+        index,
+        alpha,
+        triangle,
+        this.camera.worldToViewportScale,
+      );
+      context.moveTo(
+        triangle[0],
+        triangle[2]
+          - triangle[1] * HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER,
+      );
+      context.lineTo(
+        triangle[3],
+        triangle[5]
+          - triangle[4] * HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER,
+      );
+      context.lineTo(
+        triangle[6],
+        triangle[8]
+          - triangle[7] * HEIGHT_PROJECTION_GROUND_METERS_PER_VERTICAL_METER,
+      );
+      context.closePath();
+    }
+    context.fillStyle = KINETIC_FRAGMENT_STYLE.css;
+    context.fill();
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha @param {boolean} developerToolsOpen */

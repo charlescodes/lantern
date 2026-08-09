@@ -1,6 +1,7 @@
 // @ts-check
 
 import { DebugRenderer } from "../browser/renderer.js";
+import { KineticFragmentPool } from "./kinetic_fragments.js";
 import { parsePresentationOptions, PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
 import { ScorchMarkPool } from "./scorch_marks.js";
@@ -27,6 +28,8 @@ export class CanvasPresentation {
     this.profiler = new PresentationProfiler();
     this.scorchMarks = new ScorchMarkPool();
     this.scorchMarks.prime(initialSnapshot);
+    this.kineticFragments = new KineticFragmentPool();
+    this.kineticFragments.prime(initialSnapshot);
     this.warmup = new PresentationWarmupStatus(false);
     this.profiler.prime({
       projectileCount: initialSnapshot.projectiles.length,
@@ -39,12 +42,14 @@ export class CanvasPresentation {
   render(snapshot, alpha, view) {
     const started = performance.now();
     this.scorchMarks.ingest(snapshot);
+    this.kineticFragments.ingest(snapshot);
     this.renderer.render(
       snapshot,
       alpha,
       view,
       this.flags.values.lightColorVariation,
       this.scorchMarks,
+      this.kineticFragments,
     );
     const finished = performance.now();
     const submitMs = finished - started;
@@ -109,6 +114,7 @@ export class CanvasPresentation {
         aa: this.options.aa,
       },
       scorchMarks: this.scorchMarks.diagnostics(),
+      kineticFragments: this.kineticFragments.diagnostics(),
     };
   }
 

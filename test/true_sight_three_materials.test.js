@@ -47,6 +47,7 @@ test("Three world materials share one resident red-byte TrueSight node pipeline"
     presentation.floorMaterial,
     presentation.scorchCoreMaterial,
     presentation.scorchFleckMaterial,
+    presentation.kineticFragmentMaterial,
     presentation.rockMaterial,
     presentation.projectileMaterial,
     presentation.particleMaterial,
@@ -130,6 +131,7 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     wall: presentation.wallMaterial,
     scorchCore: presentation.scorchCoreMaterial,
     scorchFleck: presentation.scorchFleckMaterial,
+    kineticFragment: presentation.kineticFragmentMaterial,
     rock: presentation.rockMaterial,
     projectile: presentation.projectileMaterial,
     particle: presentation.particleMaterial,
@@ -160,6 +162,7 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     presentation.gridLines.material,
     presentation.scorchCoreMesh.material,
     presentation.scorchFleckMesh.material,
+    presentation.kineticFragmentMesh.material,
     presentation.rockMesh.material,
     presentation.projectileMesh.material,
     presentation.particleMesh.material,
@@ -183,6 +186,10 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
   assert.equal(presentation.wallMaterial.maskShadowNode, presentation.sightMaskNode);
   assert.equal(presentation.scorchCoreMesh.material, presentation.scorchCoreMaterial);
   assert.equal(presentation.scorchFleckMesh.material, presentation.scorchFleckMaterial);
+  assert.equal(
+    presentation.kineticFragmentMesh.material,
+    presentation.kineticFragmentMaterial,
+  );
   assert.equal(presentation.rockMesh.material, presentation.rockMaterial);
   assert.equal(presentation.projectileMesh.material, presentation.projectileMaterial);
   assert.equal(presentation.particleMesh.material, presentation.particleMaterial);
@@ -207,6 +214,7 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
       wall: presentation.wallMaterial,
       scorchCore: presentation.scorchCoreMaterial,
       scorchFleck: presentation.scorchFleckMaterial,
+      kineticFragment: presentation.kineticFragmentMaterial,
       rock: presentation.rockMaterial,
       projectile: presentation.projectileMaterial,
       particle: presentation.particleMaterial,

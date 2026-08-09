@@ -35,7 +35,11 @@ Lantern currently uses one in-process simulation and no network replication:
 - Every local snapshot expands live particles into presentation-facing objects. This snapshot is currently an in-process read model, not a network packet.
 - Command recordings store the initial configuration, spell baseline, seed, and commands rather than serializing every particle. Replay regenerates the same visual particles.
 - The default Three.js presentation owns 16 resident point lights. One admitted Fireball effect uses an eight-slot group with at most seven spark carriers; there is not one point light per particle.
-- A first narrow client-owned decal consumer is implemented: both renderers derive a deterministic, 200-entry local [scorch-mark pool](../notes/scorch-mark-pool.md) from retained explosion events. It has no simulation/schema authority and deliberately does not promote the broader particle-ownership migration.
+- Two narrow client-owned consumers are implemented from retained explosion
+  events: the deterministic 200-entry [scorch-mark pool](../notes/scorch-mark-pool.md)
+  and the transient 512-slot [kinetic-fragment pool](../notes/kinetic-fragment-pool.md).
+  Neither has simulation/schema authority or promotes the broader
+  particle-ownership migration.
 
 This placement was reasonable for a browser-first prototype. It enabled exact particle fixtures, renderer parity, deterministic Spell Lab comparisons, profile-compatible replay, bounded collision/lifecycle experiments, and useful diagnostics. It becomes the wrong ownership boundary only when a separate authoritative host/server must spend time and bandwidth on gameplay truth.
 

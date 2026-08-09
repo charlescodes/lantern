@@ -22,6 +22,13 @@ import {
   publishInstancedPool,
   setInstancedEmissiveAt,
 } from "./instanced_pool.js";
+import {
+  KINETIC_FRAGMENT_CAPACITY,
+  KINETIC_FRAGMENT_STYLE,
+  KINETIC_FRAGMENT_TRIANGLE_VERTICES,
+  KineticFragmentPool,
+  kineticFragmentPresentationSize,
+} from "./kinetic_fragments.js";
 import { PresentationLightBudget } from "./light_budget.js";
 import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
@@ -97,6 +104,17 @@ function createScorchGeometry(triangleCapacity) {
   return { geometry, positions };
 }
 
+function createKineticFragmentGeometry() {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(KINETIC_FRAGMENT_TRIANGLE_VERTICES, 3),
+  );
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
 export class ThreePresentation {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -145,6 +163,7 @@ export class ThreePresentation {
     this.lightBudget = new PresentationLightBudget({ capacity: options.lights });
     this.scorchMarks = new ScorchMarkPool();
     this.scorchGeometryRevision = -1;
+    this.kineticFragments = new KineticFragmentPool();
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(
       true,
@@ -267,6 +286,23 @@ export class ThreePresentation {
     this.scorchFleckMesh.frustumCulled = false;
     this.scorchFleckMesh.renderOrder = 2;
     this.scene.add(this.scorchCoreMesh, this.scorchFleckMesh);
+
+    this.kineticFragmentGeometry = createKineticFragmentGeometry();
+    this.kineticFragmentMaterial = this.#configureSightMaterial(
+      new THREE.MeshBasicNodeMaterial({
+        color: KINETIC_FRAGMENT_STYLE.color,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.kineticFragmentMesh = createDynamicInstancedPool(
+      this.kineticFragmentGeometry,
+      this.kineticFragmentMaterial,
+      KINETIC_FRAGMENT_CAPACITY,
+      "kinetic-explosion-fragments",
+    );
+    this.kineticFragmentMesh.castShadow = false;
+    this.kineticFragmentMesh.receiveShadow = false;
+    this.scene.add(this.kineticFragmentMesh);
 
     this.wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT_METERS, 1);
     this.wallInstanceOpacityNode = attribute(WALL_OPACITY_ATTRIBUTE, "float");
@@ -557,6 +593,8 @@ export class ThreePresentation {
     this._deadBodyAxis = new THREE.Vector3();
     this._deadBodyQuaternion = new THREE.Quaternion();
     this._deadBodyPose = { facing: { x: 1, z: 0 } };
+    this._kineticFragmentEuler = new THREE.Euler(0, 0, 0, "XYZ");
+    this._kineticFragmentQuaternion = new THREE.Quaternion();
     this._bloomEnabled = false;
     this.renderPipeline = null;
     this.bloomOutput = null;
@@ -582,6 +620,7 @@ export class ThreePresentation {
       this.resize();
       this.scorchMarks.prime(initialSnapshot);
       this.#syncScorchGeometry();
+      this.kineticFragments.prime(initialSnapshot);
 
       const scenePass = pass(this.scene, this.threeCamera);
       const sceneColor = scenePass.getTextureNode("output");
@@ -635,6 +674,7 @@ export class ThreePresentation {
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
     this.#updateWallOcclusion(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
+    this.#updateKineticFragments(snapshot, alpha);
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, alpha);
     this.#updateEnemies(snapshot, alpha);
@@ -664,6 +704,7 @@ export class ThreePresentation {
     }
     completeInstancedPoolSubmission(this.particleMesh);
     completeInstancedPoolSubmission(this.projectileMesh);
+    completeInstancedPoolSubmission(this.kineticFragmentMesh);
     this._bloomEnabled = bloomEnabled;
     const submitFinished = performance.now();
     this.#sampleGpuTimer();
@@ -748,6 +789,7 @@ export class ThreePresentation {
         aa: this.options.aa,
       },
       scorchMarks: this.scorchMarks.diagnostics(),
+      kineticFragments: this.kineticFragments.diagnostics(),
       wallOcclusion: {
         total: this.wallCells.length,
         opaque: this.wallCells.length - this.fadedWallCount,
@@ -811,6 +853,7 @@ export class ThreePresentation {
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
     this.#updateWallOcclusion(snapshot.player, 0);
+    this.#updateKineticFragments(snapshot, 0);
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, 0);
     this.#updateEnemies(snapshot, 0);
@@ -838,6 +881,7 @@ export class ThreePresentation {
       this.editRockPreview,
       this.scorchCoreMesh,
       this.scorchFleckMesh,
+      this.kineticFragmentMesh,
       this.enemyMesh,
       this.enemyFacingMesh,
       ...(this.deadBodyMesh ? [this.deadBodyMesh] : []),
@@ -1001,6 +1045,48 @@ export class ThreePresentation {
   #updateScorchMarks(snapshot) {
     this.scorchMarks.ingest(snapshot);
     this.#syncScorchGeometry();
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #updateKineticFragments(snapshot, alpha) {
+    const pool = this.kineticFragments;
+    pool.ingest(snapshot);
+    const t = clamp(alpha, 0, 1);
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      this._position.set(
+        pool.previousX[index] + (pool.x[index] - pool.previousX[index]) * t,
+        pool.previousY[index] + (pool.y[index] - pool.previousY[index]) * t,
+        pool.previousZ[index] + (pool.z[index] - pool.previousZ[index]) * t,
+      );
+      this._kineticFragmentEuler.set(
+        pool.previousRotationX[index]
+          + (pool.rotationX[index] - pool.previousRotationX[index]) * t,
+        pool.previousRotationY[index]
+          + (pool.rotationY[index] - pool.previousRotationY[index]) * t,
+        pool.previousRotationZ[index]
+          + (pool.rotationZ[index] - pool.previousRotationZ[index]) * t,
+        "XYZ",
+      );
+      this._kineticFragmentQuaternion.setFromEuler(this._kineticFragmentEuler);
+      this._scale.setScalar(Math.max(
+        0.0001,
+        kineticFragmentPresentationSize(
+          pool,
+          index,
+          t,
+          this.camera.worldToViewportScale,
+        ),
+      ));
+      this._matrix.compose(
+        this._position,
+        this._kineticFragmentQuaternion,
+        this._scale,
+      );
+      this.kineticFragmentMesh.setMatrixAt(index, this._matrix);
+    }
+    publishInstancedPool(this.kineticFragmentMesh, pool.activeCount, {
+      deferCountGrowth: true,
+    });
   }
 
   #syncScorchGeometry() {
