@@ -11,6 +11,10 @@ import { enemyFacingTriangle } from "../presentation/enemy_facing.js";
 import { enemyDeadBodyPose } from "../presentation/dead_body_pose.js";
 import { interpolateRenderValue } from "../presentation/player_camera.js";
 import {
+  SCORCH_STYLE,
+  SCORCH_WALL_HEIGHT_METERS,
+} from "../presentation/scorch_marks.js";
+import {
   FIREBALL_COLOR_CORE,
   FIREBALL_COLOR_IMPACT_LIGHT,
   FIREBALL_COLOR_PARTICLE,
@@ -21,8 +25,8 @@ import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
 const COLORS = Object.freeze({
   void: "#090c0b",
-  floorA: "#2b342f",
-  floorB: "#303b34",
+  floorA: "#586358",
+  floorB: "#5b665b",
   grid: "#46544b",
   gridMajor: "#667565",
   wall: "#687568",
@@ -93,6 +97,7 @@ export class DebugRenderer {
     this.sightImageData = null;
     this._fireColor = { r: 1, g: 1, b: 1 };
     this._deadBodyPose = { facing: { x: 1, z: 0 } };
+    this._scorchPoint = { x: 0, z: 0 };
   }
 
   /** @param {number} value */
@@ -130,8 +135,10 @@ export class DebugRenderer {
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
    * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
+   * @param {boolean} [colorVariation]
+   * @param {import('../presentation/scorch_marks.js').ScorchMarkPool|null} [scorchMarks]
    */
-  render(snapshot, alpha, view, colorVariation = true) {
+  render(snapshot, alpha, view, colorVariation = true, scorchMarks = null) {
     this.resize();
     const context = this.context;
     const scale = this.camera.worldToViewportScale;
@@ -151,6 +158,8 @@ export class DebugRenderer {
     context.lineJoin = "round";
 
     this.#drawMap(snapshot, view, developerToolsOpen);
+    if (scorchMarks) this.#drawScorchMarks(scorchMarks);
+    this.#drawObelisks(snapshot.obelisks ?? []);
     if (developerToolsOpen && snapshot.debugFlags.explosionForces) {
       this.#drawExplosionForces(snapshot, colorVariation);
     }
@@ -319,8 +328,6 @@ export class DebugRenderer {
     context.lineWidth = line * 2;
     context.strokeRect(0, 0, map.width, map.height);
 
-    this.#drawObelisks(snapshot.obelisks ?? []);
-
     if (
       developerToolsOpen
       && snapshot.debugFlags.gridCoordinates
@@ -344,6 +351,66 @@ export class DebugRenderer {
         context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
       }
     }
+  }
+
+  /** @param {import('../presentation/scorch_marks.js').ScorchMarkPool} scorchMarks */
+  #drawScorchMarks(scorchMarks) {
+    this.#drawScorchLayer(scorchMarks, "coreTriangles", SCORCH_STYLE.coreCss);
+    this.#drawScorchLayer(scorchMarks, "fleckTriangles", SCORCH_STYLE.fleckCss);
+  }
+
+  /**
+   * @param {import('../presentation/scorch_marks.js').ScorchMarkPool} scorchMarks
+   * @param {"coreTriangles"|"fleckTriangles"} layer
+   * @param {string} color
+   */
+  #drawScorchLayer(scorchMarks, layer, color) {
+    const context = this.context;
+    context.beginPath();
+    let triangleCount = 0;
+    for (let markIndex = 0; markIndex < scorchMarks.length; markIndex += 1) {
+      const mark = scorchMarks.at(markIndex);
+      if (!mark) continue;
+      for (const triangle of mark[layer]) {
+        let point = this.#canvasScorchPoint(mark, triangle.u0, triangle.v0);
+        context.moveTo(point.x, point.z);
+        point = this.#canvasScorchPoint(mark, triangle.u1, triangle.v1);
+        context.lineTo(point.x, point.z);
+        point = this.#canvasScorchPoint(mark, triangle.u2, triangle.v2);
+        context.lineTo(point.x, point.z);
+        context.closePath();
+        triangleCount += 1;
+      }
+    }
+    if (triangleCount === 0) return;
+    context.fillStyle = color;
+    context.fill();
+  }
+
+  /**
+   * @param {NonNullable<ReturnType<import('../presentation/scorch_marks.js').ScorchMarkPool['at']>>} mark
+   * @param {number} u
+   * @param {number} v
+   */
+  #canvasScorchPoint(mark, u, v) {
+    if (mark.surface.kind === "ground") {
+      this._scorchPoint.x = mark.surface.x + u;
+      this._scorchPoint.z = mark.surface.z + v;
+      return this._scorchPoint;
+    }
+    const worldY = clamp(
+      mark.surface.y + v,
+      0,
+      SCORCH_WALL_HEIGHT_METERS,
+    );
+    const inset = 0.04 + worldY / SCORCH_WALL_HEIGHT_METERS * 0.18;
+    this._scorchPoint.x = mark.surface.x
+      + mark.surface.tx * u
+      - mark.surface.nx * inset;
+    this._scorchPoint.z = mark.surface.z
+      + mark.surface.tz * u
+      - mark.surface.nz * inset;
+    return this._scorchPoint;
   }
 
   /** @param {Array<{x:number,z:number}>} obelisks */

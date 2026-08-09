@@ -6,6 +6,7 @@ import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ENEMY_WIZARD, ROCK_ARCHETYPES } from "../config.js";
 import {
+  FIREBALL_PRESENTATION_HEIGHT_METERS,
   HEALTH_BAR,
   healthBarColor,
   healthBarRatio,
@@ -26,6 +27,14 @@ import { applyLightPool } from "./light_pool.js";
 import { PresentationFlags } from "./options.js";
 import { interpolateRenderValue } from "./player_camera.js";
 import { PresentationProfiler } from "./profiler.js";
+import {
+  SCORCH_CORE_TRIANGLE_COUNT,
+  SCORCH_FLECK_TRIANGLE_COUNT,
+  SCORCH_MARK_CAPACITY,
+  SCORCH_STYLE,
+  SCORCH_WALL_OFFSET_METERS,
+  ScorchMarkPool,
+} from "./scorch_marks.js";
 import { TrueSightTextureTransport } from "./true_sight_transport.js";
 import { PresentationWarmupStatus } from "./warmup.js";
 import { TRUE_SIGHT_MAX_RAYS } from "../visibility/true_sight.js";
@@ -39,7 +48,6 @@ import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
 const WALL_HEIGHT_METERS = 2.5;
 const PLAYER_HEIGHT_METERS = ENEMY_BODY_HEIGHT_METERS;
-const FIREBALL_CHEST_HEIGHT_METERS = 0.9;
 const ACTOR_CYLINDER_RADIAL_SEGMENTS = 16;
 const ENEMY_FACING_MARKER_RADIUS_METERS = 0.11;
 const ENEMY_FACING_MARKER_LENGTH_METERS = 0.34;
@@ -69,6 +77,18 @@ function setMaterialColor(material, color) {
   if ("color" in material && material.color instanceof THREE.Color) {
     material.color.set(color);
   }
+}
+
+/** @param {number} triangleCapacity */
+function createScorchGeometry(triangleCapacity) {
+  const positions = new Float32Array(triangleCapacity * 3 * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage),
+  );
+  geometry.setDrawRange(0, 0);
+  return { geometry, positions };
 }
 
 export class ThreePresentation {
@@ -109,6 +129,8 @@ export class ThreePresentation {
     this.particleMesh = null;
     this.deadBodyMesh = null;
     this.lightBudget = new PresentationLightBudget({ capacity: options.lights });
+    this.scorchMarks = new ScorchMarkPool();
+    this.scorchGeometryRevision = -1;
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(
       true,
@@ -179,7 +201,7 @@ export class ThreePresentation {
     this.residentLightCount = this.dynamicLights.length;
 
     this.floorMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
-      color: 0x35413f,
+      color: 0x626d67,
       roughness: 0.94,
       metalness: 0,
     }));
@@ -188,6 +210,49 @@ export class ThreePresentation {
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.receiveShadow = true;
     this.scene.add(this.floor);
+
+    const scorchCore = createScorchGeometry(
+      SCORCH_MARK_CAPACITY * SCORCH_CORE_TRIANGLE_COUNT,
+    );
+    this.scorchCoreGeometry = scorchCore.geometry;
+    this.scorchCorePositions = scorchCore.positions;
+    this.scorchCoreMaterial = this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
+      color: SCORCH_STYLE.coreColor,
+      transparent: true,
+      opacity: SCORCH_STYLE.coreOpacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }));
+    this.scorchCoreMesh = new THREE.Mesh(
+      this.scorchCoreGeometry,
+      this.scorchCoreMaterial,
+    );
+    this.scorchCoreMesh.name = "scorch-mark-cores";
+    this.scorchCoreMesh.visible = false;
+    this.scorchCoreMesh.frustumCulled = false;
+    this.scorchCoreMesh.renderOrder = 1;
+
+    const scorchFleck = createScorchGeometry(
+      SCORCH_MARK_CAPACITY * SCORCH_FLECK_TRIANGLE_COUNT,
+    );
+    this.scorchFleckGeometry = scorchFleck.geometry;
+    this.scorchFleckPositions = scorchFleck.positions;
+    this.scorchFleckMaterial = this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
+      color: SCORCH_STYLE.fleckColor,
+      transparent: true,
+      opacity: SCORCH_STYLE.fleckOpacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }));
+    this.scorchFleckMesh = new THREE.Mesh(
+      this.scorchFleckGeometry,
+      this.scorchFleckMaterial,
+    );
+    this.scorchFleckMesh.name = "scorch-mark-flecks";
+    this.scorchFleckMesh.visible = false;
+    this.scorchFleckMesh.frustumCulled = false;
+    this.scorchFleckMesh.renderOrder = 2;
+    this.scene.add(this.scorchCoreMesh, this.scorchFleckMesh);
 
     this.wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT_METERS, 1);
     this.wallMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
@@ -492,6 +557,8 @@ export class ThreePresentation {
       this.gpuTimingSupported = this.#detectGpuTimingSupport();
       this.camera.focus(initialSnapshot.player.x, initialSnapshot.player.z);
       this.resize();
+      this.scorchMarks.prime(initialSnapshot);
+      this.#syncScorchGeometry();
 
       const scenePass = pass(this.scene, this.threeCamera);
       const sceneColor = scenePass.getTextureNode("output");
@@ -543,6 +610,7 @@ export class ThreePresentation {
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateScorchMarks(snapshot);
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, alpha);
     this.#updateEnemies(snapshot, alpha);
@@ -655,6 +723,7 @@ export class ThreePresentation {
         dpr: this.pixelDensityCap,
         aa: this.options.aa,
       },
+      scorchMarks: this.scorchMarks.diagnostics(),
       combatInstances: {
         enemies: {
           active: this.enemyMesh.count,
@@ -735,6 +804,8 @@ export class ThreePresentation {
       this.selectedMarker,
       this.editCellPreview,
       this.editRockPreview,
+      this.scorchCoreMesh,
+      this.scorchFleckMesh,
       this.enemyMesh,
       this.enemyFacingMesh,
       ...(this.deadBodyMesh ? [this.deadBodyMesh] : []),
@@ -751,6 +822,25 @@ export class ThreePresentation {
     const frustumCulling = normallyHidden.map((mesh) => mesh.frustumCulled);
     const x = snapshot.player.x;
     const z = snapshot.player.z;
+    const scorchGeometries = [
+      [this.scorchCoreGeometry, this.scorchCorePositions],
+      [this.scorchFleckGeometry, this.scorchFleckPositions],
+    ];
+    const scorchDrawCounts = scorchGeometries.map(([geometry]) => geometry.drawRange.count);
+    for (const [geometry, positions] of scorchGeometries) {
+      if (geometry.drawRange.count > 0) continue;
+      positions[0] = x - 0.01;
+      positions[1] = 0.012;
+      positions[2] = z - 0.01;
+      positions[3] = x + 0.01;
+      positions[4] = 0.012;
+      positions[5] = z - 0.01;
+      positions[6] = x;
+      positions[7] = 0.012;
+      positions[8] = z + 0.01;
+      geometry.getAttribute("position").needsUpdate = true;
+      geometry.setDrawRange(0, 3);
+    }
     this.cursorMarker.position.set(x, 0.018, z);
     this.hoverMarker.position.set(x, 0.024, z);
     this.selectedMarker.position.set(x, 0.024, z);
@@ -768,6 +858,9 @@ export class ThreePresentation {
       for (let index = 0; index < normallyHidden.length; index += 1) {
         normallyHidden[index].visible = visibility[index];
         normallyHidden[index].frustumCulled = frustumCulling[index];
+      }
+      for (let index = 0; index < scorchGeometries.length; index += 1) {
+        scorchGeometries[index][0].setDrawRange(0, scorchDrawCounts[index]);
       }
     }
   }
@@ -870,6 +963,106 @@ export class ThreePresentation {
     this.threeCamera.lookAt(this._cameraTarget);
     this.threeCamera.updateProjectionMatrix();
     this.threeCamera.updateMatrixWorld();
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
+  #updateScorchMarks(snapshot) {
+    this.scorchMarks.ingest(snapshot);
+    this.#syncScorchGeometry();
+  }
+
+  #syncScorchGeometry() {
+    if (this.scorchGeometryRevision === this.scorchMarks.revision) return;
+    const coreComponents = this.#writeScorchLayer(
+      "coreTriangles",
+      this.scorchCorePositions,
+    );
+    const fleckComponents = this.#writeScorchLayer(
+      "fleckTriangles",
+      this.scorchFleckPositions,
+    );
+    this.#publishScorchGeometry(
+      this.scorchCoreGeometry,
+      this.scorchCoreMesh,
+      coreComponents,
+    );
+    this.#publishScorchGeometry(
+      this.scorchFleckGeometry,
+      this.scorchFleckMesh,
+      fleckComponents,
+    );
+    this.scorchGeometryRevision = this.scorchMarks.revision;
+  }
+
+  /**
+   * @param {"coreTriangles"|"fleckTriangles"} layer
+   * @param {Float32Array} positions
+   */
+  #writeScorchLayer(layer, positions) {
+    let offset = 0;
+    for (let markIndex = 0; markIndex < this.scorchMarks.length; markIndex += 1) {
+      const mark = this.scorchMarks.at(markIndex);
+      if (!mark) continue;
+      for (const triangle of mark[layer]) {
+        offset = this.#writeScorchVertex(
+          positions,
+          offset,
+          mark,
+          triangle.u0,
+          triangle.v0,
+        );
+        offset = this.#writeScorchVertex(
+          positions,
+          offset,
+          mark,
+          triangle.u1,
+          triangle.v1,
+        );
+        offset = this.#writeScorchVertex(
+          positions,
+          offset,
+          mark,
+          triangle.u2,
+          triangle.v2,
+        );
+      }
+    }
+    return offset;
+  }
+
+  /**
+   * @param {Float32Array} positions
+   * @param {number} offset
+   * @param {NonNullable<ReturnType<ScorchMarkPool['at']>>} mark
+   * @param {number} u
+   * @param {number} v
+   */
+  #writeScorchVertex(positions, offset, mark, u, v) {
+    if (mark.surface.kind === "ground") {
+      positions[offset] = mark.surface.x + u;
+      positions[offset + 1] = mark.surface.y;
+      positions[offset + 2] = mark.surface.z + v;
+    } else {
+      positions[offset] = mark.surface.x
+        + mark.surface.nx * SCORCH_WALL_OFFSET_METERS
+        + mark.surface.tx * u;
+      positions[offset + 1] = mark.surface.y + v;
+      positions[offset + 2] = mark.surface.z
+        + mark.surface.nz * SCORCH_WALL_OFFSET_METERS
+        + mark.surface.tz * u;
+    }
+    return offset + 3;
+  }
+
+  /** @param {THREE.BufferGeometry} geometry @param {THREE.Mesh} mesh @param {number} componentCount */
+  #publishScorchGeometry(geometry, mesh, componentCount) {
+    const attribute = geometry.getAttribute("position");
+    attribute.clearUpdateRanges();
+    if (componentCount > 0) attribute.addUpdateRange(0, componentCount);
+    attribute.needsUpdate = true;
+    const vertexCount = componentCount / 3;
+    geometry.setDrawRange(0, vertexCount);
+    mesh.visible = vertexCount > 0;
   }
 
   /** @param {{width:number,height:number,cells:number[],playerSpawn:{x:number,z:number}}} map @param {Array<{cell:{cx:number,cz:number}}>} obelisks */
@@ -1162,7 +1355,7 @@ export class ThreePresentation {
       const projectile = snapshot.projectiles[index];
       const x = projectile.previousX + (projectile.x - projectile.previousX) * alpha;
       const z = projectile.previousZ + (projectile.z - projectile.previousZ) * alpha;
-      this._position.set(x, FIREBALL_CHEST_HEIGHT_METERS, z);
+      this._position.set(x, FIREBALL_PRESENTATION_HEIGHT_METERS, z);
       this._scale.setScalar(projectile.radius * 1.15);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.projectileMesh.setMatrixAt(index, this._matrix);

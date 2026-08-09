@@ -16,6 +16,7 @@ import {
   writeFireballPaletteColor,
 } from "../src/spells/palette.js";
 import { Camera3D } from "../src/presentation/camera_3d.js";
+import { FIREBALL_PRESENTATION_HEIGHT_METERS } from "../src/presentation/combat_visuals.js";
 import { PresentationLightBudget } from "../src/presentation/light_budget.js";
 import {
   parsePresentationOptions,
@@ -276,6 +277,19 @@ test("Three keeps mesh, material, node, color, emissive, and light resources sta
   };
   presentation.render(snapshot, 0, view);
   assert.equal(presentation.projectileMaterial.color.getHex(), 0xffffff);
+  const projectileMatrix = new THREE.Matrix4();
+  const projectilePosition = new THREE.Vector3();
+  const projectileQuaternion = new THREE.Quaternion();
+  const projectileScale = new THREE.Vector3();
+  presentation.projectileMesh.getMatrixAt(0, projectileMatrix);
+  projectileMatrix.decompose(
+    projectilePosition,
+    projectileQuaternion,
+    projectileScale,
+  );
+  assert.ok(
+    Math.abs(projectilePosition.y - FIREBALL_PRESENTATION_HEIGHT_METERS) < 1e-6,
+  );
 
   const identities = {
     projectileMesh: presentation.projectileMesh,

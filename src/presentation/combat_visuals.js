@@ -1,5 +1,7 @@
 // @ts-check
 
+export const FIREBALL_PRESENTATION_HEIGHT_METERS = 0.9;
+
 export const HEALTH_BAR = Object.freeze({
   widthMeters: 0.10,
   heightMeters: 0.90,

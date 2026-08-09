@@ -3,6 +3,7 @@
 import { DebugRenderer } from "../browser/renderer.js";
 import { parsePresentationOptions, PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
+import { ScorchMarkPool } from "./scorch_marks.js";
 import { PresentationWarmupStatus } from "./warmup.js";
 
 export class CanvasPresentation {
@@ -24,6 +25,8 @@ export class CanvasPresentation {
     this.flags = flags;
     this.options = options;
     this.profiler = new PresentationProfiler();
+    this.scorchMarks = new ScorchMarkPool();
+    this.scorchMarks.prime(initialSnapshot);
     this.warmup = new PresentationWarmupStatus(false);
     this.profiler.prime({
       projectileCount: initialSnapshot.projectiles.length,
@@ -35,11 +38,13 @@ export class CanvasPresentation {
   /** @param {any} snapshot @param {number} alpha @param {any} view */
   render(snapshot, alpha, view) {
     const started = performance.now();
+    this.scorchMarks.ingest(snapshot);
     this.renderer.render(
       snapshot,
       alpha,
       view,
       this.flags.values.lightColorVariation,
+      this.scorchMarks,
     );
     const finished = performance.now();
     const submitMs = finished - started;
@@ -103,6 +108,7 @@ export class CanvasPresentation {
         dpr: this.renderer.pixelDensityCap,
         aa: this.options.aa,
       },
+      scorchMarks: this.scorchMarks.diagnostics(),
     };
   }
 

@@ -46,6 +46,8 @@ test("Three world materials share one resident red-byte TrueSight node pipeline"
   const materials = [
     presentation.floorMaterial,
     presentation.wallMaterial,
+    presentation.scorchCoreMaterial,
+    presentation.scorchFleckMaterial,
     presentation.rockMaterial,
     presentation.projectileMaterial,
     presentation.particleMaterial,
@@ -117,6 +119,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
   const materialIdentities = {
     floor: presentation.floorMaterial,
     wall: presentation.wallMaterial,
+    scorchCore: presentation.scorchCoreMaterial,
+    scorchFleck: presentation.scorchFleckMaterial,
     rock: presentation.rockMaterial,
     projectile: presentation.projectileMaterial,
     particle: presentation.particleMaterial,
@@ -146,6 +150,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     ...Object.values(materialIdentities),
     presentation.gridLines.material,
     presentation.wallMesh.material,
+    presentation.scorchCoreMesh.material,
+    presentation.scorchFleckMesh.material,
     presentation.rockMesh.material,
     presentation.projectileMesh.material,
     presentation.particleMesh.material,
@@ -156,6 +162,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     assert.equal(material.maskShadowNode, presentation.sightMaskNode);
   }
   assert.equal(presentation.wallMesh.material, presentation.wallMaterial);
+  assert.equal(presentation.scorchCoreMesh.material, presentation.scorchCoreMaterial);
+  assert.equal(presentation.scorchFleckMesh.material, presentation.scorchFleckMaterial);
   assert.equal(presentation.rockMesh.material, presentation.rockMaterial);
   assert.equal(presentation.projectileMesh.material, presentation.projectileMaterial);
   assert.equal(presentation.particleMesh.material, presentation.particleMaterial);
@@ -178,6 +186,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     {
       floor: presentation.floorMaterial,
       wall: presentation.wallMaterial,
+      scorchCore: presentation.scorchCoreMaterial,
+      scorchFleck: presentation.scorchFleckMaterial,
       rock: presentation.rockMaterial,
       projectile: presentation.projectileMaterial,
       particle: presentation.particleMaterial,
