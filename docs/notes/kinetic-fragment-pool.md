@@ -40,8 +40,8 @@ visible `dropped` diagnostic for every rejected fragment.
 The authored edge length stays `2–7cm`, but the metric camera would project a
 typical fragment to substantially less than one covered pixel at the default
 24m view. Both renderers therefore apply the same bounded readability scale:
-target a `48 CSS px` edge at the current zoom, never magnify an authored edge by
-more than `72x`, and multiply that result by the ordinary lifetime shrink. This
+target a `24 CSS px` edge at the current zoom, never magnify an authored edge by
+more than `36x`, and multiply that result by the ordinary lifetime shrink. This
 keeps the effect rasterizable without changing motion, capacity, admission, or
 the deterministic physical recipe, and it naturally returns to literal metric
 size when the camera is close enough.

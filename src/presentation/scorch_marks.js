@@ -131,8 +131,8 @@ function sampleTriangle(markSeed, ordinal, count, radius, layer) {
   const seed = mixUint32(
     markSeed ^ Math.imul((ordinal + 1) >>> 0, 0x9e37_79b1),
   );
-  const edgeMinimum = layer === "core" ? 0.15 : 0.01;
-  const edgeRange = layer === "core" ? 0.15 : 0.04;
+  const edgeMinimum = layer === "core" ? 0.15 : 0.02;
+  const edgeRange = layer === "core" ? 0.15 : 0.08;
   const edge = radius * (edgeMinimum + sampleUnit(seed, 0) * edgeRange);
   const direction = (
     ordinal + 0.18 + sampleUnit(seed, 1) * 0.64

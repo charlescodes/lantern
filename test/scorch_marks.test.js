@@ -94,7 +94,7 @@ test("one deterministic ground recipe contains eight cores and sixteen visible f
   }
   for (const triangle of first.fleckTriangles) {
     const edge = edgeLength(triangle);
-    assert.ok(edge >= 0.01 - 1e-12 && edge <= 0.05 + 1e-12);
+    assert.ok(edge >= 0.02 - 1e-12 && edge <= 0.1 + 1e-12);
   }
 });
 

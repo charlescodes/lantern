@@ -38,8 +38,8 @@ markRadius    = clamp(0.4 * blastRadius * pressureScale, 0.15m, 4m)
 
 The default `2.5m`/`800 N·s/m²` Fireball therefore leaves a `1m`-radius mark.
 The stable effect seed and explosion ID select eight inner triangles with
-`15–30%` radius edges and sixteen outer flecks with `1–5%` radius edges. At the
-default footprint those ranges are 15–30cm and 1–5cm. No sample uses
+`15–30%` radius edges and sixteen outer flecks with `2–10%` radius edges. At the
+default footprint those ranges are 15–30cm and 2–10cm. No sample uses
 `Math.random`.
 
 Ordinary wall-cell hits use the captured contact normal and the same `0.9m`
