@@ -37,6 +37,13 @@ import {
 } from "./scorch_marks.js";
 import { TrueSightTextureTransport } from "./true_sight_transport.js";
 import { PresentationWarmupStatus } from "./warmup.js";
+import {
+  createOpenTopWallGeometry,
+  createWallCapGeometry,
+  shouldSuppressWallCap,
+  WALL_CAP_RELIEF_RADIUS_METERS,
+  WALL_HEIGHT_METERS,
+} from "./wall_cap_relief.js";
 import { TRUE_SIGHT_MAX_RAYS } from "../visibility/true_sight.js";
 import {
   FIREBALL_COLOR_CORE,
@@ -46,7 +53,6 @@ import {
 } from "../spells/palette.js";
 import { fireballDefinitionFromSnapshot } from "../spells/snapshot.js";
 
-const WALL_HEIGHT_METERS = 2.5;
 const PLAYER_HEIGHT_METERS = ENEMY_BODY_HEIGHT_METERS;
 const ACTOR_CYLINDER_RADIAL_SEGMENTS = 16;
 const ENEMY_FACING_MARKER_RADIUS_METERS = 0.11;
@@ -124,6 +130,12 @@ export class ThreePresentation {
     this.mapHeight = 0;
     this.gridLines = null;
     this.wallMesh = null;
+    this.wallCapMesh = null;
+    this.wallCells = [];
+    this.wallCapMapHash = -1;
+    this.wallCapPlayerX = Number.NaN;
+    this.wallCapPlayerZ = Number.NaN;
+    this.suppressedWallCapCount = 0;
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
@@ -254,7 +266,8 @@ export class ThreePresentation {
     this.scorchFleckMesh.renderOrder = 2;
     this.scene.add(this.scorchCoreMesh, this.scorchFleckMesh);
 
-    this.wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT_METERS, 1);
+    this.wallGeometry = createOpenTopWallGeometry();
+    this.wallCapGeometry = createWallCapGeometry();
     this.wallMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0x738079,
       roughness: 0.78,
@@ -610,6 +623,7 @@ export class ThreePresentation {
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateWallCaps(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, alpha);
@@ -640,6 +654,7 @@ export class ThreePresentation {
     }
     completeInstancedPoolSubmission(this.particleMesh);
     completeInstancedPoolSubmission(this.projectileMesh);
+    completeInstancedPoolSubmission(this.wallCapMesh);
     this._bloomEnabled = bloomEnabled;
     const submitFinished = performance.now();
     this.#sampleGpuTimer();
@@ -724,6 +739,12 @@ export class ThreePresentation {
         aa: this.options.aa,
       },
       scorchMarks: this.scorchMarks.diagnostics(),
+      wallCaps: {
+        visible: this.wallCapMesh?.count ?? 0,
+        suppressed: this.suppressedWallCapCount,
+        capacity: this.wallCapMesh?.userData.capacity ?? 0,
+        reliefRadiusMeters: WALL_CAP_RELIEF_RADIUS_METERS,
+      },
       combatInstances: {
         enemies: {
           active: this.enemyMesh.count,
@@ -779,6 +800,8 @@ export class ThreePresentation {
     };
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateWallCaps(snapshot.player, 0);
+    completeInstancedPoolSubmission(this.wallCapMesh);
     this.#updateObelisk(snapshot.obelisks ?? []);
     this.#updatePlayer(snapshot.player, 0);
     this.#updateEnemies(snapshot, 0);
@@ -1103,13 +1126,16 @@ export class ThreePresentation {
       );
       this.gridLines.name = "metric-grid";
       this.scene.add(this.gridLines);
-      this.#replaceWallMesh(map.width * map.height);
+      this.#replaceWallMeshes(map.width * map.height);
     }
 
-    if (!this.wallMesh) this.#replaceWallMesh(map.width * map.height);
+    if (!this.wallMesh || !this.wallCapMesh) {
+      this.#replaceWallMeshes(map.width * map.height);
+    }
     const obeliskCells = new Set(
       obelisks.map((obelisk) => `${obelisk.cell.cx}:${obelisk.cell.cz}`),
     );
+    this.wallCells.length = 0;
     let wallCount = 0;
     for (let cz = 0; cz < map.height; cz += 1) {
       for (let cx = 0; cx < map.width; cx += 1) {
@@ -1119,10 +1145,47 @@ export class ThreePresentation {
         this._scale.set(1, 1, 1);
         this._matrix.compose(this._position, this._quaternion, this._scale);
         this.wallMesh.setMatrixAt(wallCount, this._matrix);
+        this.wallCells.push({ cx, cz });
         wallCount += 1;
       }
     }
     publishInstancedPool(this.wallMesh, wallCount);
+    this.wallCapMapHash = -1;
+  }
+
+  /** @param {Record<string, any>} player @param {number} alpha */
+  #updateWallCaps(player, alpha) {
+    if (!this.wallCapMesh) return;
+    const playerX = interpolateRenderValue(player.previousX, player.x, alpha);
+    const playerZ = interpolateRenderValue(player.previousZ, player.z, alpha);
+    if (
+      this.wallCapMapHash === this.mapHash
+      && this.wallCapPlayerX === playerX
+      && this.wallCapPlayerZ === playerZ
+    ) {
+      return;
+    }
+
+    let visibleCount = 0;
+    let suppressedCount = 0;
+    for (const cell of this.wallCells) {
+      if (shouldSuppressWallCap(playerX, playerZ, cell.cx, cell.cz)) {
+        suppressedCount += 1;
+        continue;
+      }
+      this._position.set(cell.cx + 0.5, WALL_HEIGHT_METERS, cell.cz + 0.5);
+      this._scale.set(1, 1, 1);
+      this._matrix.compose(this._position, this._quaternion, this._scale);
+      this.wallCapMesh.setMatrixAt(visibleCount, this._matrix);
+      visibleCount += 1;
+    }
+    publishInstancedPool(this.wallCapMesh, visibleCount, {
+      deferCountGrowth: true,
+    });
+    this.suppressedWallCapCount = suppressedCount;
+    this.wallCapMapHash = this.mapHash;
+    this.wallCapPlayerX = playerX;
+    this.wallCapPlayerZ = playerZ;
   }
 
   /** @param {Array<{x:number,z:number}>} obelisks */
@@ -1133,8 +1196,9 @@ export class ThreePresentation {
   }
 
   /** @param {number} capacity */
-  #replaceWallMesh(capacity) {
+  #replaceWallMeshes(capacity) {
     if (this.wallMesh) this.scene.remove(this.wallMesh);
+    if (this.wallCapMesh) this.scene.remove(this.wallCapMesh);
     this.wallMesh = createDynamicInstancedPool(
       this.wallGeometry,
       this.wallMaterial,
@@ -1143,7 +1207,16 @@ export class ThreePresentation {
     );
     this.wallMesh.castShadow = true;
     this.wallMesh.receiveShadow = true;
-    this.scene.add(this.wallMesh);
+    this.wallCapMesh = createDynamicInstancedPool(
+      this.wallCapGeometry,
+      this.wallMaterial,
+      capacity,
+      "solid-wall-caps",
+    );
+    this.wallCapMesh.castShadow = true;
+    this.wallCapMesh.receiveShadow = true;
+    this.wallCapMapHash = -1;
+    this.scene.add(this.wallMesh, this.wallCapMesh);
   }
 
   /** @param {Record<string, any>} player @param {number} alpha */

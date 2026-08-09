@@ -150,6 +150,7 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     ...Object.values(materialIdentities),
     presentation.gridLines.material,
     presentation.wallMesh.material,
+    presentation.wallCapMesh.material,
     presentation.scorchCoreMesh.material,
     presentation.scorchFleckMesh.material,
     presentation.rockMesh.material,
@@ -162,6 +163,7 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     assert.equal(material.maskShadowNode, presentation.sightMaskNode);
   }
   assert.equal(presentation.wallMesh.material, presentation.wallMaterial);
+  assert.equal(presentation.wallCapMesh.material, presentation.wallMaterial);
   assert.equal(presentation.scorchCoreMesh.material, presentation.scorchCoreMaterial);
   assert.equal(presentation.scorchFleckMesh.material, presentation.scorchFleckMaterial);
   assert.equal(presentation.rockMesh.material, presentation.rockMaterial);

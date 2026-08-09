@@ -22,6 +22,11 @@ import {
   PresentationFlags,
 } from "../src/presentation/options.js";
 import { ThreePresentation } from "../src/presentation/three_presentation.js";
+import {
+  shouldSuppressWallCap,
+  WALL_CAP_RELIEF_RADIUS_METERS,
+  WALL_HEIGHT_METERS,
+} from "../src/presentation/wall_cap_relief.js";
 import { Simulation } from "../src/sim/simulation.js";
 import { TrueSightSystem } from "../src/visibility/true_sight.js";
 
@@ -319,6 +324,52 @@ test("Three preallocates bounded combat pools without recreating resident instan
 
   const solidCells = snapshot.map.cells.filter((cell) => cell === 1).length;
   assert.equal(presentation.wallMesh.count, solidCells - 1);
+  const wallMesh = presentation.wallMesh;
+  const wallCapMesh = presentation.wallCapMesh;
+  const wallCells = [];
+  const obeliskCells = new Set(
+    snapshot.obelisks.map(({ cell }) => `${cell.cx}:${cell.cz}`),
+  );
+  for (let cz = 0; cz < snapshot.map.height; cz += 1) {
+    for (let cx = 0; cx < snapshot.map.width; cx += 1) {
+      if (snapshot.map.cells[cz * snapshot.map.width + cx] !== 1) continue;
+      if (obeliskCells.has(`${cx}:${cz}`)) continue;
+      wallCells.push({ cx, cz });
+    }
+  }
+  const expectedInitialCapCount = wallCells.filter(({ cx, cz }) => (
+    !shouldSuppressWallCap(snapshot.player.x, snapshot.player.z, cx, cz)
+  )).length;
+  assert.equal(presentation.wallCapMesh.count, expectedInitialCapCount);
+  assert.equal(
+    presentation.wallCapMesh.userData.capacity,
+    snapshot.map.width * snapshot.map.height,
+  );
+  const capMatrix = new THREE.Matrix4();
+  const capPosition = new THREE.Vector3();
+  presentation.wallCapMesh.getMatrixAt(0, capMatrix);
+  capMatrix.decompose(capPosition, quaternion, new THREE.Vector3());
+  assert.ok(Math.abs(capPosition.y - WALL_HEIGHT_METERS) < 1e-9);
+
+  snapshot.player.x = 1.3;
+  snapshot.player.previousX = 1.3;
+  snapshot.player.z = 10.5;
+  snapshot.player.previousZ = 10.5;
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  const expectedNearbyCapCount = wallCells.filter(({ cx, cz }) => (
+    !shouldSuppressWallCap(snapshot.player.x, snapshot.player.z, cx, cz)
+  )).length;
+  assert.equal(presentation.wallMesh, wallMesh);
+  assert.equal(presentation.wallCapMesh, wallCapMesh);
+  assert.equal(presentation.wallMesh.count, wallCells.length);
+  assert.equal(presentation.wallCapMesh.count, expectedNearbyCapCount);
+  assert.ok(presentation.wallCapMesh.count < presentation.wallMesh.count);
+  assert.deepEqual(presentation.diagnostics().wallCaps, {
+    visible: expectedNearbyCapCount,
+    suppressed: wallCells.length - expectedNearbyCapCount,
+    capacity: snapshot.map.width * snapshot.map.height,
+    reliefRadiusMeters: WALL_CAP_RELIEF_RADIUS_METERS,
+  });
   assert.equal(presentation.enemyMesh, identities.enemies);
   assert.equal(presentation.enemyFacingMesh, identities.facing);
   assert.equal(presentation.healthTrackMesh, identities.tracks);
