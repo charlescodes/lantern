@@ -55,7 +55,7 @@ Start with the [documentation index](./docs/README.md). It separates mutable [so
 
 ## Playtest controls and developer toolbox
 
-- Hold RMB to move toward the pointer; targets within an inclusive `0.75m` make the player walk silently at `2.25m/s`, while farther targets run at `4.5m/s` and emit anonymous AI footstep clues. Release RMB to brake.
+- Begin an RMB hold inside the invisible `0.75m`-diameter circle around the player to walk silently at `2.25m/s`. Crossing outside that circle promotes the held gesture to a `4.5m/s` run; returning inside does not restore walking until RMB is released and pressed near the player again. Release RMB to brake.
 - Press LMB to cast the selected spell; Fireball is the only handler. Fireballs explode on the first opposing actor, dynamic enemy body, wall, rock, or obelisk they hit and pass through same-team living actors.
 - Press `;` to reveal or hide the developer toolbox. The top controls, right-side instruments, bottom coordinate/help rail, authoring windows, debug overlays, and developer shortcuts remain behind this presentation-only gate. Closing the toolbox while editing returns to play mode.
 - Open **Spell Lab** from the toolbox while moving and casting. **Recast last target** uses the normal cooldown. **Lock seed** makes both LMB and Recast use the visible hexadecimal variation seed. **Collapse** removes the window from the arena and returns its launcher to the toolbox.
@@ -109,7 +109,7 @@ The shared overlay shows the 6–9m engagement band, the selected mob's `120°`/
 
 Player and enemy wizards each have a `0.3m` radius, `75kg` mass, the same movement fundamentals, and `100` maximum health. Health regenerates at `1 HP/s` after five damage-free seconds. Direct opposing Fireball hits deal `25`; splash deals `25 × clamp(1 - surfaceDistance / capturedBlastRadius, 0, 1)`. Walls and the obelisk block splash. Casters and allies are immune to health damage, while the existing blast impulse remains team-neutral.
 
-Player running uses a deterministic distance cadence: the first footstep after `0.75m`, then every `1.5m`; a heading change of at least `120°` can emit the same event behind a 12-tick gate. Turn emission wins over stride emission, so there is at most one footstep per tick. Walking, walk-mode deceleration, and external velocity are silent. Footsteps are authoritative `8m` AI stimuli only—this checkpoint adds no WebAudio or enemy footsteps.
+Player running uses a deterministic distance cadence: the first footstep after `0.75m`, then every `1.5m`; a heading change of at least `120°` can emit the same event behind a 12-tick gate. Turn emission wins over stride emission, so there is at most one footstep per tick. Walking, release braking, and external velocity are silent. Footsteps are authoritative `8m` AI stimuli only—this checkpoint adds no WebAudio or enemy footsteps.
 
 On death, an enemy immediately leaves every AI and caster loop and transfers its stable identity, X/Z circle, last facing, mass, and post-impact velocity into a 16-entry dynamic dead-body pool. Dynamic bodies collide with the map, actors, rocks, one another, and either team's Fireballs. Their visual cylinder falls toward last facing over 36 ticks, but authoritative collision remains the centered `0.3m` circle. After the fall, 30 uninterrupted quiet ticks settle a body; 180 ticks is the hard ceiling. A full dynamic pool settles its oldest body early.
 

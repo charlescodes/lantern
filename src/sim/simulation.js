@@ -3238,6 +3238,7 @@ export class Simulation {
   /** @param {{x:number,z:number}|null} target @param {number} dt @param {number} simulationTick */
   #prepareMovement(target, dt, simulationTick) {
     const player = this.player;
+    const previousMode = player.movementMode;
     let desiredVx = 0;
     let desiredVz = 0;
     let movementMode = PLAYER_MOVEMENT_IDLE;
@@ -3249,13 +3250,19 @@ export class Simulation {
       const dz = target.z - player.z;
       const length = Math.hypot(dx, dz);
       targetDistance = length;
+      if (this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1) {
+        const runningGesture = previousMode === PLAYER_MOVEMENT_RUNNING
+          || length > MOVEMENT_SOUND.walkTargetRadiusMeters;
+        movementMode = runningGesture
+          ? PLAYER_MOVEMENT_RUNNING
+          : PLAYER_MOVEMENT_WALKING;
+      }
       if (length > 1e-5) {
         directionX = dx / length;
         directionZ = dz / length;
-        movementMode = this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1
-          && length <= MOVEMENT_SOUND.walkTargetRadiusMeters
-          ? PLAYER_MOVEMENT_WALKING
-          : PLAYER_MOVEMENT_RUNNING;
+        if (this.movementSoundProfile !== MOVEMENT_SOUND_PROFILE_V1) {
+          movementMode = PLAYER_MOVEMENT_RUNNING;
+        }
         const desiredSpeed = movementMode === PLAYER_MOVEMENT_WALKING
           ? MOVEMENT_SOUND.walkSpeedMetersPerSecond
           : PLAYER.desiredSpeed;
@@ -3263,7 +3270,6 @@ export class Simulation {
         desiredVz = directionZ * desiredSpeed;
       }
     }
-    const previousMode = player.movementMode;
     player.movementMode = movementMode;
     player.movementTargetDistance = targetDistance;
     player.movementDirectionX = directionX;

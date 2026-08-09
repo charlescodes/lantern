@@ -87,7 +87,7 @@ function runUntilFootsteps(value, count, direction = { x: 1, z: 0 }, limit = 300
   return value.soundEventHistory.toArray().filter((event) => event.kind === "footstep");
 }
 
-test("proximity movement uses the inclusive walk zone while legacy movement keeps full speed", () => {
+test("RMB movement promotes walking to a latched run until release", () => {
   const value = simulation();
   value.tick({
     move: {
@@ -98,34 +98,75 @@ test("proximity movement uses the inclusive walk zone while legacy movement keep
   let snapshot = value.snapshot();
   assert.equal(snapshot.player.movement.mode, "walking");
   assert.equal(snapshot.player.desiredVx, MOVEMENT_SOUND.walkSpeedMetersPerSecond);
-  assert.equal(snapshot.player.movement.targetDistanceMeters, 0.75);
+  assert.equal(snapshot.player.movement.targetDistanceMeters, 0.375);
 
-  value.tick({ move: { x: value.player.x + 0.750_001, z: value.player.z } });
+  const locomotionBeforePromotion = value.player.locomotionVx;
+  value.tick({
+    move: {
+      x: value.player.x + MOVEMENT_SOUND.walkTargetRadiusMeters + 0.000_001,
+      z: value.player.z,
+    },
+  });
+  snapshot = value.snapshot();
+  assert.equal(snapshot.player.movement.mode, "running");
+  assert.equal(snapshot.player.desiredVx, PLAYER.desiredSpeed);
+  assert.ok(value.player.locomotionVx > locomotionBeforePromotion);
+  assert.ok(value.player.locomotionVx < PLAYER.desiredSpeed);
+
+  tickRelative(value, 0.1, 0);
   snapshot = value.snapshot();
   assert.equal(snapshot.player.movement.mode, "running");
   assert.equal(snapshot.player.desiredVx, PLAYER.desiredSpeed);
 
+  value.tick(null);
+  assert.equal(value.snapshot().player.movement.mode, "idle");
+  tickRelative(value, MOVEMENT_SOUND.walkTargetRadiusMeters, 0);
+  assert.equal(value.snapshot().player.movement.mode, "walking");
+
   const legacy = simulation({ movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE });
-  legacy.tick({ move: { x: legacy.player.x + 0.5, z: legacy.player.z } });
+  legacy.tick({ move: { x: legacy.player.x, z: legacy.player.z } });
+  assert.equal(legacy.snapshot().player.movement.mode, "idle");
+  tickRelative(legacy, 0.25, 0);
+  assert.equal(legacy.snapshot().player.movement.mode, "running");
   assert.equal(legacy.snapshot().player.desiredVx, PLAYER.desiredSpeed);
   assert.equal(legacy.soundEventMetrics.emittedFootsteps, 0);
 });
 
-test("walking, walk-mode deceleration, and external knockback emit no footsteps", () => {
+test("zero-distance targets retain the held schema-v11 designation", () => {
   const value = simulation();
-  for (let tick = 0; tick < 120; tick += 1) tickRelative(value, 0.5, 0);
+  value.tick({ move: { x: value.player.x, z: value.player.z } });
+  assert.equal(value.snapshot().player.movement.mode, "walking");
+  assert.equal(value.player.desiredVx, 0);
+  assert.equal(value.player.desiredVz, 0);
+
+  tickRelative(value, 10, 0);
+  assert.equal(value.snapshot().player.movement.mode, "running");
+  value.tick({ move: { x: value.player.x, z: value.player.z } });
+  assert.equal(value.snapshot().player.movement.mode, "running");
+  assert.equal(value.player.desiredVx, 0);
+  assert.equal(value.player.desiredVz, 0);
+
+  value.reset();
+  assert.equal(value.snapshot().player.movement.mode, "idle");
+});
+
+test("walking, release braking, and external knockback emit no footsteps", () => {
+  const value = simulation();
+  for (let tick = 0; tick < 120; tick += 1) tickRelative(value, 0.25, 0);
   assert.equal(value.snapshot().player.movement.mode, "walking");
   assert.equal(value.soundEventMetrics.emittedFootsteps, 0);
 
   runUntilFootsteps(value, 1);
   const before = value.soundEventMetrics.emittedFootsteps;
   value.player.externalVx = 12;
-  for (let tick = 0; tick < 30; tick += 1) tickRelative(value, 0.5, 0);
+  value.tick(null);
+  assert.equal(value.snapshot().player.movement.mode, "idle");
+  for (let tick = 0; tick < 30; tick += 1) tickRelative(value, 0.25, 0);
   assert.equal(value.snapshot().player.movement.mode, "walking");
   assert.equal(value.soundEventMetrics.emittedFootsteps, before);
 });
 
-test("running emits a half-stride first step, full-stride repeats, and resets after walking", () => {
+test("running emits a half-stride first step, full-stride repeats, and resets after release", () => {
   const value = simulation();
   const startX = value.player.x;
   let footsteps = runUntilFootsteps(value, 1);
@@ -137,12 +178,29 @@ test("running emits a half-stride first step, full-stride repeats, and resets af
   const repeatDistance = footsteps[1].x - footsteps[0].x;
   assert.ok(repeatDistance >= 1.4 && repeatDistance <= 1.6, repeatDistance);
 
-  tickRelative(value, 0.5, 0);
+  value.tick(null);
+  assert.equal(value.snapshot().player.movement.mode, "idle");
+  tickRelative(value, 0.25, 0);
+  assert.equal(value.snapshot().player.movement.mode, "walking");
   assert.equal(value.player.runningStrideProgress, 0);
   const resetStartX = value.player.x;
   footsteps = runUntilFootsteps(value, 3);
   const resetDistance = footsteps[2].x - resetStartX;
   assert.ok(resetDistance >= 0.65 && resetDistance <= 0.85, resetDistance);
+});
+
+test("schema-v11 replay reproduces a latched RMB gesture without new command fields", () => {
+  const value = simulation();
+  tickRelative(value, 0.2, 0);
+  tickRelative(value, 0.2, 0);
+  tickRelative(value, 0.5, 0);
+  tickRelative(value, 0.1, 0);
+  value.tick(null);
+  tickRelative(value, 0.2, 0);
+
+  const recording = value.exportCommandLog();
+  assert.deepEqual(Object.keys(recording.commands[0].command.move), ["x", "z"]);
+  assert.deepEqual(Simulation.replay(recording).snapshot(), value.snapshot());
 });
 
 test("a 120-degree turn emits one gated footstep while 119 degrees does not", () => {

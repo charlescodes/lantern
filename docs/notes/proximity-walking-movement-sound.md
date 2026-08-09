@@ -6,30 +6,35 @@
 > recording schema advances to v11; performance-report schema advances to v4;
 > scenario v3, map v1, Fireball definition v1, and schemas v2-v10 remain frozen.
 
-The player's right-mouse movement target now controls walking versus running,
+The player's right-mouse movement gesture now controls walking versus running,
 and running can produce anonymous sound clues for investigative enemies. This
 is authoritative simulation behavior, not WebAudio: no audible footstep is
 played, and presentation does not decide whether a mob heard an event.
 
 ## Movement and cadence
 
-At each fixed tick, the current player position is compared with the RMB world
-target. A target at or inside an inclusive `0.75m` radius selects walking at
-`2.25m/s`; a farther target selects the existing `4.5m/s` run. Releasing RMB
-still selects idle and uses the existing locomotion braking. Schema-v2 through
-v10 recordings force movement-sound profile `none`, preserving their original
-full-speed response for every nonzero movement target.
+On the first fixed tick of an RMB hold, the current player position is compared
+with the world target. A target at or inside the inclusive `0.375m` radius
+(`0.75m` diameter) selects walking at `2.25m/s`; a farther target selects the
+existing `4.5m/s` run. A walking hold promotes to running as soon as its target
+leaves the circle. Running then has priority for the rest of that hold, even if
+the target returns inside. Releasing RMB selects idle, clears the latch, and
+uses the existing locomotion braking; walking again requires a new near-player
+hold. Schema-v2 through v10 recordings force movement-sound profile `none`,
+preserving their original full-speed response for every nonzero movement target.
 
 Walking is absolutely silent. This includes locomotion left over while braking
-from a run after the pointer enters the walk zone. External velocity from
+after release or while beginning a new walking gesture. External velocity from
 Fireballs or body contacts never contributes to a footstep.
 
 While running, post-physics locomotion distance advances a deterministic
 cadence. The first step occurs after `0.75m`; later steps occur every `1.5m`.
 Changing the requested run heading by at least `120 degrees` can emit the same
 footstep event after a 12-tick gate. Turn emission wins over stride emission,
-so a player produces at most one footstep per tick. Entering walk or idle
-resets the cadence; the next run begins again at the half stride.
+so a player produces at most one footstep per tick. Releasing RMB resets the
+cadence; the next newly selected or promoted run begins again at the half
+stride. Returning a latched run target to the walking circle does not reset its
+cadence.
 
 ## Bounded sound events
 
@@ -85,10 +90,11 @@ event on a selected mob. Performance-report v4 adds sound capacity, maximum
 per-tick occupancy, drops, and emitted/heard counts without changing capture
 behavior.
 
-Automated coverage fixes the inclusive walk boundary, silent walking and
-knockback, half/full stride cadence, 119/120-degree turn boundary, team/range
-hearing, wall-independent next-tick investigation, newest-clue redirection,
-Fireball routing, queue overflow, replay compatibility, and diagnostics.
+Automated coverage fixes the inclusive walk boundary, held-gesture promotion
+and run priority, release reset, silent walking and knockback, half/full stride
+cadence, 119/120-degree turn boundary, team/range hearing, wall-independent
+next-tick investigation, newest-clue redirection, Fireball routing, queue
+overflow, replay compatibility, and diagnostics.
 `npm run test:soak:sound` runs 7,200 fixed ticks with 50 listeners and both
 sound sources under the existing 8ms p99 and 64MiB heap-delta ceilings. Manual
 browser acceptance remains for the feel of the walk zone and readability of

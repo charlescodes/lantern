@@ -200,13 +200,18 @@ Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded schedul
 ```text
 FUNCTION preparePlayerMovement(RMB target)
     IF no target
-        mode := idle
-    ELSE IF distance(player, target) <= 0.75m
-        mode := walking; requested speed := 2.25m/s
-    ELSE
-        mode := running; requested speed := 4.5m/s
+        latched mode := idle
+    ELSE IF latched mode == running
+        keep running
+    ELSE IF distance(player, target) > 0.375m
+        latched mode := running
+    ELSE IF latched mode == idle
+        latched mode := walking
 
-    IF mode changed from running to walking/idle
+    requested velocity := zero when target is centered
+                          otherwise walking ? 2.25m/s : running ? 4.5m/s : 0
+
+    IF RMB released
         reset run cadence
 END
 

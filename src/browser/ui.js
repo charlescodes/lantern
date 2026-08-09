@@ -182,7 +182,7 @@ export class ArenaUi {
       `log       ${snapshot.commandLog.retained}/${snapshot.commandLog.capacity}  dropped ${snapshot.commandLog.dropped}`,
       `contacts  ${snapshot.contacts.length}  dropped ${snapshot.contactMetrics.dropped}`,
       `combat    ${snapshot.combatEventMetrics.retained}/${snapshot.combatEventMetrics.capacity}  dropped ${snapshot.combatEventMetrics.dropped}`,
-      `movement  ${snapshot.player.movement.mode}  target ${number(snapshot.player.movement.targetDistanceMeters)}m  next step ${number(snapshot.player.movement.nextFootstepDistanceMeters)}m`,
+      `RMB latch ${snapshot.player.movement.mode}  target ${number(snapshot.player.movement.targetDistanceMeters)}m  next step ${number(snapshot.player.movement.nextFootstepDistanceMeters)}m`,
       `sound     recent ${snapshot.soundEventMetrics.retained}/${snapshot.soundEventMetrics.historyCapacity}  footsteps ${snapshot.soundEventMetrics.emittedFootsteps}/${snapshot.soundEventMetrics.heardFootsteps} emitted/heard`,
     ].join("\n");
     this.rockPool.textContent = `${snapshot.pools.rocks.active} / ${snapshot.pools.rocks.capacity}  ·  dropped ${snapshot.pools.rocks.dropped}  ·  caps ${snapshot.pools.rocks.speedClamped}`;
