@@ -179,7 +179,7 @@ export class ThreePresentation {
     this.residentLightCount = this.dynamicLights.length;
 
     this.floorMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
-      color: 0x182124,
+      color: 0x35413f,
       roughness: 0.94,
       metalness: 0,
     }));
@@ -191,7 +191,7 @@ export class ThreePresentation {
 
     this.wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT_METERS, 1);
     this.wallMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
-      color: 0x485453,
+      color: 0x738079,
       roughness: 0.78,
       metalness: 0.02,
     }));
@@ -903,7 +903,7 @@ export class ThreePresentation {
       this.gridLines = new THREE.LineSegments(
         geometry,
         this.#configureSightMaterial(new THREE.LineBasicNodeMaterial({
-          color: 0x334247,
+          color: 0x55645f,
           transparent: true,
           opacity: 0.72,
         })),
