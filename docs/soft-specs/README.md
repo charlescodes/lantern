@@ -73,6 +73,7 @@ Before using a soft specification to change the engine:
 
 | Document | Status | Purpose |
 | --- | --- | --- |
+| [Gameplay idea bin](./idea-bin.md) | Seed | Keeps unprioritized mechanics, creatures, traps, spell behavior, and unfinished fragments without turning them into roadmap commitments. |
 | [Emergent co-op simulation north star](./emergent-coop-simulation.md) | Working draft | Captures the desired experience, narrative probes, world layers, AI composition, data residency, co-op shape, portability, and architectural pressure. |
 | [Candidate feature roadmap](./candidate-roadmap.md) | Working draft | Orders small vertical slices that can test the north star without committing versions, dates, or a broad rewrite. |
 | [Long-term improvement ledger](./long-term-improvements.md) | Working draft | Records credible future architecture boundaries, their promotion triggers, migration constraints, and acceptance evidence without scheduling them as features. |

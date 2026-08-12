@@ -12,6 +12,7 @@ Lantern `0.9.0` is the current application release. The development runtime is n
 These documents preserve future intent and candidate experiments. They are mutable and non-authoritative: current code, tests, and contracts still define shipped behavior.
 
 - [Soft-specification collection and promotion rules](./soft-specs/README.md) — how brainstorming becomes a candidate, implementation plan, and eventually a proven contract without rewriting milestone history.
+- [Gameplay idea bin](./soft-specs/idea-bin.md) — unprioritized mechanics, monsters, traps, spell behavior, and unfinished sparks kept as non-binding seeds.
 - [Emergent co-op simulation north star](./soft-specs/emergent-coop-simulation.md) — the rat wizard, movable furniture, stealth and sound, elemental surfaces, layered world data, AI composition, CPU/GPU authority, networking shape, portability, and architectural pressure.
 - [Candidate feature roadmap](./soft-specs/candidate-roadmap.md) — small vertical slices from player telekinesis through the enchanted rat, sound, elemental contact, actor composition, co-op authority, and larger-world experiments.
 - [Long-term improvement ledger](./soft-specs/long-term-improvements.md) — trigger-driven architecture work, beginning with moving visual particles and lighting behind a client-effect event boundary before authoritative multiplayer.
