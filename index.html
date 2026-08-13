@@ -204,15 +204,12 @@
             </section>
           </div>
         </aside>
-        <div class="editor-palette" data-developer-surface aria-label="Scenario authoring tools">
-          <span>AUTHOR</span>
-          <button type="button" data-editor-tool="wall" aria-pressed="true">Wall</button>
-          <button type="button" data-editor-tool="small" aria-pressed="false">Rock .1m</button>
-          <button type="button" data-editor-tool="medium" aria-pressed="false">Rock .3m</button>
-          <button type="button" data-editor-tool="large" aria-pressed="false">Rock .9m</button>
-          <button type="button" data-editor-tool="erase" aria-pressed="false">Erase</button>
-          <button id="restore-scenario-button" type="button">Restore positions</button>
-        </div>
+        <aside
+          id="map-palette"
+          class="editor-palette"
+          data-developer-surface
+          aria-label="Catalog-driven map palette"
+        ></aside>
         <div class="viewport-rail" data-developer-surface>
           <span id="pointer-value">x -- z -- · cell --</span>
           <span class="mode-hint play-hint">RMB move · LMB cast · click pins</span>

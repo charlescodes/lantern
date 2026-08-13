@@ -51,7 +51,7 @@ mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.9.0` remains the [Fireball Investigation AI](./docs/milestones/0.9.0-fireball-investigation-ai.md) boundary. The current non-release [proximity-walking and movement-sound checkpoint](./docs/notes/proximity-walking-movement-sound.md) advances snapshots and recordings to schema v11 and performance reports to v4 without changing the application/package version; the preceding [enemy dead-body checkpoint](./docs/notes/enemy-dead-body-lifecycle.md) remains the frozen schema-v10 contract. Scenario JSON remains v3, map v1, and Fireball definition v1. Schemas v2-v10 retain their frozen behavior.
+Start with the [documentation index](./docs/README.md). It separates mutable [soft specifications](./docs/soft-specs/README.md) from the durable [platform contract](./docs/platform.md), chronological milestone contracts, and regression notes. Release `0.9.0` remains the [Fireball Investigation AI](./docs/milestones/0.9.0-fireball-investigation-ai.md) boundary. The current non-release [M1A.1 map-authoring foundation](./docs/notes/map-authoring-foundation.md) adds authoring-map v1 without changing snapshot/recording schema v11; [proximity walking and movement sound](./docs/notes/proximity-walking-movement-sound.md) remains the schema-v11 gameplay checkpoint. Legacy scenario v3 and map v1 remain loadable, scenario v3 remains the recording compatibility projection, and Fireball definition v1 is unchanged. Schemas v2-v10 retain their frozen behavior.
 
 ## Playtest controls and developer toolbox
 
@@ -75,9 +75,9 @@ There is no component-mask or ECS dispatch layer yet. Systems explicitly process
 
 ## Scenario editor
 
-Choose Wall, Rock .1m, Rock .3m, Rock .9m, or Erase from the authoring palette. LMB applies the selected tool and RMB erases. Invalid placements over a wall, the player, an enemy, or another authored/active body are rejected.
+Press `;`, then `E` to open the generated map palette. Its catalog currently provides stone and moss surfaces, walls, three existing movable-rock sizes, a blocking pillar, and a standing-torch placeholder. Paint definitions drag across cells; stamp definitions place once. LMB applies the selection and RMB or **Erase** removes an instance first, then a structure. Invalid placements over a wall, the player, an enemy, or another authored/active body are rejected.
 
-Scenario JSON v3 stores the grid, player spawn, authored rocks, and at most one cell-centered obelisk on a solid cell. The default obelisk occupies cell `(20, 18)` at `(20.5, 18.5)`; its cell and entity are protected from editor erasure. Legacy map v1 and scenario v2 JSON still load without an obelisk or encounter. Save exports authored positions, while **Restore positions** reconstructs authored state and clears enemies, effects, health changes, and encounter cadence.
+New saves emit `lantern-authoring-map` v1 with metadata, named layers, separate surface/structure grids, stable sparse-instance IDs, and player/obelisk markers. The default obelisk occupies cell `(20, 18)` at `(20.5, 18.5)`; its structure and marker are protected from editor erasure. Legacy map v1 and scenario v2/v3 JSON migrate explicitly and resave in the new format. Entering play or using **Restore positions** reconstructs authored state and clears enemies, effects, health changes, and encounter cadence. Save exports authored positions, and runtime rock motion never rewrites them.
 
 ## Spell Lab
 

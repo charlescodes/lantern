@@ -3,6 +3,7 @@
 import { InputController } from "./browser/input.js";
 import { AiView } from "./browser/ai_view.js";
 import { DeveloperToolbox } from "./browser/developer_toolbox.js";
+import { MapPalette } from "./browser/map_palette.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
@@ -21,6 +22,8 @@ import {
 } from "./presentation/performance_capture.js";
 import { RenderLab } from "./presentation/render_lab.js";
 import { FixedStepRuntime } from "./runtime/fixed_step_runtime.js";
+import { snapDefinitionPlacement } from "./authoring/authoring_commands.js";
+import { getPlaceableDefinition } from "./authoring/definition_catalog.js";
 import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
 import { TrueSightSystem } from "./visibility/true_sight.js";
@@ -72,13 +75,14 @@ if (presentationBundle) {
 const { camera, presentation } = presentationBundle;
 renderLab.attachPresentation(presentation);
 document.body.dataset.backend = presentation.diagnostics().activeBackend;
-let editorTool = "wall";
+let editorTool = "structure.wall";
 let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
 let spellLab;
 let aiView;
 let performanceCapture;
+let mapPalette;
 
 function presentationDiagnostics() {
   const diagnostics = presentation.diagnostics();
@@ -125,6 +129,20 @@ const runtime = new FixedStepRuntime({
       : { entity: null, hidden: false };
     const selected = selection.entity;
     const pinnedHidden = selection.hidden;
+    const editorDefinition = getPlaceableDefinition(editorTool);
+    let placementValid = true;
+    if (editorDefinition?.placementTarget === "instance") {
+      const snapped = snapDefinitionPlacement(
+        editorDefinition.id,
+        input.mouseWorld.x,
+        input.mouseWorld.z,
+      );
+      placementValid = simulation.canPlaceDefinition(
+        editorDefinition.id,
+        snapped.x,
+        snapped.z,
+      );
+    }
     presentation.render(snapshot, alpha, {
       mouseWorld: input.mouseWorld,
       mouseInside: input.mouseInside && cursorVisible,
@@ -132,13 +150,7 @@ const runtime = new FixedStepRuntime({
       selected,
       mode,
       editorTool,
-      placementValid: editorTool === "small" || editorTool === "medium" || editorTool === "large"
-        ? simulation.canPlaceRock(
-          editorTool,
-          Math.round(input.mouseWorld.x * 10) / 10,
-          Math.round(input.mouseWorld.z * 10) / 10,
-        )
-        : true,
+      placementValid,
       sightFrame,
       developerToolsOpen,
     });
@@ -224,6 +236,9 @@ function toggleMode() {
     runtime.pause();
     mode = "edit";
   } else {
+    trueSight.requestSnap("reset");
+    injectMutation({ type: "restoreScenario" });
+    pinned = null;
     mode = "play";
     if (resumeAfterEdit) runtime.resume();
     resumeAfterEdit = false;
@@ -240,8 +255,8 @@ function toggleMode() {
   ui.setMode(mode);
   ui.announce(
     mode === "edit"
-      ? "Edit mode paused: choose a wall or rock tool"
-      : "Play mode: RMB move, LMB cast",
+      ? "Edit mode paused: choose a catalog definition"
+      : "Play mode restored from authored state: RMB move, LMB cast",
   );
 }
 
@@ -283,23 +298,38 @@ function editAt(tool, button, x, z) {
   const cx = Math.floor(x);
   const cz = Math.floor(z);
   if (button === 2 || tool === "erase") {
-    const entity = simulation.queryAt(x, z);
-    if (entity.kind === "rock") {
-      injectMutation({ type: "removeEntity", kind: "rock", id: entity.id });
-      if (pinned?.kind === "rock" && Number(pinned.id) === Number(entity.id)) pinned = null;
+    const instance = simulation.authoredInstanceAt(x, z);
+    if (instance) {
+      injectMutation({ type: "removeInstance", authoringId: instance.id });
+      if (
+        pinned?.kind === "rock"
+        && instance.runtimeId !== undefined
+        && Number(pinned.id) === Number(instance.runtimeId)
+      ) pinned = null;
     } else {
-      injectMutation({ type: "setTile", cx, cz, tile: 0 });
+      injectMutation({ type: "eraseStructure", cx, cz });
     }
     return;
   }
-  if (tool === "wall") {
-    injectMutation({ type: "setTile", cx, cz, tile: 1 });
+  const definition = getPlaceableDefinition(tool);
+  if (!definition) return;
+  if (definition.placementTarget === "surface") {
+    injectMutation({ type: "paintSurface", cx, cz, definitionId: definition.id });
     return;
   }
-  if (tool === "small" || tool === "medium" || tool === "large") {
-    const snappedX = Math.round(x * 10) / 10;
-    const snappedZ = Math.round(z * 10) / 10;
-    injectMutation({ type: "placeRock", archetype: tool, x: snappedX, z: snappedZ });
+  if (definition.placementTarget === "structure") {
+    injectMutation({ type: "paintStructure", cx, cz, definitionId: definition.id });
+    return;
+  }
+  if (definition.placementTarget === "instance") {
+    const snapped = snapDefinitionPlacement(definition.id, x, z);
+    injectMutation({
+      type: "placeInstance",
+      definitionId: definition.id,
+      x: snapped.x,
+      z: snapped.z,
+      rotation: 0,
+    });
   }
 }
 
@@ -330,6 +360,28 @@ input = new InputController(canvas, camera, {
   createCast: (x, z) => spellLab.createCast(x, z),
 });
 
+function restoreAuthoredPositions() {
+  trueSight.requestSnap("reset");
+  injectMutation({ type: "restoreScenario" });
+  pinned = null;
+  ui.announce("Restored authored body positions");
+}
+
+mapPalette = new MapPalette({
+  definitions: simulation.listPlaceableDefinitions(),
+  selectedId: editorTool,
+  onSelect: (definitionId) => {
+    editorTool = definitionId ?? "erase";
+    const definition = definitionId ? getPlaceableDefinition(definitionId) : null;
+    input.setEditorTool(
+      editorTool,
+      definition?.placementMode === "paint" ? "paint" : "stamp",
+    );
+    ui.setEditorTool(editorTool);
+  },
+  onRestore: restoreAuthoredPositions,
+});
+
 /** @param {string} id @param {()=>void} handler */
 function onButton(id, handler) {
   document.getElementById(id)?.addEventListener("click", handler);
@@ -340,21 +392,6 @@ onButton("step-button", singleStep);
 onButton("reset-button", () => reset(false));
 onButton("mode-button", toggleMode);
 onButton("focus-button", focusPlayer);
-onButton("restore-scenario-button", () => {
-  trueSight.requestSnap("reset");
-  injectMutation({ type: "restoreScenario" });
-  pinned = null;
-  ui.announce("Restored authored body positions");
-});
-
-for (const button of document.querySelectorAll("[data-editor-tool]")) {
-  button.addEventListener("click", () => {
-    const element = /** @type {HTMLButtonElement} */ (button);
-    editorTool = element.dataset.editorTool ?? "wall";
-    input.setEditorTool(editorTool);
-    ui.setEditorTool(editorTool);
-  });
-}
 
 for (const checkbox of document.querySelectorAll("[data-debug-flag]")) {
   checkbox.addEventListener("change", () => {
@@ -484,9 +521,36 @@ const probe = Object.freeze({
   queryAt(x, z) {
     return simulation.queryAt(Number(x), Number(z));
   },
+  authoring() {
+    return {
+      ...simulation.authoringSnapshot(),
+      selectedPaletteDefinition: mapPalette.snapshot().selectedDefinitionId,
+      palette: mapPalette.snapshot(),
+    };
+  },
+  listPlaceableDefinitions() {
+    return simulation.listPlaceableDefinitions();
+  },
+  setPaletteDefinition(definitionId) {
+    return mapPalette.setSelected(
+      definitionId === null || definitionId === "erase" ? null : String(definitionId),
+    );
+  },
   setTile(cx, cz, tile) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
     return injectMutation({ type: "setTile", cx, cz, tile });
+  },
+  paintSurface(cx, cz, definitionId = "surface.stone") {
+    if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
+    return injectMutation({ type: "paintSurface", cx, cz, definitionId });
+  },
+  paintStructure(cx, cz, definitionId = "structure.wall") {
+    if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
+    return injectMutation({ type: "paintStructure", cx, cz, definitionId });
+  },
+  eraseStructure(cx, cz) {
+    if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
+    return injectMutation({ type: "eraseStructure", cx, cz });
   },
   saveMap() {
     return simulation.saveMap();
@@ -514,6 +578,33 @@ const probe = Object.freeze({
   placeRock(archetype, x, z) {
     if (!simulation.canPlaceRock(String(archetype), Number(x), Number(z))) return false;
     return injectMutation({ type: "placeRock", archetype, x, z });
+  },
+  canPlaceInstance(definitionId, x, z, rotation = 0) {
+    return simulation.canPlaceDefinition(
+      String(definitionId),
+      Number(x),
+      Number(z),
+      Number(rotation),
+    );
+  },
+  placeInstance(definitionId, x, z, options = {}) {
+    const id = String(definitionId);
+    const rotation = Number(options.rotation ?? 0);
+    if (!simulation.canPlaceDefinition(id, Number(x), Number(z), rotation)) return false;
+    return injectMutation({
+      type: "placeInstance",
+      definitionId: id,
+      x,
+      z,
+      rotation,
+      ...(options.properties === undefined ? {} : { properties: options.properties }),
+    });
+  },
+  removeInstance(authoringId) {
+    if (!simulation.authoringSnapshot().instances.some((instance) => instance.id === String(authoringId))) {
+      return false;
+    }
+    return injectMutation({ type: "removeInstance", authoringId });
   },
   removeEntity(kind, id) {
     if (String(kind) !== "rock") return false;

@@ -41,6 +41,15 @@ import {
 import { RingBuffer } from "../core/ring_buffer.js";
 import { normalizeSeed, SeededRng } from "../core/rng.js";
 import {
+  AUTHORING_MAP_VERSION,
+  cloneAuthoringMap,
+} from "../authoring/authoring_map.js";
+import {
+  getPlaceableDefinition,
+  listPlaceableDefinitions,
+  rockDefinitionId,
+} from "../authoring/definition_catalog.js";
+import {
   cloneFireballDefinition,
   DEFAULT_FIREBALL_DEFINITION,
   FIREBALL_SPELL_CODE,
@@ -250,6 +259,13 @@ function cloneUnknown(value) {
 }
 
 /** @param {unknown} value */
+function deepFreeze(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+/** @param {unknown} value */
 function canonicalAction(value) {
   if (!value || typeof value !== "object") return null;
   const action = /** @type {Record<string, unknown>} */ (value);
@@ -260,6 +276,26 @@ function canonicalAction(value) {
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
         tile: Number(action.tile) === 1 ? 1 : 0,
+      };
+    case "paintSurface":
+      return {
+        type: "paintSurface",
+        cx: Math.trunc(Number(action.cx)),
+        cz: Math.trunc(Number(action.cz)),
+        definitionId: String(action.definitionId),
+      };
+    case "paintStructure":
+      return {
+        type: "paintStructure",
+        cx: Math.trunc(Number(action.cx)),
+        cz: Math.trunc(Number(action.cz)),
+        definitionId: String(action.definitionId),
+      };
+    case "eraseStructure":
+      return {
+        type: "eraseStructure",
+        cx: Math.trunc(Number(action.cx)),
+        cz: Math.trunc(Number(action.cz)),
       };
     case "loadMap":
     case "loadScenario":
@@ -273,6 +309,20 @@ function canonicalAction(value) {
         archetype: String(action.archetype),
         x: Number(action.x),
         z: Number(action.z),
+      };
+    case "placeInstance":
+      return {
+        type: "placeInstance",
+        definitionId: String(action.definitionId),
+        x: Number(action.x),
+        z: Number(action.z),
+        rotation: action.rotation === undefined ? 0 : Number(action.rotation),
+        properties: action.properties === undefined ? undefined : cloneUnknown(action.properties),
+      };
+    case "removeInstance":
+      return {
+        type: "removeInstance",
+        authoringId: String(action.authoringId),
       };
     case "removeEntity":
       return {
@@ -318,6 +368,9 @@ function cloneCanonicalCommand(command) {
 function cloneScenarioJson(scenario) {
   return {
     version: scenario.version,
+    ...(scenario.authoringMetadata
+      ? { authoringMetadata: { ...scenario.authoringMetadata } }
+      : {}),
     width: scenario.width,
     height: scenario.height,
     cells: [...scenario.cells],
@@ -487,6 +540,8 @@ export class Simulation {
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
     this.map = this.scenario.map;
+    this._preparedAuthoringState = null;
+    this.#refreshPreparedAuthoringState();
     this.seed = normalizeSeed(options.seed ?? 0x1a2b3c4d);
     this.rng = new SeededRng(this.seed);
     this.gameplayProfile = options.gameplayProfile ?? GAMEPLAY_PROFILE_OBELISK_DUEL;
@@ -677,6 +732,7 @@ export class Simulation {
     this.commandLog = new RingBuffer(HISTORY.commands);
     this.commandLogDropped = 0;
     this.commandLogScenario = this.scenario.toJSON();
+    this.commandLogAuthoringMap = this.scenario.toAuthoringJSON();
     this.commandLogMap = this.map.toJSON();
     this.debugFlags = {
       ...DEFAULT_DEBUG_FLAGS,
@@ -820,6 +876,7 @@ export class Simulation {
       this.commandLog.clear();
       this.commandLogDropped = 0;
       this.commandLogScenario = this.scenario.toJSON();
+      this.commandLogAuthoringMap = this.scenario.toAuthoringJSON();
       this.commandLogMap = this.map.toJSON();
       this.commandLogParticleProfile = this.particleProfile;
       this.commandLogParticleBounce = this.debugFlags.particleBounce;
@@ -1020,6 +1077,20 @@ export class Simulation {
           if (!this.#setTile(action.cx, action.cz, action.tile)) {
             throw new RangeError("Tile would overlap an authored or active body");
           }
+        } else if (action.type === "paintSurface") {
+          if (!this.#paintSurface(action.cx, action.cz, action.definitionId)) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Surface paint is invalid");
+          }
+        } else if (action.type === "paintStructure") {
+          if (!this.#paintStructure(action.cx, action.cz, action.definitionId)) {
+            throw new RangeError(
+              this.scenario.lastMutationError ?? "Structure would overlap an authored or active body",
+            );
+          }
+        } else if (action.type === "eraseStructure") {
+          if (!this.#eraseStructure(action.cx, action.cz)) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Structure cannot be erased");
+          }
         } else if (action.type === "loadScenario") {
           const loadedScenario = ArenaScenario.fromJSON(action.json);
           if (
@@ -1030,6 +1101,7 @@ export class Simulation {
           }
           this.scenario = loadedScenario;
           this.map = loadedScenario.map;
+          this.#refreshPreparedAuthoringState();
           this.mapRevision += 1;
           this.#restoreAuthoredState();
           this.impactEvents.clear();
@@ -1039,33 +1111,35 @@ export class Simulation {
           this.perceptionEventDropped = 0;
           this.#clearSoundEventHistory();
         } else if (action.type === "placeRock") {
-          if (!this.canPlaceRock(action.archetype, action.x, action.z)) {
+          const definitionId = rockDefinitionId(action.archetype);
+          if (!definitionId || !this.#placeDefinition(definitionId, action.x, action.z, 0)) {
             throw new RangeError("Rock placement is invalid or overlaps another body");
           }
-          const spawnId = this.scenario.placeRock(action.archetype, action.x, action.z);
-          if (spawnId === 0) throw new RangeError("Rock placement could not be authored");
-          const definition = getRockArchetype(action.archetype);
-          const id = definition
-            ? this.rocks.spawn({
-              spawnId,
-              archetype: definition.code,
-              x: action.x,
-              z: action.z,
-              radius: definition.radius,
-              massKg: definition.massKg,
-            })
-            : 0;
-          if (id === 0) {
-            this.scenario.removeRock(spawnId);
-            throw new RangeError("Rock pool capacity reached");
+        } else if (action.type === "placeInstance") {
+          if (!this.#placeDefinition(
+            action.definitionId,
+            action.x,
+            action.z,
+            action.rotation,
+            action.properties,
+          )) {
+            throw new RangeError(
+              this.scenario.lastMutationError ?? "Instance placement is invalid or overlaps another body",
+            );
+          }
+        } else if (action.type === "removeInstance") {
+          if (!this.#removeAuthoredInstance(action.authoringId)) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Authoring instance no longer exists");
           }
         } else if (action.type === "removeEntity") {
           if (action.kind !== "rock") throw new RangeError("Only authored rocks can be removed");
           const index = this.rocks.findIndexById(action.id);
           if (index < 0) throw new RangeError("Rock no longer exists");
           const spawnId = this.rocks.spawnId[index];
-          if (!this.scenario.removeRock(spawnId)) throw new RangeError("Rock is not authored");
-          this.rocks.removeSwap(index);
+          const authoringId = this.scenario.authoringIdForSpawnId(spawnId);
+          if (!authoringId || !this.#removeAuthoredInstance(authoringId)) {
+            throw new RangeError("Rock is not authored");
+          }
         } else if (
           action.type === "setDebugFlag" &&
           Object.hasOwn(this.debugFlags, action.name)
@@ -1100,68 +1174,153 @@ export class Simulation {
 
   /** @param {number} cx @param {number} cz @param {number} tile */
   #setTile(cx, cz, tile) {
+    return tile === 1
+      ? this.#paintStructure(cx, cz, "structure.wall")
+      : this.#eraseStructure(cx, cz);
+  }
+
+  /** @param {number} cx @param {number} cz @param {string} definitionId */
+  #paintSurface(cx, cz, definitionId) {
     if (!this.map.inBounds(cx, cz)) return false;
-    const previous = this.map.get(cx, cz);
-    if (!this.scenario.setTile(cx, cz, tile)) return false;
-    if (tile !== 1) {
-      if (previous !== tile) this.mapRevision += 1;
-      return true;
-    }
+    if (!this.scenario.paintSurface(cx, cz, definitionId)) return false;
+    this.#refreshPreparedAuthoringState();
+    return true;
+  }
+
+  /** @param {GridMap} candidateMap */
+  #activeBodiesFitMap(candidateMap) {
     if (
       firstSolidContact(
-        this.map,
+        candidateMap,
         this.player.x,
         this.player.z,
         this.player.radius,
         this._gridContact,
       )
-    ) {
-      this.map.set(cx, cz, previous);
-      return false;
-    }
+    ) return false;
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       if (
         firstSolidContact(
-          this.map,
+          candidateMap,
           this.rocks.x[index],
           this.rocks.z[index],
           this.rocks.radius[index],
           this._gridContact,
         )
-      ) {
-        this.map.set(cx, cz, previous);
-        return false;
-      }
+      ) return false;
     }
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
       if (
         firstSolidContact(
-          this.map,
+          candidateMap,
           this.enemies.x[index],
           this.enemies.z[index],
           this.enemies.radius[index],
           this._gridContact,
         )
-      ) {
-        this.map.set(cx, cz, previous);
-        return false;
-      }
+      ) return false;
     }
     for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
       if (
         firstSolidContact(
-          this.map,
+          candidateMap,
           this.dynamicDeadBodies.x[index],
           this.dynamicDeadBodies.z[index],
           this.dynamicDeadBodies.radius[index],
           this._gridContact,
         )
-      ) {
-        this.map.set(cx, cz, previous);
+      ) return false;
+    }
+    return true;
+  }
+
+  /** @param {number} cx @param {number} cz @param {string} definitionId */
+  #paintStructure(cx, cz, definitionId) {
+    if (!this.map.inBounds(cx, cz)) return false;
+    const candidate = this.scenario.clone();
+    if (!candidate.paintStructure(cx, cz, definitionId)) {
+      this.scenario.lastMutationError = candidate.lastMutationError;
+      return false;
+    }
+    if (!this.#activeBodiesFitMap(candidate.map)) {
+      this.scenario.lastMutationError = "Structure would overlap an active body";
+      return false;
+    }
+    const before = this.scenario.structure.cells[this.map.index(cx, cz)];
+    if (!this.scenario.paintStructure(cx, cz, definitionId)) return false;
+    const after = this.scenario.structure.cells[this.map.index(cx, cz)];
+    if (before !== after) this.mapRevision += 1;
+    this.#refreshPreparedAuthoringState();
+    return true;
+  }
+
+  /** @param {number} cx @param {number} cz */
+  #eraseStructure(cx, cz) {
+    if (!this.map.inBounds(cx, cz)) return false;
+    const before = this.scenario.structure.cells[this.map.index(cx, cz)];
+    if (!this.scenario.eraseStructure(cx, cz)) return false;
+    if (before !== 0) this.mapRevision += 1;
+    this.#refreshPreparedAuthoringState();
+    return true;
+  }
+
+  /**
+   * @param {string} definitionId
+   * @param {number} x
+   * @param {number} z
+   * @param {number} rotation
+   * @param {Record<string,unknown>|undefined} [properties]
+   */
+  #placeDefinition(definitionId, x, z, rotation, properties) {
+    if (!this.canPlaceDefinition(definitionId, x, z, rotation)) return false;
+    const definition = getPlaceableDefinition(definitionId);
+    if (!definition) return false;
+    const authoringId = this.scenario.placeInstance(
+      definitionId,
+      x,
+      z,
+      { rotation, ...(properties === undefined ? {} : { properties }) },
+    );
+    if (!authoringId) return false;
+    if (definition.traits.runtimeKind === "rock") {
+      const archetype = getRockArchetype(String(definition.traits.rockArchetype));
+      const spawnId = this.scenario.spawnIdForAuthoringId(authoringId);
+      const id = archetype && spawnId
+        ? this.rocks.spawn({
+          spawnId,
+          archetype: archetype.code,
+          x,
+          z,
+          radius: archetype.radius,
+          massKg: archetype.massKg,
+        })
+        : 0;
+      if (id === 0) {
+        this.scenario.removeInstance(authoringId);
+        this.scenario.lastMutationError = "Rock pool capacity reached";
         return false;
       }
     }
-    if (previous !== tile) this.mapRevision += 1;
+    if (definition.traits.blocksMovement || definition.traits.blocksSight) {
+      this.mapRevision += 1;
+    }
+    this.#refreshPreparedAuthoringState();
+    return true;
+  }
+
+  /** @param {string} authoringId */
+  #removeAuthoredInstance(authoringId) {
+    const instance = this.scenario.instances.find((candidate) => candidate.id === authoringId);
+    if (!instance) return false;
+    const definition = getPlaceableDefinition(instance.definitionId);
+    const spawnId = this.scenario.spawnIdForAuthoringId(authoringId);
+    const rockIndex = spawnId === null ? -1 : this.rocks.findIndexBySpawnId(spawnId);
+    if (!this.scenario.removeInstance(authoringId)) return false;
+    if (rockIndex >= 0) this.rocks.removeSwap(rockIndex);
+    if (definition?.traits.blocksMovement || definition?.traits.blocksSight) {
+      this.mapRevision += 1;
+    }
+    this.#refreshPreparedAuthoringState();
     return true;
   }
 
@@ -6359,6 +6518,7 @@ export class Simulation {
         kind: "rock",
         id: this.rocks.id[index],
         spawnId: this.rocks.spawnId[index],
+        authoringId: this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]),
         archetype: ROCK_NAME_BY_CODE.get(this.rocks.archetype[index]) ?? "unknown",
         index,
         x: this.rocks.x[index],
@@ -6378,6 +6538,7 @@ export class Simulation {
         kind: "obelisk",
         id: entity.spawnId,
         spawnId: entity.spawnId,
+        authoringId: entity.authoringId ?? "marker.obelisk",
         x: entity.x,
         z: entity.z,
         cell: { cx: Math.floor(entity.x), cz: Math.floor(entity.z) },
@@ -6652,11 +6813,16 @@ export class Simulation {
       },
       particleProfile: this.particleProfile,
       scenarioVersion: SCENARIO_VERSION,
+      authoringMapVersion: AUTHORING_MAP_VERSION,
+      authoring: this._preparedAuthoringState.authoring,
       map: {
         version: MAP_VERSION,
         width: this.map.width,
         height: this.map.height,
         cells: Array.from(this.map.cells),
+        occluderCells: this._preparedAuthoringState.occluderCells,
+        surface: this._preparedAuthoringState.surface,
+        structure: this._preparedAuthoringState.structure,
         playerSpawn: { ...this.map.playerSpawn },
       },
       player: {
@@ -7134,6 +7300,80 @@ export class Simulation {
     }));
   }
 
+  listPlaceableDefinitions() {
+    return listPlaceableDefinitions().map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      category: definition.category,
+      categoryLabel: definition.categoryLabel,
+      placementMode: definition.placementMode,
+      placementTarget: definition.placementTarget,
+      footprint: {
+        cells: definition.footprint.cells.map((cell) => ({ ...cell })),
+      },
+      debug: { ...definition.debug },
+      renderAsset: definition.renderAsset,
+      traits: { ...definition.traits },
+    }));
+  }
+
+  #refreshPreparedAuthoringState() {
+    this._preparedAuthoringState = deepFreeze({
+      authoring: {
+        format: this.scenario.authoringMap.format,
+        schemaVersion: AUTHORING_MAP_VERSION,
+        metadata: { ...this.scenario.authoringMap.metadata },
+        activeLayer: { ...this.scenario.activeLayer },
+        availableDefinitionIds: listPlaceableDefinitions().map((definition) => definition.id),
+        instances: this.scenario.instances.map((instance) => cloneUnknown(instance)),
+        runtimeMappings: this.scenario.runtimeMappings.map((mapping) => ({
+          ...mapping,
+          collisionCells: mapping.collisionCells.map((cell) => ({ ...cell })),
+        })),
+      },
+      occluderCells: Array.from(this.scenario.occluderMask),
+      surface: {
+        legend: [...this.scenario.surface.legend],
+        cells: Array.from(this.scenario.surface.cells),
+      },
+      structure: {
+        legend: [...this.scenario.structure.legend],
+        cells: Array.from(this.scenario.structure.cells),
+      },
+    });
+  }
+
+  authoringSnapshot() {
+    return cloneUnknown(this._preparedAuthoringState.authoring);
+  }
+
+  /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] */
+  canPlaceDefinition(definitionId, x, z, rotation = 0) {
+    const definition = getPlaceableDefinition(definitionId);
+    if (!definition || definition.placementTarget !== "instance") return false;
+    if (definition.traits.runtimeKind === "rock") {
+      return this.canPlaceRock(String(definition.traits.rockArchetype), x, z);
+    }
+    const candidate = this.scenario.clone();
+    if (!candidate.placeInstance(definitionId, x, z, { rotation })) return false;
+    return this.#activeBodiesFitMap(candidate.map);
+  }
+
+  /** @param {number} x @param {number} z */
+  authoredInstanceAt(x, z) {
+    for (let index = this.rocks.activeCount - 1; index >= 0; index -= 1) {
+      if (
+        Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index])
+        <= this.rocks.radius[index]
+      ) {
+        const authoringId = this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]);
+        const instance = this.scenario.instances.find((candidate) => candidate.id === authoringId);
+        if (instance) return { ...instance, runtimeId: this.rocks.id[index] };
+      }
+    }
+    return this.scenario.instanceAt(x, z);
+  }
+
   /** @param {string} archetype @param {number} x @param {number} z */
   canPlaceRock(archetype, x, z) {
     const definition = getRockArchetype(archetype);
@@ -7180,7 +7420,7 @@ export class Simulation {
   }
 
   saveScenario() {
-    return JSON.stringify(this.scenario.toJSON(), null, 2);
+    return JSON.stringify(this.scenario.toAuthoringJSON(), null, 2);
   }
 
   saveMap() {
@@ -7192,6 +7432,7 @@ export class Simulation {
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
+      initialAuthoringMap: cloneAuthoringMap(this.commandLogAuthoringMap),
       initialScenario,
       initialMap: cloneMapJson(
         GridMap.fromJSON({
@@ -7235,7 +7476,11 @@ export class Simulation {
     if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 11) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
-    const scenario = ArenaScenario.fromJSON(recording.initialScenario ?? recording.initialMap);
+    const scenario = ArenaScenario.fromJSON(
+      recordingSchema === SCHEMA_VERSION && recording.initialAuthoringMap
+        ? recording.initialAuthoringMap
+        : recording.initialScenario ?? recording.initialMap,
+    );
     const particleProfile = recordingSchema >= 4
       ? recording.configuration?.particleProfile ?? DEFAULT_PARTICLE_PROFILE
       : PARTICLE_PROFILE_M02;

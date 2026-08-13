@@ -102,9 +102,11 @@ export class ArenaUi {
 
   /** @param {string} tool */
   setEditorTool(tool) {
-    for (const button of document.querySelectorAll("[data-editor-tool]")) {
+    for (const button of document.querySelectorAll("[data-definition-id], [data-palette-action='erase']")) {
       const element = /** @type {HTMLButtonElement} */ (button);
-      const selected = element.dataset.editorTool === tool;
+      const selected = tool === "erase"
+        ? element.dataset.paletteAction === "erase"
+        : element.dataset.definitionId === tool;
       element.classList.toggle("is-active", selected);
       element.setAttribute("aria-pressed", String(selected));
     }

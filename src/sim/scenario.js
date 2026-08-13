@@ -1,76 +1,114 @@
 // @ts-check
 
 import {
-  MAP_VERSION,
-  PLAYER,
-  ROCK,
   ROCK_ARCHETYPES,
   SCENARIO_VERSION,
 } from "../config.js";
-import { firstSolidContact } from "./collision.js";
+import {
+  eraseStructure as eraseAuthoringStructure,
+  paintStructure as paintAuthoringStructure,
+  paintSurface as paintAuthoringSurface,
+  placeInstance as placeAuthoringInstance,
+  removeInstance as removeAuthoringInstance,
+} from "../authoring/authoring_commands.js";
+import {
+  authoringMapFromRuntime,
+  cloneAuthoringMap,
+  isAuthoringMapDocument,
+  loadAuthoringMap,
+} from "../authoring/authoring_map.js";
+import {
+  getPlaceableDefinition,
+  rockDefinitionId,
+} from "../authoring/definition_catalog.js";
+import { compileAuthoringMap } from "../authoring/map_compiler.js";
 import { createDebugArenaMap, GridMap } from "./grid_map.js";
-
-/** @param {unknown} value */
-function finite(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
 
 /** @param {string} archetype */
 export function getRockArchetype(archetype) {
   return Object.hasOwn(ROCK_ARCHETYPES, archetype) ? ROCK_ARCHETYPES[archetype] : null;
 }
 
-/** @param {{kind:"rock"|"obelisk",archetype?:string,x:number,z:number,spawnId:number}} entity */
-function cloneEntity(entity) {
-  return { ...entity };
-}
-
-/** @param {{kind:string}} entity */
-function isRock(entity) {
-  return entity.kind === "rock";
-}
-
-/** @param {number} value */
-function isCellCenter(value) {
-  return Number.isFinite(value) && value === Math.floor(value) + 0.5;
-}
-
 export class ArenaScenario {
   /**
-   * @param {GridMap} map
-   * @param {Array<{kind:"rock"|"obelisk",archetype?:string,x:number,z:number,spawnId?:number}>} [entities]
+   * @param {GridMap | Record<string, unknown>} map
+   * @param {Array<{kind:"rock"|"obelisk",archetype?:string,x:number,z:number,spawnId?:number,authoringId?:string}>} [entities]
    */
   constructor(map, entities = []) {
-    if (entities.filter(isRock).length > ROCK.capacity) {
-      throw new RangeError(`Scenario entity count exceeds the ${ROCK.capacity}-rock limit`);
+    const authoringMap = isAuthoringMapDocument(map)
+      ? loadAuthoringMap(map)
+      : authoringMapFromRuntime(
+        /** @type {GridMap} */ (map),
+        entities,
+        { id: "arena", name: "Lantern arena" },
+      );
+    this.lastMutationError = null;
+    this.#applyCompiled(compileAuthoringMap(authoringMap), true);
+  }
+
+  /** @param {ReturnType<typeof compileAuthoringMap>} compiled @param {boolean} initial */
+  #applyCompiled(compiled, initial = false) {
+    this.authoringMap = compiled.document;
+    if (
+      !initial
+      && this.map
+      && this.map.width === compiled.map.width
+      && this.map.height === compiled.map.height
+    ) {
+      this.map.cells.set(compiled.map.cells);
+      this.map.playerSpawn = { ...compiled.map.playerSpawn };
+    } else {
+      this.map = compiled.map;
     }
-    this.map = map.clone();
-    this.entities = [];
-    this.nextSpawnId = 1;
-    for (const entity of entities) {
-      const spawnId = Number.isInteger(entity.spawnId) && entity.spawnId > 0
-        ? entity.spawnId
-        : this.nextSpawnId;
-      this.entities.push({
-        kind: entity.kind,
-        ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
-        x: entity.x,
-        z: entity.z,
-        spawnId,
-      });
-      this.nextSpawnId = Math.max(this.nextSpawnId, spawnId + 1);
+    this.activeLayer = { ...compiled.activeLayer };
+    this.surface = {
+      legend: [...compiled.surface.legend],
+      cells: new Uint16Array(compiled.surface.cells),
+    };
+    this.structure = {
+      legend: [...compiled.structure.legend],
+      cells: new Uint16Array(compiled.structure.cells),
+    };
+    this.occluderMask = new Uint8Array(compiled.occluderMask);
+    this.instances = compiled.instances.map((instance) => ({
+      ...instance,
+      ...(instance.properties ? { properties: { ...instance.properties } } : {}),
+    }));
+    this.runtimeMappings = compiled.runtimeMappings.map((mapping) => ({
+      ...mapping,
+      collisionCells: mapping.collisionCells.map((cell) => ({ ...cell })),
+    }));
+    this.entities = compiled.entities.map((entity) => ({ ...entity }));
+    this.nextSpawnId = this.entities.reduce(
+      (maximum, entity) => Math.max(maximum, Number(entity.spawnId) + 1),
+      1,
+    );
+  }
+
+  /** @param {unknown} nextDocument */
+  #commit(nextDocument) {
+    try {
+      this.#applyCompiled(compileAuthoringMap(nextDocument));
+      this.lastMutationError = null;
+      return true;
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
     }
-    this.#validateAll();
   }
 
   clone() {
-    return new ArenaScenario(this.map, this.entities.map(cloneEntity));
+    return new ArenaScenario(this.toAuthoringJSON());
   }
 
+  /**
+   * Legacy compiled scenario JSON remains the recording-schema-v11 boundary.
+   * User saves use toAuthoringJSON() through Simulation.saveScenario().
+   */
   toJSON() {
     return {
       version: SCENARIO_VERSION,
+      authoringMetadata: { ...this.authoringMap.metadata },
       width: this.map.width,
       height: this.map.height,
       cells: Array.from(this.map.cells),
@@ -84,117 +122,150 @@ export class ArenaScenario {
     };
   }
 
+  toAuthoringJSON() {
+    return cloneAuthoringMap(this.authoringMap);
+  }
+
   /** @param {number} cx @param {number} cz @param {number} tile */
   setTile(cx, cz, tile) {
-    if (!this.map.inBounds(cx, cz)) return false;
-    if (tile !== 1 && this.obeliskAtCell(cx, cz)) return false;
-    const previous = this.map.get(cx, cz);
-    this.map.set(cx, cz, tile);
-    if (tile === 1 && !this.#placementsAreValid()) {
-      this.map.set(cx, cz, previous);
+    return tile === 1
+      ? this.paintStructure(cx, cz, "structure.wall")
+      : this.eraseStructure(cx, cz);
+  }
+
+  /** @param {number} cx @param {number} cz @param {string} definitionId */
+  paintSurface(cx, cz, definitionId) {
+    try {
+      return this.#commit(
+        paintAuthoringSurface(this.authoringMap, cx, cz, definitionId),
+      );
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
-    return true;
+  }
+
+  /** @param {number} cx @param {number} cz @param {string} definitionId */
+  paintStructure(cx, cz, definitionId) {
+    try {
+      return this.#commit(
+        paintAuthoringStructure(this.authoringMap, cx, cz, definitionId),
+      );
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
+  /** @param {number} cx @param {number} cz */
+  eraseStructure(cx, cz) {
+    try {
+      return this.#commit(eraseAuthoringStructure(this.authoringMap, cx, cz));
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
+  /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] */
+  canPlaceDefinition(definitionId, x, z, rotation = 0) {
+    try {
+      const result = placeAuthoringInstance(
+        this.authoringMap,
+        definitionId,
+        x,
+        z,
+        { rotation },
+      );
+      compileAuthoringMap(result.document);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * @param {string} definitionId
+   * @param {number} x
+   * @param {number} z
+   * @param {{rotation?:number,properties?:Record<string,unknown>}} [options]
+   */
+  placeInstance(definitionId, x, z, options = {}) {
+    try {
+      const result = placeAuthoringInstance(
+        this.authoringMap,
+        definitionId,
+        x,
+        z,
+        options,
+      );
+      return this.#commit(result.document) ? result.instanceId : null;
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return null;
+    }
+  }
+
+  /** @param {string} authoringId */
+  removeInstance(authoringId) {
+    try {
+      return this.#commit(removeAuthoringInstance(this.authoringMap, authoringId));
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
   }
 
   /** @param {string} archetype @param {number} x @param {number} z */
   canPlaceRock(archetype, x, z) {
-    const definition = getRockArchetype(archetype);
-    if (!definition || !Number.isFinite(x) || !Number.isFinite(z)) return false;
-    if (this.#circleTouchesSolid(x, z, definition.radius)) return false;
-    if (Math.hypot(x - this.map.playerSpawn.x, z - this.map.playerSpawn.z) < definition.radius + PLAYER.radius) {
-      return false;
-    }
-    for (const entity of this.entities) {
-      if (entity.kind !== "rock") continue;
-      const other = getRockArchetype(entity.archetype);
-      if (other && Math.hypot(x - entity.x, z - entity.z) < definition.radius + other.radius) {
-        return false;
-      }
-    }
-    return true;
+    const definitionId = rockDefinitionId(archetype);
+    return Boolean(definitionId && this.canPlaceDefinition(definitionId, x, z));
   }
 
   /** @param {string} archetype @param {number} x @param {number} z */
   placeRock(archetype, x, z) {
-    if (!this.canPlaceRock(archetype, x, z)) return 0;
-    const spawnId = this.nextSpawnId;
-    this.nextSpawnId += 1;
-    this.entities.push({ kind: "rock", archetype, x, z, spawnId });
-    return spawnId;
+    const definitionId = rockDefinitionId(archetype);
+    if (!definitionId) return 0;
+    const authoringId = this.placeInstance(definitionId, x, z);
+    if (!authoringId) return 0;
+    return this.spawnIdForAuthoringId(authoringId) ?? 0;
   }
 
   /** @param {number} spawnId */
   removeRock(spawnId) {
-    const index = this.entities.findIndex(
-      (entity) => entity.kind === "rock" && entity.spawnId === spawnId,
+    const entity = this.entities.find(
+      (candidate) => candidate.kind === "rock" && candidate.spawnId === spawnId,
     );
-    if (index < 0) return false;
-    this.entities.splice(index, 1);
-    return true;
+    return Boolean(entity?.authoringId && this.removeInstance(entity.authoringId));
   }
 
-  #placementsAreValid() {
-    if (this.#circleTouchesSolid(this.map.playerSpawn.x, this.map.playerSpawn.z, PLAYER.radius)) {
-      return false;
-    }
-    for (const entity of this.entities) {
-      if (entity.kind !== "rock") continue;
-      const definition = getRockArchetype(entity.archetype);
-      if (!definition || this.#circleTouchesSolid(entity.x, entity.z, definition.radius)) return false;
-    }
-    return true;
+  /** @param {string} authoringId */
+  spawnIdForAuthoringId(authoringId) {
+    return this.entities.find((entity) => entity.authoringId === authoringId)?.spawnId ?? null;
   }
 
-  /** @param {number} x @param {number} z @param {number} radius */
-  #circleTouchesSolid(x, z, radius) {
-    const contact = { nx: 0, nz: 0, penetration: 0, px: 0, pz: 0, cx: 0, cz: 0 };
-    return firstSolidContact(this.map, x, z, radius, contact);
+  /** @param {number} spawnId */
+  authoringIdForSpawnId(spawnId) {
+    return this.entities.find((entity) => entity.spawnId === spawnId)?.authoringId ?? null;
   }
 
-  #validateAll() {
-    for (const entity of this.entities) {
-      if (entity.kind !== "rock" && entity.kind !== "obelisk") {
-        throw new RangeError(`Unknown scenario entity kind: ${entity.kind}`);
-      }
-    }
-    if (!this.#placementsAreValid()) throw new RangeError("Scenario contains a body inside solid geometry");
-    const obelisks = this.entities.filter((entity) => entity.kind === "obelisk");
-    if (obelisks.length > 1) throw new RangeError("Scenario may contain at most one obelisk");
-    if (obelisks.length === 1) {
-      const obelisk = obelisks[0];
-      const cx = Math.floor(obelisk.x);
-      const cz = Math.floor(obelisk.z);
-      if (!isCellCenter(obelisk.x) || !isCellCenter(obelisk.z)) {
-        throw new RangeError("Obelisk position must be cell-centered");
-      }
-      if (!this.map.inBounds(cx, cz) || this.map.get(cx, cz) !== 1) {
-        throw new RangeError("Obelisk must occupy a solid in-bounds cell");
-      }
-    }
-    for (let left = 0; left < this.entities.length; left += 1) {
-      const a = this.entities[left];
-      if (a.kind !== "rock") continue;
-      const aDefinition = getRockArchetype(a.archetype);
-      if (!aDefinition) throw new RangeError(`Unknown rock archetype: ${a.archetype}`);
-      for (let right = left + 1; right < this.entities.length; right += 1) {
-        const b = this.entities[right];
-        if (b.kind !== "rock") continue;
-        const bDefinition = getRockArchetype(b.archetype);
-        if (
-          bDefinition &&
-          Math.hypot(a.x - b.x, a.z - b.z) < aDefinition.radius + bDefinition.radius
-        ) {
-          throw new RangeError("Scenario contains overlapping rocks");
+  /** @param {number} x @param {number} z */
+  instanceAt(x, z) {
+    for (let index = this.instances.length - 1; index >= 0; index -= 1) {
+      const instance = this.instances[index];
+      const definition = getPlaceableDefinition(instance.definitionId);
+      if (!definition) continue;
+      if (definition.traits.runtimeKind === "rock") {
+        if (Math.hypot(x - instance.x, z - instance.z) <= Number(definition.traits.radius)) {
+          return { ...instance };
         }
+        continue;
       }
-      if (
-        Math.hypot(a.x - this.map.playerSpawn.x, a.z - this.map.playerSpawn.z) <
-        aDefinition.radius + PLAYER.radius
-      ) {
-        throw new RangeError("Scenario contains a rock overlapping the player spawn");
+      if (Math.floor(x) === Math.floor(instance.x) && Math.floor(z) === Math.floor(instance.z)) {
+        return { ...instance };
       }
     }
+    return null;
   }
 
   /** @param {number} cx @param {number} cz */
@@ -212,47 +283,7 @@ export class ArenaScenario {
 
   /** @param {string | Record<string, unknown>} input */
   static fromJSON(input) {
-    const data = typeof input === "string" ? JSON.parse(input) : input;
-    if (!data || typeof data !== "object") throw new TypeError("Scenario JSON must be an object");
-    const version = Number(data.version);
-    if (version === MAP_VERSION) {
-      return new ArenaScenario(GridMap.fromJSON(data));
-    }
-    if (version !== 2 && version !== SCENARIO_VERSION) {
-      throw new RangeError(`Unsupported scenario version: ${version}`);
-    }
-
-    const map = GridMap.fromJSON({
-      version: MAP_VERSION,
-      width: data.width,
-      height: data.height,
-      cells: data.cells,
-      playerSpawn: data.playerSpawn,
-    });
-    if (!Array.isArray(data.entities)) throw new RangeError("Scenario JSON has an invalid entity array");
-    const entities = data.entities.map((value, index) => {
-      if (!value || typeof value !== "object") {
-        throw new RangeError(`Invalid scenario entity at index ${index}`);
-      }
-      const entity = /** @type {Record<string, unknown>} */ (value);
-      const x = finite(entity.x);
-      const z = finite(entity.z);
-      if (x === null || z === null) {
-        throw new RangeError(`Invalid scenario entity at index ${index}`);
-      }
-      if (entity.kind === "rock") {
-        const archetype = String(entity.archetype);
-        if (!getRockArchetype(archetype)) {
-          throw new RangeError(`Invalid scenario entity at index ${index}`);
-        }
-        return { kind: /** @type {const} */ ("rock"), archetype, x, z };
-      }
-      if (version === SCENARIO_VERSION && entity.kind === "obelisk") {
-        return { kind: /** @type {const} */ ("obelisk"), x, z };
-      }
-      throw new RangeError(`Invalid scenario entity at index ${index}`);
-    });
-    return new ArenaScenario(map, entities);
+    return new ArenaScenario(loadAuthoringMap(input));
   }
 }
 

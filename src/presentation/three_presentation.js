@@ -5,6 +5,7 @@ import { attribute, instancedDynamicBufferAttribute, pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ENEMY_WIZARD, ROCK_ARCHETYPES } from "../config.js";
+import { getPlaceableDefinition } from "../authoring/definition_catalog.js";
 import {
   FIREBALL_PRESENTATION_HEIGHT_METERS,
   HEALTH_BAR,
@@ -77,9 +78,34 @@ function hashMap(map, obelisks = []) {
   hash = Math.imul(hash ^ map.width, 16_777_619);
   hash = Math.imul(hash ^ map.height, 16_777_619);
   for (const cell of map.cells) hash = Math.imul(hash ^ cell, 16_777_619);
+  for (const cell of map.surface?.cells ?? []) hash = Math.imul(hash ^ cell, 16_777_619);
+  for (const definitionId of map.surface?.legend ?? []) {
+    for (let index = 0; index < definitionId.length; index += 1) {
+      hash = Math.imul(hash ^ definitionId.charCodeAt(index), 16_777_619);
+    }
+  }
+  for (const cell of map.structure?.cells ?? []) hash = Math.imul(hash ^ cell, 16_777_619);
+  for (const definitionId of map.structure?.legend ?? []) {
+    if (!definitionId) continue;
+    for (let index = 0; index < definitionId.length; index += 1) {
+      hash = Math.imul(hash ^ definitionId.charCodeAt(index), 16_777_619);
+    }
+  }
   for (const obelisk of obelisks) {
     hash = Math.imul(hash ^ obelisk.cell.cx, 16_777_619);
     hash = Math.imul(hash ^ obelisk.cell.cz, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+/** @param {Array<Record<string, any>>} instances */
+function hashAuthoringInstances(instances) {
+  let hash = 2_166_136_261;
+  for (const instance of instances) {
+    const text = `${instance.id}|${instance.definitionId}|${instance.x}|${instance.z}|${instance.rotation}`;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = Math.imul(hash ^ text.charCodeAt(index), 16_777_619);
+    }
   }
   return hash >>> 0;
 }
@@ -147,6 +173,7 @@ export class ThreePresentation {
     this.mapWidth = 0;
     this.mapHeight = 0;
     this.gridLines = null;
+    this.surfaceMesh = null;
     this.wallMesh = null;
     this.wallCells = [];
     this.wallOpacityAttribute = null;
@@ -156,6 +183,9 @@ export class ThreePresentation {
     this.wallOcclusionForwardX = Number.NaN;
     this.wallOcclusionForwardZ = Number.NaN;
     this.fadedWallCount = 0;
+    this.authoringInstanceHash = -1;
+    this.pillarMesh = null;
+    this.torchMesh = null;
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
@@ -243,6 +273,14 @@ export class ThreePresentation {
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.receiveShadow = true;
     this.scene.add(this.floor);
+    this.surfaceGeometry = new THREE.PlaneGeometry(1, 1);
+    this.surfaceGeometry.rotateX(-Math.PI / 2);
+    this.surfaceMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0xffffff,
+      roughness: 0.96,
+      metalness: 0,
+      vertexColors: true,
+    }));
 
     const scorchCore = createScorchGeometry(
       SCORCH_MARK_CAPACITY * SCORCH_CORE_TRIANGLE_COUNT,
@@ -319,6 +357,20 @@ export class ThreePresentation {
     this.wallMaterial.opacityNode = this.wallCompositeOpacityNode;
     this.wallMaterial.alphaHash = false;
     this.wallMaterial.alphaToCoverage = false;
+    this.pillarGeometry = new THREE.CylinderGeometry(0.31, 0.36, 1.9, 12);
+    this.pillarMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x777d74,
+      roughness: 0.86,
+      metalness: 0.01,
+    }));
+    this.torchGeometry = new THREE.ConeGeometry(0.17, 1.35, 8);
+    this.torchMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0xe19b45,
+      emissive: 0x9a3f12,
+      emissiveIntensity: 0.45,
+      roughness: 0.7,
+      metalness: 0,
+    }));
     this.rockGeometry = new THREE.IcosahedronGeometry(1, 1);
     this.rockMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffffff,
@@ -672,6 +724,7 @@ export class ThreePresentation {
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? []);
     this.#updateWallOcclusion(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
     this.#updateKineticFragments(snapshot, alpha);
@@ -847,11 +900,12 @@ export class ThreePresentation {
       hover: null,
       selected: null,
       mode: "play",
-      editorTool: "wall",
+      editorTool: "structure.wall",
       placementValid: true,
     };
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? []);
     this.#updateWallOcclusion(snapshot.player, 0);
     this.#updateKineticFragments(snapshot, 0);
     this.#updateObelisk(snapshot.obelisks ?? []);
@@ -1221,8 +1275,33 @@ export class ThreePresentation {
       );
       this.gridLines.name = "metric-grid";
       this.scene.add(this.gridLines);
+      this.#replaceSurfaceMesh(map.width * map.height);
+      this.#replaceAuthoringMeshes(map.width * map.height);
       this.#replaceWallMesh(map.width * map.height);
     }
+
+    if (!this.surfaceMesh) this.#replaceSurfaceMesh(map.width * map.height);
+    let surfaceCount = 0;
+    for (let cz = 0; cz < map.height; cz += 1) {
+      for (let cx = 0; cx < map.width; cx += 1) {
+        const index = cz * map.width + cx;
+        const definitionId = map.surface
+          ? map.surface.legend[map.surface.cells[index]]
+          : "surface.stone";
+        const definition = getPlaceableDefinition(definitionId);
+        const color = (cx + cz) % 2 === 0
+          ? definition?.debug.fill ?? "#586358"
+          : definition?.debug.alternateFill ?? "#5b665b";
+        this._position.set(cx + 0.5, 0.004, cz + 0.5);
+        this._scale.set(0.995, 0.995, 0.995);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.surfaceMesh.setMatrixAt(surfaceCount, this._matrix);
+        this._color.set(color);
+        this.surfaceMesh.setColorAt(surfaceCount, this._color);
+        surfaceCount += 1;
+      }
+    }
+    publishInstancedPool(this.surfaceMesh, surfaceCount, { instanceColors: true });
 
     if (!this.wallMesh) this.#replaceWallMesh(map.width * map.height);
     const obeliskCells = new Set(
@@ -1232,7 +1311,13 @@ export class ThreePresentation {
     let wallCount = 0;
     for (let cz = 0; cz < map.height; cz += 1) {
       for (let cx = 0; cx < map.width; cx += 1) {
-        if (map.cells[cz * map.width + cx] !== 1) continue;
+        const index = cz * map.width + cx;
+        const structureDefinitionId = map.structure
+          ? map.structure.legend[map.structure.cells[index]]
+          : map.cells[index] === 1
+            ? "structure.wall"
+            : null;
+        if (!structureDefinitionId) continue;
         if (obeliskCells.has(`${cx}:${cz}`)) continue;
         this._position.set(cx + 0.5, WALL_HEIGHT_METERS / 2, cz + 0.5);
         this._scale.set(1, 1, 1);
@@ -1244,6 +1329,74 @@ export class ThreePresentation {
     }
     publishInstancedPool(this.wallMesh, wallCount);
     this.wallOcclusionMapHash = -1;
+  }
+
+  /** @param {number} capacity */
+  #replaceSurfaceMesh(capacity) {
+    if (this.surfaceMesh) this.scene.remove(this.surfaceMesh);
+    this.surfaceMesh = createDynamicInstancedPool(
+      this.surfaceGeometry,
+      this.surfaceMaterial,
+      capacity,
+      "authored-surface-cells",
+      { instanceColors: true },
+    );
+    this.surfaceMesh.receiveShadow = true;
+    this.scene.add(this.surfaceMesh);
+  }
+
+  /** @param {number} capacity */
+  #replaceAuthoringMeshes(capacity) {
+    if (this.pillarMesh) this.scene.remove(this.pillarMesh);
+    if (this.torchMesh) this.scene.remove(this.torchMesh);
+    this.pillarMesh = createDynamicInstancedPool(
+      this.pillarGeometry,
+      this.pillarMaterial,
+      capacity,
+      "authored-pillars",
+    );
+    this.pillarMesh.castShadow = true;
+    this.pillarMesh.receiveShadow = true;
+    this.torchMesh = createDynamicInstancedPool(
+      this.torchGeometry,
+      this.torchMaterial,
+      capacity,
+      "authored-standing-torches",
+    );
+    this.torchMesh.castShadow = false;
+    this.torchMesh.receiveShadow = true;
+    this.scene.add(this.pillarMesh, this.torchMesh);
+    this.authoringInstanceHash = -1;
+  }
+
+  /** @param {Array<Record<string, any>>} instances */
+  #updateAuthoringInstances(instances) {
+    const nextHash = hashAuthoringInstances(instances);
+    if (nextHash === this.authoringInstanceHash) return;
+    this.authoringInstanceHash = nextHash;
+    if (!this.pillarMesh || !this.torchMesh) {
+      this.#replaceAuthoringMeshes(Math.max(1, this.mapWidth * this.mapHeight));
+    }
+    let pillarCount = 0;
+    let torchCount = 0;
+    for (const instance of instances) {
+      const definition = getPlaceableDefinition(instance.definitionId);
+      if (definition?.traits.shape === "pillar") {
+        this._position.set(instance.x, 0.95, instance.z);
+        this._scale.set(1, 1, 1);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.pillarMesh.setMatrixAt(pillarCount, this._matrix);
+        pillarCount += 1;
+      } else if (definition?.traits.shape === "standing-torch") {
+        this._position.set(instance.x, 0.675, instance.z);
+        this._scale.set(1, 1, 1);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.torchMesh.setMatrixAt(torchCount, this._matrix);
+        torchCount += 1;
+      }
+    }
+    publishInstancedPool(this.pillarMesh, pillarCount);
+    publishInstancedPool(this.torchMesh, torchCount);
   }
 
   /** @param {Record<string, any>} player @param {number} alpha */
@@ -1637,17 +1790,17 @@ export class ThreePresentation {
     this.#positionInspectionMarker(this.selectedMarker, view.selected);
 
     const editing = view.mouseInside && view.mode === "edit";
-    const definition = Object.hasOwn(ROCK_ARCHETYPES, view.editorTool)
-      ? ROCK_ARCHETYPES[view.editorTool]
-      : null;
-    this.editRockPreview.visible = Boolean(editing && definition);
-    this.editCellPreview.visible = Boolean(editing && !definition);
+    const definition = getPlaceableDefinition(view.editorTool);
+    const rockDefinition = definition?.traits.runtimeKind === "rock" ? definition : null;
+    this.editRockPreview.visible = Boolean(editing && rockDefinition);
+    this.editCellPreview.visible = Boolean(editing && !rockDefinition);
     const previewColor = view.placementValid ? 0x69d4b3 : 0xff5b63;
-    if (this.editRockPreview.visible && definition) {
+    if (this.editRockPreview.visible && rockDefinition) {
       const x = Math.round(view.mouseWorld.x * 10) / 10;
       const z = Math.round(view.mouseWorld.z * 10) / 10;
-      this.editRockPreview.position.set(x, definition.radius, z);
-      this.editRockPreview.scale.setScalar(definition.radius);
+      const radius = Number(rockDefinition.traits.radius);
+      this.editRockPreview.position.set(x, radius, z);
+      this.editRockPreview.scale.setScalar(radius);
       setMaterialColor(this.editRockPreview.material, previewColor);
     }
     if (this.editCellPreview.visible) {

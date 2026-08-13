@@ -1,6 +1,7 @@
 // @ts-check
 
-import { EXPLOSION, ROCK_ARCHETYPES, SIMULATION } from "../config.js";
+import { EXPLOSION, SIMULATION } from "../config.js";
+import { getPlaceableDefinition } from "../authoring/definition_catalog.js";
 import {
   colorHexCss,
   HEALTH_BAR,
@@ -171,6 +172,7 @@ export class DebugRenderer {
     context.lineJoin = "round";
 
     this.#drawMap(snapshot, view, developerToolsOpen);
+    this.#drawAuthoringInstances(snapshot);
     if (scorchMarks) this.#drawScorchMarks(scorchMarks);
     this.#drawObelisks(snapshot.obelisks ?? []);
     if (developerToolsOpen && snapshot.debugFlags.explosionForces) {
@@ -307,19 +309,30 @@ export class DebugRenderer {
 
     for (let cz = minZ; cz <= maxZ; cz += 1) {
       for (let cx = minX; cx <= maxX; cx += 1) {
-        const tile = map.cells[cz * map.width + cx];
+        const index = cz * map.width + cx;
+        const surfaceDefinitionId = map.surface
+          ? map.surface.legend[map.surface.cells[index]]
+          : "surface.stone";
+        const surfaceDefinition = getPlaceableDefinition(surfaceDefinitionId);
+        context.fillStyle = (cx + cz) % 2 === 0
+          ? surfaceDefinition?.debug.fill ?? COLORS.floorA
+          : surfaceDefinition?.debug.alternateFill ?? COLORS.floorB;
+        context.fillRect(cx, cz, 1, 1);
+        const structureDefinitionId = map.structure
+          ? map.structure.legend[map.structure.cells[index]]
+          : map.cells[index] === 1
+            ? "structure.wall"
+            : null;
         const obeliskCell = snapshot.obelisks?.some(
           (obelisk) => obelisk.cell.cx === cx && obelisk.cell.cz === cz,
         );
-        if (tile === 0 || obeliskCell) {
-          context.fillStyle = (cx + cz) % 2 === 0 ? COLORS.floorA : COLORS.floorB;
-          context.fillRect(cx, cz, 1, 1);
-        } else {
-          context.fillStyle = COLORS.wall;
+        if (structureDefinitionId && !obeliskCell) {
+          const structureDefinition = getPlaceableDefinition(structureDefinitionId);
+          context.fillStyle = structureDefinition?.debug.fill ?? COLORS.wall;
           context.fillRect(cx + line, cz + line, 1 - line * 2, 1 - line * 2);
           context.fillStyle = COLORS.wallTop;
           context.fillRect(cx + line * 3, cz + line * 3, 1 - line * 6, 0.12);
-          context.strokeStyle = COLORS.wallEdge;
+          context.strokeStyle = structureDefinition?.debug.stroke ?? COLORS.wallEdge;
           context.lineWidth = line * 1.2;
           context.strokeRect(cx + line, cz + line, 1 - line * 2, 1 - line * 2);
         }
@@ -364,6 +377,50 @@ export class DebugRenderer {
         context.lineWidth = (entity === view.selected ? 3 : 2) * line;
         context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
       }
+    }
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
+  #drawAuthoringInstances(snapshot) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1.5);
+    for (const instance of snapshot.authoring?.instances ?? []) {
+      const definition = getPlaceableDefinition(instance.definitionId);
+      if (!definition || definition.traits.runtimeKind === "rock") continue;
+      context.save();
+      context.translate(instance.x, instance.z);
+      if (definition.traits.shape === "pillar") {
+        context.beginPath();
+        context.ellipse(0.08, 0.12, 0.34, 0.22, 0, 0, Math.PI * 2);
+        context.fillStyle = "rgba(0, 0, 0, 0.34)";
+        context.fill();
+        context.beginPath();
+        context.arc(0, 0, 0.31, 0, Math.PI * 2);
+        context.fillStyle = definition.debug.fill;
+        context.fill();
+        context.strokeStyle = definition.debug.stroke;
+        context.lineWidth = line;
+        context.stroke();
+      } else if (definition.traits.shape === "standing-torch") {
+        context.fillStyle = "#554735";
+        context.fillRect(-0.045, -0.02, 0.09, 0.34);
+        context.beginPath();
+        context.arc(0, -0.09, 0.14, 0, Math.PI * 2);
+        context.fillStyle = definition.debug.fill;
+        context.fill();
+        context.strokeStyle = definition.debug.stroke;
+        context.lineWidth = line;
+        context.stroke();
+      }
+      if (definition.debug.glyph) {
+        const size = this.camera.viewportLengthToWorld(9);
+        context.fillStyle = "rgba(15, 19, 16, 0.82)";
+        context.font = `600 ${size}px monospace`;
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(definition.debug.glyph, 0, 0);
+      }
+      context.restore();
     }
   }
 
@@ -945,24 +1002,37 @@ export class DebugRenderer {
     const context = this.context;
     const size = this.camera.viewportLengthToWorld(7);
     if (mode === "edit") {
-      const definition = Object.hasOwn(ROCK_ARCHETYPES, editorTool)
-        ? ROCK_ARCHETYPES[editorTool]
-        : null;
-      if (definition) {
-        const x = Math.round(mouse.x * 10) / 10;
-        const z = Math.round(mouse.z * 10) / 10;
+      const definition = getPlaceableDefinition(editorTool);
+      if (definition?.placementTarget === "instance") {
+        const cellCentered = definition.traits.snap === "cell-center";
+        const x = cellCentered
+          ? Math.floor(mouse.x) + 0.5
+          : Math.round(mouse.x * 10) / 10;
+        const z = cellCentered
+          ? Math.floor(mouse.z) + 0.5
+          : Math.round(mouse.z * 10) / 10;
+        const radius = Number(definition.traits.radius ?? 0.34);
         context.beginPath();
-        context.arc(x, z, definition.radius, 0, Math.PI * 2);
+        context.arc(x, z, radius, 0, Math.PI * 2);
         context.fillStyle = placementValid ? "rgba(107, 200, 168, 0.2)" : "rgba(255, 111, 103, 0.2)";
         context.fill();
         context.strokeStyle = placementValid ? COLORS.hover : COLORS.blocked;
         context.lineWidth = this.camera.viewportLengthToWorld(1.5);
         context.stroke();
+        if (definition.debug.glyph) {
+          context.fillStyle = placementValid ? COLORS.hover : COLORS.blocked;
+          context.font = `600 ${this.camera.viewportLengthToWorld(9)}px monospace`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillText(definition.debug.glyph, x, z);
+        }
         return;
       }
       const cx = Math.floor(mouse.x);
       const cz = Math.floor(mouse.z);
-      context.strokeStyle = editorTool === "erase" ? COLORS.blocked : COLORS.projectile;
+      context.strokeStyle = editorTool === "erase"
+        ? COLORS.blocked
+        : definition?.debug.stroke ?? COLORS.projectile;
       context.lineWidth = this.camera.viewportLengthToWorld(1.5);
       context.strokeRect(cx + size * 0.2, cz + size * 0.2, 1 - size * 0.4, 1 - size * 0.4);
       return;

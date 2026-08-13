@@ -291,10 +291,9 @@ body[data-mode="edit"] #arena {
   top: 14px;
   right: 14px;
   display: none;
-  align-items: center;
-  gap: 5px;
-  max-width: calc(100% - 100px);
-  padding: 6px;
+  width: min(310px, calc(100% - 28px));
+  max-height: calc(100% - 72px);
+  overflow: hidden;
   border: 1px solid rgba(141, 111, 54, 0.82);
   border-radius: 3px;
   background: rgba(12, 16, 13, 0.92);
@@ -303,21 +302,90 @@ body[data-mode="edit"] #arena {
 }
 
 body[data-mode="edit"] .editor-palette {
+  display: block;
+}
+
+.map-palette-heading {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--rule);
 }
 
-.editor-palette > span {
-  padding: 0 6px;
+.map-palette-heading h2 {
+  margin: 1px 0 0;
+  color: var(--ink);
+  font: 600 14px var(--display);
+}
+
+.map-palette-heading .eyebrow {
+  margin: 0;
   color: var(--amber);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: 8px;
 }
 
-.editor-palette button {
+.map-palette-heading button,
+.map-palette-body button {
   min-height: 28px;
   padding: 0 8px;
   font-size: 9px;
   white-space: nowrap;
+}
+
+.map-palette-body {
+  max-height: calc(100% - 50px);
+  padding: 8px;
+  overflow: auto;
+}
+
+.map-palette-selection {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 7px;
+  padding: 6px 7px;
+  border: 1px solid rgba(67, 88, 71, 0.72);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.map-palette-selection output {
+  color: var(--mint);
+  text-align: right;
+}
+
+.map-palette-group + .map-palette-group {
+  margin-top: 8px;
+}
+
+.map-palette-group h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.map-palette-controls,
+.map-palette-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.map-palette-controls button,
+.map-palette-actions button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-palette-actions {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
 }
 
 .editor-palette button.is-active {
@@ -325,6 +393,10 @@ body[data-mode="edit"] .editor-palette {
   background: linear-gradient(#24382e, #17251e);
   color: #b7f0dc;
   box-shadow: inset 0 -2px 0 rgba(107, 200, 168, 0.45);
+}
+
+.editor-palette[data-collapsed="true"] {
+  width: auto;
 }
 
 .viewport-rail {

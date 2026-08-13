@@ -58,7 +58,9 @@ test("authored edits reject overlap and restore reconstructs original body state
   assert.equal(simulation.rocks.x[0], 4);
   assert.equal(simulation.rocks.vx[0], 0);
   assert.equal(simulation.projectiles.activeCount, 0);
-  assert.equal(JSON.parse(simulation.saveScenario()).entities.length, 2);
+  const saved = JSON.parse(simulation.saveScenario());
+  assert.equal(saved.format, "lantern-authoring-map");
+  assert.equal(saved.layers[0].instances.length, 2);
 });
 
 test("wall authoring cannot place solids over active or authored bodies", () => {

@@ -24,7 +24,8 @@ export class InputController {
     this.camera = camera;
     this.actions = actions;
     this.mode = "play";
-    this.editorTool = "wall";
+    this.editorTool = "structure.wall";
+    this.editorPlacementMode = "paint";
     this.mouseWorld = { x: 0, z: 0 };
     this.mouseInside = false;
     this.rightHeld = false;
@@ -67,9 +68,10 @@ export class InputController {
     return this.mouseWorld;
   }
 
-  /** @param {string} tool */
-  setEditorTool(tool) {
+  /** @param {string} tool @param {"paint"|"stamp"} [placementMode] */
+  setEditorTool(tool, placementMode = "stamp") {
     this.editorTool = tool;
+    this.editorPlacementMode = placementMode;
     this.paintButton = -1;
     this.lastPaintedCell = "";
   }
@@ -131,7 +133,11 @@ export class InputController {
     if (
       this.mode === "edit" &&
       this.paintButton >= 0 &&
-      (this.editorTool === "wall" || this.editorTool === "erase")
+      (
+        this.editorPlacementMode === "paint"
+        || this.editorTool === "erase"
+        || this.paintButton === 2
+      )
     ) {
       this.#editCurrentPoint();
     }
