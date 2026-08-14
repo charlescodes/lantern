@@ -1,7 +1,13 @@
 // @ts-check
 
 import { EXPLOSION, SIMULATION } from "../config.js";
-import { getPlaceableDefinition } from "../authoring/definition_catalog.js";
+import {
+  getPlaceableDefinition,
+  isDynamicBodyDefinition,
+  isDynamicCircleDefinition,
+} from "../authoring/definition_catalog.js";
+import { occupiedCellsForTarget } from "../authoring/editor_interaction.js";
+import { getOccupiedCells } from "../authoring/footprint.js";
 import {
   colorHexCss,
   HEALTH_BAR,
@@ -140,7 +146,7 @@ export class DebugRenderer {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,authoringEditor?:Record<string,any>|null,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
    * @param {boolean} [colorVariation]
    * @param {import('../presentation/scorch_marks.js').ScorchMarkPool|null} [scorchMarks]
    * @param {import('../presentation/kinetic_fragments.js').KineticFragmentPool|null} [kineticFragments]
@@ -173,6 +179,9 @@ export class DebugRenderer {
 
     this.#drawMap(snapshot, view, developerToolsOpen);
     this.#drawAuthoringInstances(snapshot);
+    if (developerToolsOpen && view.mode === "edit" && view.authoringEditor) {
+      this.#drawAuthoringOverlays(snapshot, view.authoringEditor);
+    }
     if (scorchMarks) this.#drawScorchMarks(scorchMarks);
     this.#drawObelisks(snapshot.obelisks ?? []);
     if (developerToolsOpen && snapshot.debugFlags.explosionForces) {
@@ -190,7 +199,7 @@ export class DebugRenderer {
       this.#drawContacts(snapshot.contacts);
     }
     if (developerToolsOpen) this.#drawInspection(view.hover, view.selected);
-    if (view.mouseInside) {
+    if (view.mouseInside && view.mode !== "edit") {
       this.#drawMouse(view.mouseWorld, view.mode, view.editorTool, view.placementValid);
     }
     if (view.sightFrame) {
@@ -386,7 +395,7 @@ export class DebugRenderer {
     const line = this.camera.viewportLengthToWorld(1.5);
     for (const instance of snapshot.authoring?.instances ?? []) {
       const definition = getPlaceableDefinition(instance.definitionId);
-      if (!definition || definition.traits.runtimeKind === "rock") continue;
+      if (!definition || isDynamicBodyDefinition(definition)) continue;
       context.save();
       context.translate(instance.x, instance.z);
       if (definition.traits.shape === "pillar") {
@@ -421,6 +430,90 @@ export class DebugRenderer {
         context.fillText(definition.debug.glyph, 0, 0);
       }
       context.restore();
+    }
+  }
+
+  /**
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
+   * @param {Record<string,any>} editor
+   */
+  #drawAuthoringOverlays(snapshot, editor) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1.5);
+    const drawCells = (cells, fill, stroke, width = line) => {
+      context.fillStyle = fill;
+      context.strokeStyle = stroke;
+      context.lineWidth = width;
+      for (const cell of cells) {
+        context.fillRect(cell.cx + line * 1.5, cell.cz + line * 1.5, 1 - line * 3, 1 - line * 3);
+        context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
+      }
+    };
+
+    if (editor.showAuthoringExtents) {
+      context.save();
+      context.setLineDash([
+        this.camera.viewportLengthToWorld(4),
+        this.camera.viewportLengthToWorld(3),
+      ]);
+      for (const instance of snapshot.authoring.instances) {
+        const definition = getPlaceableDefinition(instance.definitionId);
+        if (!definition) continue;
+        const cells = getOccupiedCells(definition, instance);
+        drawCells(cells, "rgba(106, 125, 112, 0.08)", "rgba(191, 211, 196, 0.72)");
+        const bounds = getFootprintBounds(cells);
+        if (!bounds) continue;
+        const fontSize = this.camera.viewportLengthToWorld(9);
+        context.setLineDash([]);
+        context.font = `600 ${fontSize}px monospace`;
+        context.textAlign = "center";
+        context.textBaseline = "bottom";
+        context.fillStyle = "rgba(239, 245, 238, 0.94)";
+        context.strokeStyle = "rgba(8, 11, 9, 0.9)";
+        context.lineWidth = this.camera.viewportLengthToWorld(3);
+        const label = `${definition.label} · ${instance.id}`;
+        context.strokeText(label, bounds.centerX, bounds.minimumZ - 0.06);
+        context.fillText(label, bounds.centerX, bounds.minimumZ - 0.06);
+        context.setLineDash([
+          this.camera.viewportLengthToWorld(4),
+          this.camera.viewportLengthToWorld(3),
+        ]);
+      }
+      context.restore();
+    }
+
+    const hoveredCells = occupiedCellsForTarget(snapshot.authoring, editor.hoveredTarget);
+    drawCells(hoveredCells, "rgba(105, 212, 179, 0.09)", COLORS.hover, line);
+    const selectedCells = occupiedCellsForTarget(snapshot.authoring, editor.selectedTarget);
+    drawCells(selectedCells, "rgba(255, 247, 214, 0.11)", COLORS.selected, line * 1.8);
+
+    const preview = editor.placementPreview;
+    if (preview?.occupiedCells) {
+      const valid = Boolean(preview.valid);
+      drawCells(
+        preview.occupiedCells,
+        valid ? "rgba(105, 212, 179, 0.2)" : "rgba(255, 111, 103, 0.2)",
+        valid ? COLORS.hover : COLORS.blocked,
+        line * 1.5,
+      );
+      const definition = getPlaceableDefinition(preview.definitionId);
+      if (isDynamicCircleDefinition(definition) && preview.transform) {
+        context.beginPath();
+        context.arc(
+          preview.transform.x,
+          preview.transform.z,
+          Number(definition.traits.radius),
+          0,
+          Math.PI * 2,
+        );
+        context.fillStyle = valid
+          ? "rgba(105, 212, 179, 0.22)"
+          : "rgba(255, 111, 103, 0.22)";
+        context.fill();
+        context.strokeStyle = valid ? COLORS.hover : COLORS.blocked;
+        context.lineWidth = line * 1.5;
+        context.stroke();
+      }
     }
   }
 
@@ -613,6 +706,50 @@ export class DebugRenderer {
     for (const rock of snapshot.rocks) {
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
+      if (rock.kind === "table") {
+        context.save();
+        context.translate(x, z);
+        context.rotate(rock.rotation * Math.PI / 2);
+        context.fillStyle = "rgba(0, 0, 0, 0.34)";
+        context.fillRect(-0.82, -0.28, 1.8, 0.72);
+        context.fillStyle = "#7b5b3f";
+        context.fillRect(-0.9, -0.36, 1.8, 0.72);
+        context.strokeStyle = "#e0b47d";
+        context.lineWidth = line * 1.5;
+        context.strokeRect(-0.9, -0.36, 1.8, 0.72);
+        context.fillStyle = "rgba(31, 22, 15, 0.7)";
+        for (const dx of [-0.72, 0.72]) {
+          for (const dz of [-0.22, 0.22]) {
+            context.beginPath();
+            context.arc(dx, dz, 0.045, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+        this.#drawArrow(0, 0, 0.46, 0, "#e0b47d");
+        context.restore();
+        if (developerToolsOpen && snapshot.debugFlags.velocityVectors) {
+          this.#drawArrow(x, z, rock.vx * 0.3, rock.vz * 0.3, COLORS.velocity);
+        }
+        continue;
+      }
+      if (rock.kind === "torch") {
+        context.save();
+        context.translate(x, z);
+        context.fillStyle = "#554735";
+        context.fillRect(-0.045, -0.02, 0.09, 0.34);
+        context.beginPath();
+        context.arc(0, -0.09, 0.14, 0, Math.PI * 2);
+        context.fillStyle = "#ef4e1f";
+        context.fill();
+        context.strokeStyle = "#ffd08a";
+        context.lineWidth = line * 1.5;
+        context.stroke();
+        context.restore();
+        if (developerToolsOpen && snapshot.debugFlags.velocityVectors) {
+          this.#drawArrow(x, z, rock.vx * 0.3, rock.vz * 0.3, COLORS.velocity);
+        }
+        continue;
+      }
       context.save();
       context.translate(x + rock.radius * 0.1, z + rock.radius * 0.16);
       context.scale(1, 0.52);

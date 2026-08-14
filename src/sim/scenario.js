@@ -5,11 +5,17 @@ import {
   SCENARIO_VERSION,
 } from "../config.js";
 import {
+  eraseSurface as eraseAuthoringSurface,
+  eraseSurfaceCells as eraseAuthoringSurfaceCells,
   eraseStructure as eraseAuthoringStructure,
+  eraseStructureCells as eraseAuthoringStructureCells,
+  paintStructureCells as paintAuthoringStructureCells,
   paintStructure as paintAuthoringStructure,
+  paintSurfaceCells as paintAuthoringSurfaceCells,
   paintSurface as paintAuthoringSurface,
   placeInstance as placeAuthoringInstance,
   removeInstance as removeAuthoringInstance,
+  updateInstanceTransform as updateAuthoringInstanceTransform,
 } from "../authoring/authoring_commands.js";
 import {
   authoringMapFromRuntime,
@@ -22,6 +28,8 @@ import {
   rockDefinitionId,
 } from "../authoring/definition_catalog.js";
 import { compileAuthoringMap } from "../authoring/map_compiler.js";
+import { pointHitsInstanceExtent } from "../authoring/footprint.js";
+import { validateInstancePlacement } from "../authoring/placement_validation.js";
 import { createDebugArenaMap, GridMap } from "./grid_map.js";
 
 /** @param {string} archetype */
@@ -32,7 +40,7 @@ export function getRockArchetype(archetype) {
 export class ArenaScenario {
   /**
    * @param {GridMap | Record<string, unknown>} map
-   * @param {Array<{kind:"rock"|"obelisk",archetype?:string,x:number,z:number,spawnId?:number,authoringId?:string}>} [entities]
+   * @param {Array<{kind:"rock"|"dynamicInstance"|"obelisk",definitionId?:string,archetype?:string,x:number,z:number,spawnId?:number,authoringId?:string,radius?:number,massKg?:number}>} [entities]
    */
   constructor(map, entities = []) {
     const authoringMap = isAuthoringMapDocument(map)
@@ -113,12 +121,14 @@ export class ArenaScenario {
       height: this.map.height,
       cells: Array.from(this.map.cells),
       playerSpawn: { ...this.map.playerSpawn },
-      entities: this.entities.map((entity) => ({
-        kind: entity.kind,
-        ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
-        x: entity.x,
-        z: entity.z,
-      })),
+      entities: this.entities
+        .filter((entity) => entity.kind === "rock" || entity.kind === "obelisk")
+        .map((entity) => ({
+          kind: entity.kind,
+          ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
+          x: entity.x,
+          z: entity.z,
+        })),
     };
   }
 
@@ -145,11 +155,55 @@ export class ArenaScenario {
     }
   }
 
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId */
+  paintSurfaceCells(cells, definitionId) {
+    try {
+      return this.#commit(
+        paintAuthoringSurfaceCells(this.authoringMap, cells, definitionId),
+      );
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
+  /** @param {number} cx @param {number} cz */
+  eraseSurface(cx, cz) {
+    try {
+      return this.#commit(eraseAuthoringSurface(this.authoringMap, cx, cz));
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
+  /** @param {Array<{cx:number,cz:number}>} cells */
+  eraseSurfaceCells(cells) {
+    try {
+      return this.#commit(eraseAuthoringSurfaceCells(this.authoringMap, cells));
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
   /** @param {number} cx @param {number} cz @param {string} definitionId */
   paintStructure(cx, cz, definitionId) {
     try {
       return this.#commit(
         paintAuthoringStructure(this.authoringMap, cx, cz, definitionId),
+      );
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId */
+  paintStructureCells(cells, definitionId) {
+    try {
+      return this.#commit(
+        paintAuthoringStructureCells(this.authoringMap, cells, definitionId),
       );
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
@@ -167,21 +221,30 @@ export class ArenaScenario {
     }
   }
 
-  /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] */
-  canPlaceDefinition(definitionId, x, z, rotation = 0) {
+  /** @param {Array<{cx:number,cz:number}>} cells */
+  eraseStructureCells(cells) {
     try {
-      const result = placeAuthoringInstance(
-        this.authoringMap,
-        definitionId,
-        x,
-        z,
-        { rotation },
-      );
-      compileAuthoringMap(result.document);
-      return true;
-    } catch {
+      return this.#commit(eraseAuthoringStructureCells(this.authoringMap, cells));
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
+  }
+
+  /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] */
+  canPlaceDefinition(definitionId, x, z, rotation = 0) {
+    return this.validateInstanceTransform(definitionId, { x, z, rotation }).valid;
+  }
+
+  /**
+   * @param {string} definitionId
+   * @param {{x:number,z:number,rotation?:number}} transform
+   * @param {string} [ignoreInstanceId]
+   */
+  validateInstanceTransform(definitionId, transform, ignoreInstanceId) {
+    return validateInstancePlacement(this.authoringMap, definitionId, transform, {
+      ...(ignoreInstanceId ? { ignoreInstanceId } : {}),
+    });
   }
 
   /**
@@ -214,6 +277,34 @@ export class ArenaScenario {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
+  }
+
+  /**
+   * @param {string} authoringId
+   * @param {{x?:number,z?:number,rotation?:number}} transform
+   */
+  updateInstanceTransform(authoringId, transform) {
+    try {
+      return this.#commit(
+        updateAuthoringInstanceTransform(this.authoringMap, authoringId, transform),
+      );
+    } catch (error) {
+      this.lastMutationError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
+  /** @param {string} authoringId */
+  instanceById(authoringId) {
+    const instance = this.instances.find((candidate) => candidate.id === authoringId);
+    return instance
+      ? {
+        ...instance,
+        ...(instance.properties
+          ? { properties: JSON.parse(JSON.stringify(instance.properties)) }
+          : {}),
+      }
+      : null;
   }
 
   /** @param {string} archetype @param {number} x @param {number} z */
@@ -255,13 +346,7 @@ export class ArenaScenario {
       const instance = this.instances[index];
       const definition = getPlaceableDefinition(instance.definitionId);
       if (!definition) continue;
-      if (definition.traits.runtimeKind === "rock") {
-        if (Math.hypot(x - instance.x, z - instance.z) <= Number(definition.traits.radius)) {
-          return { ...instance };
-        }
-        continue;
-      }
-      if (Math.floor(x) === Math.floor(instance.x) && Math.floor(z) === Math.floor(instance.z)) {
+      if (pointHitsInstanceExtent(definition, instance, x, z)) {
         return { ...instance };
       }
     }

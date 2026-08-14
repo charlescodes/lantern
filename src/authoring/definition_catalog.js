@@ -15,6 +15,10 @@ function freezeDefinition(definition) {
     Object.freeze(definition.footprint.cells);
     Object.freeze(definition.footprint);
   }
+  if (definition.traits?.presentationLight) {
+    Object.freeze(definition.traits.presentationLight.color);
+    Object.freeze(definition.traits.presentationLight);
+  }
   Object.freeze(definition.debug);
   Object.freeze(definition.traits);
   return Object.freeze(definition);
@@ -81,6 +85,7 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       rockArchetype: archetype,
       radius: rock.radius,
       massKg: rock.massKg,
+      collider: "circle",
       dynamic: true,
       snap: "tenth",
       blocksMovement: true,
@@ -116,10 +121,50 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
     debug: { fill: "#e19b45", alternateFill: "#e19b45", stroke: "#ffe0a1", glyph: "T" },
     renderAsset: null,
     traits: {
-      runtimeKind: "debug-placeholder",
+      runtimeKind: "dynamic-upright",
       shape: "standing-torch",
+      snap: "tenth",
+      radius: 0.1,
+      height: 2,
+      massKg: 8,
+      collider: "circle",
+      dynamic: true,
+      upright: true,
+      blocksMovement: true,
+      blocksSight: false,
+      presentationLight: {
+        height: 1.82,
+        color: { r: 1, g: 0.22, b: 0.045 },
+        intensity: 18,
+        distance: 5,
+        decay: 2,
+      },
+    },
+  }),
+  freezeDefinition({
+    id: "object.table",
+    label: "Plain table",
+    category: "object",
+    categoryLabel: CATEGORY_LABELS.object,
+    placementMode: "stamp",
+    placementTarget: "instance",
+    footprint: { cells: [{ x: 0, z: 0 }, { x: 1, z: 0 }] },
+    debug: { fill: "#7b5b3f", alternateFill: "#8a6848", stroke: "#e0b47d", glyph: "→" },
+    renderAsset: null,
+    traits: {
+      runtimeKind: "dynamic-fixed-box",
+      shape: "table",
       snap: "cell-center",
-      blocksMovement: false,
+      rotatable: true,
+      dynamic: true,
+      collider: "box",
+      halfWidth: 0.9,
+      halfDepth: 0.36,
+      height: 0.52,
+      massKg: 320,
+      fixedRotation: true,
+      runtimeAnchor: "footprint-center",
+      blocksMovement: true,
       blocksSight: false,
     },
   }),
@@ -136,6 +181,45 @@ export function getPlaceableDefinition(id) {
 
 export function listPlaceableDefinitions() {
   return [...PLACEABLE_DEFINITIONS];
+}
+
+/**
+ * Dynamic circular props share the existing bounded X/Z rigid-body pool.
+ * Their stable authoring definition remains the semantic identity; the pool
+ * slot is only a runtime implementation detail.
+ * @param {Record<string, any>|null|undefined} definition
+ */
+export function isDynamicCircleDefinition(definition) {
+  return Boolean(
+    isDynamicBodyDefinition(definition)
+    && definition.traits.collider !== "box"
+    && Number.isFinite(Number(definition.traits.radius))
+    && Number(definition.traits.radius) > 0
+    && Number.isFinite(Number(definition.traits.massKg))
+    && Number(definition.traits.massKg) > 0,
+  );
+}
+
+/** @param {Record<string, any>|null|undefined} definition */
+export function isDynamicBoxDefinition(definition) {
+  return Boolean(
+    isDynamicBodyDefinition(definition)
+    && definition.traits.collider === "box"
+    && Number.isFinite(Number(definition.traits.halfWidth))
+    && Number(definition.traits.halfWidth) > 0
+    && Number.isFinite(Number(definition.traits.halfDepth))
+    && Number(definition.traits.halfDepth) > 0,
+  );
+}
+
+/** @param {Record<string, any>|null|undefined} definition */
+export function isDynamicBodyDefinition(definition) {
+  return Boolean(
+    definition?.placementTarget === "instance"
+    && definition.traits?.dynamic === true
+    && Number.isFinite(Number(definition.traits.massKg))
+    && Number(definition.traits.massKg) > 0,
+  );
 }
 
 /** @param {string} archetype */

@@ -26,7 +26,11 @@ export class MapPalette {
    * root?:HTMLElement|null,
    * definitions:Array<Record<string, any>>,
    * selectedId?:string,
-   * onSelect?:(id:string|null)=>void,
+   * onSelect?:(id:string)=>void,
+   * onTool?:(tool:string)=>void,
+   * onChannel?:(channel:string)=>void,
+   * onRotate?:()=>void,
+   * onExtents?:(value:boolean)=>void,
    * onRestore?:()=>void
    * }} options
    */
@@ -36,14 +40,24 @@ export class MapPalette {
     this.definitions = [...options.definitions];
     this.definitionIds = new Set(this.definitions.map((definition) => definition.id));
     this.onSelect = options.onSelect ?? (() => {});
+    this.onTool = options.onTool ?? (() => {});
+    this.onChannel = options.onChannel ?? (() => {});
+    this.onRotate = options.onRotate ?? (() => {});
+    this.onExtents = options.onExtents ?? (() => {});
     this.onRestore = options.onRestore ?? (() => {});
     this.selectedId = this.definitionIds.has(options.selectedId)
       ? String(options.selectedId)
       : this.definitions[0]?.id ?? null;
     this.collapsed = false;
-    this.buttons = new Map();
+    this.activeTool = "paint";
+    this.activeChannel = "structure";
+    this.previewRotation = 0;
+    this.showAuthoringExtents = false;
+    this.definitionButtons = new Map();
+    this.toolButtons = new Map();
+    this.channelButtons = new Map();
     this.#render();
-    this.setSelected(this.selectedId);
+    this.#applyVisualState();
   }
 
   #render() {
@@ -77,6 +91,56 @@ export class MapPalette {
     selection.append(this.selectionOutput);
     this.body.append(selection);
 
+    const stateLine = document.createElement("p");
+    stateLine.className = "map-palette-state";
+    stateLine.append("Tool ");
+    this.toolOutput = document.createElement("output");
+    stateLine.append(this.toolOutput, " · channel ");
+    this.channelOutput = document.createElement("output");
+    stateLine.append(this.channelOutput, " · rotation ");
+    this.rotationOutput = document.createElement("output");
+    stateLine.append(this.rotationOutput);
+    this.body.append(stateLine);
+
+    const tools = document.createElement("div");
+    tools.className = "map-palette-tools";
+    tools.setAttribute("role", "toolbar");
+    tools.setAttribute("aria-label", "Authoring tool");
+    for (const [tool, label] of [
+      ["select", "Select"],
+      ["paint", "Paint / stamp"],
+      ["erase", "Erase"],
+      ["eyedropper", "Eyedropper"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.editorTool = tool;
+      button.textContent = label;
+      button.addEventListener("click", () => this.setTool(tool));
+      this.toolButtons.set(tool, button);
+      tools.append(button);
+    }
+    this.body.append(tools);
+
+    const channels = document.createElement("div");
+    channels.className = "map-palette-channels";
+    channels.setAttribute("role", "toolbar");
+    channels.setAttribute("aria-label", "Authoring channel");
+    for (const [channel, label] of [
+      ["surface", "Surface"],
+      ["structure", "Structure"],
+      ["instance", "Instances"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.authoringChannel = channel;
+      button.textContent = label;
+      button.addEventListener("click", () => this.setChannel(channel));
+      this.channelButtons.set(channel, button);
+      channels.append(button);
+    }
+    this.body.append(channels);
+
     for (const group of groupPaletteDefinitions(this.definitions)) {
       const section = document.createElement("section");
       section.className = "map-palette-group";
@@ -93,7 +157,7 @@ export class MapPalette {
         button.textContent = definition.label;
         button.title = `${definition.placementMode} · ${definition.id}`;
         button.addEventListener("click", () => this.setSelected(definition.id));
-        this.buttons.set(definition.id, button);
+        this.definitionButtons.set(definition.id, button);
         controls.append(button);
       }
       section.append(label, controls);
@@ -102,40 +166,122 @@ export class MapPalette {
 
     const actions = document.createElement("div");
     actions.className = "map-palette-actions";
-    const eraseButton = document.createElement("button");
-    eraseButton.type = "button";
-    eraseButton.dataset.paletteAction = "erase";
-    eraseButton.textContent = "Erase";
-    eraseButton.title = "Remove an instance or erase a structure (RMB also erases)";
-    eraseButton.addEventListener("click", () => this.setSelected(null));
-    this.buttons.set("erase", eraseButton);
+    const rotateButton = document.createElement("button");
+    rotateButton.type = "button";
+    rotateButton.dataset.paletteAction = "rotate";
+    rotateButton.textContent = "Rotate 90°";
+    rotateButton.title = "Rotate the stamp preview or selected instance (R)";
+    rotateButton.addEventListener("click", () => this.onRotate());
     const restoreButton = document.createElement("button");
     restoreButton.type = "button";
     restoreButton.textContent = "Restore positions";
     restoreButton.addEventListener("click", () => this.onRestore());
-    actions.append(eraseButton, restoreButton);
+    actions.append(rotateButton, restoreButton);
     this.body.append(actions);
+
+    const extentsLabel = document.createElement("label");
+    extentsLabel.className = "map-palette-extents";
+    this.extentsCheckbox = document.createElement("input");
+    this.extentsCheckbox.type = "checkbox";
+    this.extentsCheckbox.addEventListener("change", () => {
+      this.setExtents(this.extentsCheckbox.checked);
+    });
+    extentsLabel.append(this.extentsCheckbox, " Show authoring extents");
+    this.body.append(extentsLabel);
+
+    this.hoverOutput = document.createElement("output");
+    this.hoverOutput.className = "map-palette-hover";
+    this.hoverOutput.textContent = "Hover: none";
+    this.body.append(this.hoverOutput);
 
     this.root.append(heading, this.body);
   }
 
   /** @param {string|null} definitionId */
   setSelected(definitionId) {
-    if (definitionId !== null && !this.definitionIds.has(definitionId)) return false;
+    if (definitionId === null) return this.setTool("erase");
+    if (!this.definitionIds.has(definitionId)) return false;
     this.selectedId = definitionId;
-    this.root.dataset.selectedDefinition = definitionId ?? "erase";
-    const selected = definitionId === null
-      ? null
-      : this.definitions.find((definition) => definition.id === definitionId);
-    this.selectionOutput.value = selected?.label ?? "Erase";
-    this.selectionOutput.textContent = selected?.label ?? "Erase";
-    for (const [id, button] of this.buttons) {
-      const active = id === (definitionId ?? "erase");
+    const definition = this.definitions.find((candidate) => candidate.id === definitionId);
+    this.activeChannel = definition?.placementTarget ?? this.activeChannel;
+    this.activeTool = "paint";
+    this.previewRotation = 0;
+    this.#applyVisualState();
+    this.onSelect(definitionId);
+    return true;
+  }
+
+  /** @param {string} tool */
+  setTool(tool) {
+    if (!this.toolButtons.has(tool)) return false;
+    this.activeTool = tool;
+    this.#applyVisualState();
+    this.onTool(tool);
+    return true;
+  }
+
+  /** @param {string} channel */
+  setChannel(channel) {
+    if (!this.channelButtons.has(channel)) return false;
+    this.activeChannel = channel;
+    this.#applyVisualState();
+    this.onChannel(channel);
+    return true;
+  }
+
+  /** @param {boolean} value */
+  setExtents(value) {
+    this.showAuthoringExtents = Boolean(value);
+    this.#applyVisualState();
+    this.onExtents(this.showAuthoringExtents);
+    return true;
+  }
+
+  /** @param {Record<string,any>} editor */
+  sync(editor) {
+    this.selectedId = editor.selectedDefinitionId;
+    this.activeTool = editor.activeTool;
+    this.activeChannel = editor.activeChannel;
+    this.previewRotation = editor.previewRotation;
+    this.showAuthoringExtents = Boolean(editor.showAuthoringExtents);
+    const hovered = editor.hoveredTarget;
+    this.hoverOutput.textContent = editor.hoveredIdentity
+      ? `Hover: ${editor.hoveredIdentity.label} · ${editor.hoveredIdentity.authoringId}`
+      : hovered?.kind === "cell"
+        ? `Hover: cell ${hovered.x}, ${hovered.z}`
+        : "Hover: none";
+    this.#applyVisualState();
+  }
+
+  #applyVisualState() {
+    this.root.dataset.selectedDefinition = this.selectedId ?? "";
+    this.root.dataset.activeTool = this.activeTool;
+    this.root.dataset.activeChannel = this.activeChannel;
+    const selected = this.definitions.find((definition) => definition.id === this.selectedId);
+    this.selectionOutput.value = selected?.label ?? "None";
+    this.selectionOutput.textContent = selected?.label ?? "None";
+    this.toolOutput.value = this.activeTool;
+    this.toolOutput.textContent = this.activeTool;
+    this.channelOutput.value = this.activeChannel;
+    this.channelOutput.textContent = this.activeChannel;
+    this.rotationOutput.value = `${this.previewRotation * 90}°`;
+    this.rotationOutput.textContent = `${this.previewRotation * 90}°`;
+    this.extentsCheckbox.checked = this.showAuthoringExtents;
+    for (const [id, button] of this.definitionButtons) {
+      const active = id === this.selectedId;
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-pressed", String(active));
     }
-    this.onSelect(definitionId);
-    return true;
+    for (const [id, button] of this.toolButtons) {
+      const active = id === this.activeTool;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+    for (const [id, button] of this.channelButtons) {
+      const active = id === this.activeChannel;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
   }
 
   /** @param {boolean} collapsed */
@@ -149,8 +295,15 @@ export class MapPalette {
 
   snapshot() {
     return {
-      selectedDefinitionId: this.selectedId,
-      selectedTool: this.selectedId ?? "erase",
+      // M1A.1 exposed null while its erase pseudo-tool was active. Keep that
+      // compatibility field while the richer editor snapshot retains the
+      // actual selected catalog definition independently.
+      selectedDefinitionId: this.activeTool === "erase" ? null : this.selectedId,
+      selectedTool: this.activeTool,
+      activeTool: this.activeTool,
+      activeChannel: this.activeChannel,
+      previewRotation: this.previewRotation,
+      showAuthoringExtents: this.showAuthoringExtents,
       collapsed: this.collapsed,
       availableDefinitionIds: [...this.definitionIds],
     };

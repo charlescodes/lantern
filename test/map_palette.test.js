@@ -15,6 +15,7 @@ test("the centralized catalog contains the representative M1A definitions", () =
     "object.rock.medium",
     "object.pillar",
     "object.torch",
+    "object.table",
   ]) {
     assert.equal(ids.has(id), true, `missing ${id}`);
   }
@@ -22,6 +23,14 @@ test("the centralized catalog contains the representative M1A definitions", () =
   assert.equal(definitions.find((value) => value.id === "structure.wall")?.traits.blocksMovement, true);
   assert.equal(definitions.find((value) => value.id === "object.pillar")?.traits.blocksSight, true);
   assert.equal(definitions.find((value) => value.id === "object.torch")?.renderAsset, null);
+  assert.equal(definitions.find((value) => value.id === "object.torch")?.traits.dynamic, true);
+  assert.equal(definitions.find((value) => value.id === "object.torch")?.traits.upright, true);
+  assert.equal(definitions.find((value) => value.id === "object.torch")?.traits.blocksSight, false);
+  assert.equal(definitions.find((value) => value.id === "object.table")?.footprint.cells.length, 2);
+  assert.equal(definitions.find((value) => value.id === "object.table")?.traits.blocksSight, false);
+  assert.equal(definitions.find((value) => value.id === "object.table")?.traits.dynamic, true);
+  assert.equal(definitions.find((value) => value.id === "object.table")?.traits.collider, "box");
+  assert.equal(definitions.find((value) => value.id === "object.table")?.traits.fixedRotation, true);
 });
 
 test("palette groups are derived from catalog categories in stable order", () => {

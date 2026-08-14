@@ -7,24 +7,17 @@ import {
   AuthoringMapValidationError,
   validateAuthoringMap,
 } from "./authoring_map.js";
-import { getPlaceableDefinition } from "./definition_catalog.js";
+import {
+  getPlaceableDefinition,
+  isDynamicBodyDefinition,
+  isDynamicBoxDefinition,
+} from "./definition_catalog.js";
+import { getOccupiedCells, getRuntimeBodyTransform } from "./footprint.js";
+import { validateInstancePlacement } from "./placement_validation.js";
 
 /** @param {string} path @param {string} code @param {string} message */
 function fail(path, code, message) {
   throw new AuthoringMapValidationError([{ path, code, message }]);
-}
-
-/** @param {number} value */
-function cellCentered(value) {
-  return Number.isFinite(value) && value === Math.floor(value) + 0.5;
-}
-
-/** @param {number} dx @param {number} dz @param {number} rotation */
-function rotateOffset(dx, dz, rotation) {
-  if (rotation === 1) return { x: -dz, z: dx };
-  if (rotation === 2) return { x: -dx, z: -dz };
-  if (rotation === 3) return { x: dz, z: -dx };
-  return { x: dx, z: dz };
 }
 
 /** @param {string} value */
@@ -73,12 +66,16 @@ export function compileAuthoringMap(input) {
   const structureSolidCells = new Uint8Array(cellCount);
   const surfaceCodes = Uint16Array.from(layer.surface.cells);
   const structureCodes = Uint16Array.from(layer.structure.cells);
-  const authoredRockCount = layer.instances.reduce((count, instance) => {
+  const authoredDynamicBodyCount = layer.instances.reduce((count, instance) => {
     const definition = getPlaceableDefinition(instance.definitionId);
-    return count + (definition?.traits.runtimeKind === "rock" ? 1 : 0);
+    return count + (isDynamicBodyDefinition(definition) ? 1 : 0);
   }, 0);
-  if (authoredRockCount > ROCK.capacity) {
-    fail(`${layerPath}.instances`, "rock_capacity", `contains more than the ${ROCK.capacity}-rock limit`);
+  if (authoredDynamicBodyCount > ROCK.capacity) {
+    fail(
+      `${layerPath}.instances`,
+      "rock_capacity",
+      `contains more than the ${ROCK.capacity}-rock limit shared with dynamic authored props`,
+    );
   }
 
   for (let index = 0; index < cellCount; index += 1) {
@@ -95,9 +92,7 @@ export function compileAuthoringMap(input) {
     if (definition.traits.blocksSight) occluderCells[index] = 1;
   }
 
-  const occupiedInstanceCells = new Map();
   const collisionCellsByInstance = new Map();
-  const anchors = [];
   for (let index = 0; index < layer.instances.length; index += 1) {
     const instance = layer.instances[index];
     const instancePath = `${layerPath}.instances[${index}]`;
@@ -105,32 +100,15 @@ export function compileAuthoringMap(input) {
     if (!definition) {
       fail(`${instancePath}.definitionId`, "unknown_definition", `Unknown definition "${instance.definitionId}"`);
     }
-    if (definition.traits.runtimeKind === "rock") continue;
-    if (definition.traits.snap === "cell-center" && (!cellCentered(instance.x) || !cellCentered(instance.z))) {
-      fail(instancePath, "cell_center", `definition "${instance.definitionId}" must be placed at a cell center`);
+    const placement = validateInstancePlacement(document, instance.definitionId, instance, {
+      layerId: layer.id,
+      ignoreInstanceId: instance.id,
+    });
+    if (!placement.valid) {
+      fail(instancePath, placement.code, placement.message);
     }
-    const anchorX = Math.floor(instance.x);
-    const anchorZ = Math.floor(instance.z);
-    const footprintCells = [];
-    for (const offset of definition.footprint.cells) {
-      const rotated = rotateOffset(offset.x, offset.z, instance.rotation);
-      const cx = anchorX + rotated.x;
-      const cz = anchorZ + rotated.z;
-      if (cx < 0 || cz < 0 || cx >= layer.width || cz >= layer.height) {
-        fail(instancePath, "out_of_bounds", `footprint cell (${cx}, ${cz}) is outside the active layer`);
-      }
-      const cellIndex = cz * layer.width + cx;
-      if (structureCodes[cellIndex] !== 0) {
-        fail(instancePath, "structure_overlap", `footprint overlaps structure at (${cx}, ${cz})`);
-      }
-      const occupiedBy = occupiedInstanceCells.get(cellIndex);
-      if (occupiedBy) {
-        fail(instancePath, "instance_overlap", `footprint overlaps authoring instance "${occupiedBy}"`);
-      }
-      occupiedInstanceCells.set(cellIndex, instance.id);
-      footprintCells.push({ cx, cz });
-    }
-    anchors.push({ id: instance.id, x: instance.x, z: instance.z });
+    const footprintCells = getOccupiedCells(definition, instance);
+    if (isDynamicBodyDefinition(definition)) continue;
     collisionCellsByInstance.set(instance.id, footprintCells);
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
       for (const cell of footprintCells) {
@@ -150,7 +128,12 @@ export function compileAuthoringMap(input) {
 
   if (layer.markers.obelisk) {
     const obelisk = layer.markers.obelisk;
-    if (!cellCentered(obelisk.x) || !cellCentered(obelisk.z)) {
+    if (
+      !Number.isFinite(obelisk.x)
+      || !Number.isFinite(obelisk.z)
+      || obelisk.x !== Math.floor(obelisk.x) + 0.5
+      || obelisk.z !== Math.floor(obelisk.z) + 0.5
+    ) {
       fail(`${layerPath}.markers.obelisk`, "cell_center", "Obelisk position must be cell-centered");
     }
     const cx = Math.floor(obelisk.x);
@@ -166,36 +149,28 @@ export function compileAuthoringMap(input) {
     }
   }
 
-  const rockInstances = [];
+  const dynamicInstances = [];
   for (let index = 0; index < layer.instances.length; index += 1) {
     const instance = layer.instances[index];
     const definition = getPlaceableDefinition(instance.definitionId);
-    if (definition?.traits.runtimeKind !== "rock") continue;
-    const instancePath = `${layerPath}.instances[${index}]`;
-    const radius = Number(definition.traits.radius);
-    if (firstSolidContact(map, instance.x, instance.z, radius, contact)) {
-      fail(instancePath, "solid_overlap", "Rock is inside solid geometry");
-    }
-    if (Math.hypot(instance.x - playerSpawn.x, instance.z - playerSpawn.z) < radius + PLAYER.radius) {
-      fail(instancePath, "player_overlap", "Rock overlaps the player spawn");
-    }
-    for (const other of rockInstances) {
-      if (Math.hypot(instance.x - other.x, instance.z - other.z) < radius + other.radius) {
-        fail(instancePath, "rock_overlap", `Rock overlaps authoring instance "${other.id}"`);
-      }
-    }
-    for (const anchor of anchors) {
-      if (Math.hypot(instance.x - anchor.x, instance.z - anchor.z) < radius + 0.1) {
-        fail(instancePath, "instance_overlap", `Rock overlaps authoring instance "${anchor.id}"`);
-      }
-    }
-    rockInstances.push({
+    if (!isDynamicBodyDefinition(definition)) continue;
+    const runtimeTransform = getRuntimeBodyTransform(definition, instance);
+    const isBox = isDynamicBoxDefinition(definition);
+    dynamicInstances.push({
       id: instance.id,
       definitionId: instance.definitionId,
-      archetype: String(definition.traits.rockArchetype),
-      x: instance.x,
-      z: instance.z,
-      radius,
+      runtimeKind: String(definition.traits.runtimeKind),
+      ...(definition.traits.runtimeKind === "rock"
+        ? { archetype: String(definition.traits.rockArchetype) }
+        : {}),
+      x: runtimeTransform.x,
+      z: runtimeTransform.z,
+      rotation: runtimeTransform.rotation,
+      collider: isBox ? "box" : "circle",
+      radius: isBox ? 0 : Number(definition.traits.radius),
+      halfWidth: isBox ? Number(definition.traits.halfWidth) : 0,
+      halfDepth: isBox ? Number(definition.traits.halfDepth) : 0,
+      fixedRotation: isBox && definition.traits.fixedRotation === true,
       massKg: Number(definition.traits.massKg),
     });
   }
@@ -203,13 +178,23 @@ export function compileAuthoringMap(input) {
     ...layer.instances.map((instance) => instance.id),
     ...(layer.markers.obelisk ? ["marker.obelisk"] : []),
   ]);
-  const entities = rockInstances.map((rock) => ({
-    kind: /** @type {const} */ ("rock"),
-    archetype: rock.archetype,
-    x: rock.x,
-    z: rock.z,
-    spawnId: spawnIds.get(rock.id),
-    authoringId: rock.id,
+  const entities = dynamicInstances.map((instance) => ({
+    kind: instance.runtimeKind === "rock"
+      ? /** @type {const} */ ("rock")
+      : /** @type {const} */ ("dynamicInstance"),
+    definitionId: instance.definitionId,
+    ...(instance.runtimeKind === "rock" ? { archetype: instance.archetype } : {}),
+    x: instance.x,
+    z: instance.z,
+    rotation: instance.rotation,
+    collider: instance.collider,
+    radius: instance.radius,
+    halfWidth: instance.halfWidth,
+    halfDepth: instance.halfDepth,
+    fixedRotation: instance.fixedRotation,
+    massKg: instance.massKg,
+    spawnId: spawnIds.get(instance.id),
+    authoringId: instance.id,
   }));
   if (layer.markers.obelisk) {
     entities.push({
@@ -227,7 +212,7 @@ export function compileAuthoringMap(input) {
       authoringId: instance.id,
       definitionId: instance.definitionId,
       runtimeKind: definition?.traits.runtimeKind ?? "unknown",
-      runtimeSpawnId: definition?.traits.runtimeKind === "rock"
+      runtimeSpawnId: isDynamicBodyDefinition(definition)
         ? spawnIds.get(instance.id)
         : null,
       collisionCells: (collisionCellsByInstance.get(instance.id) ?? []).map((cell) => ({ ...cell })),

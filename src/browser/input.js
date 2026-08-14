@@ -15,7 +15,12 @@ export class InputController {
    * developerToolsOpen?:()=>boolean,
    * focusPlayer:()=>void,
    * pinAt:(x:number,z:number)=>void,
-   * editAt:(tool:string,button:number,x:number,z:number)=>void,
+   * editorPointerMove?:(x:number,z:number,inside:boolean)=>void,
+   * editorPointerLeave?:()=>void,
+   * editorPointerDown?:(button:number,x:number,z:number)=>void,
+   * editorPointerUp?:(button:number,x:number,z:number,options:{moved:boolean})=>void,
+   * cancelEditorAction?:()=>void,
+   * rotateEditorSelection?:()=>void,
    * createCast?:(x:number,z:number)=>Record<string,unknown>|null
    * }} actions
    */
@@ -24,14 +29,11 @@ export class InputController {
     this.camera = camera;
     this.actions = actions;
     this.mode = "play";
-    this.editorTool = "structure.wall";
-    this.editorPlacementMode = "paint";
     this.mouseWorld = { x: 0, z: 0 };
     this.mouseInside = false;
     this.rightHeld = false;
     this.pendingCast = null;
-    this.paintButton = -1;
-    this.lastPaintedCell = "";
+    this.editorButton = -1;
     this.panning = false;
     this.lastPointer = { x: 0, y: 0 };
     this.pointerDown = { x: 0, y: 0, button: -1 };
@@ -53,9 +55,9 @@ export class InputController {
     this.mode = mode;
     this.rightHeld = false;
     this.panning = false;
-    this.paintButton = -1;
+    this.editorButton = -1;
     this.pointerDown.button = -1;
-    this.lastPaintedCell = "";
+    this.actions.cancelEditorAction?.();
   }
 
   refreshPointerWorld() {
@@ -68,21 +70,18 @@ export class InputController {
     return this.mouseWorld;
   }
 
-  /** @param {string} tool @param {"paint"|"stamp"} [placementMode] */
-  setEditorTool(tool, placementMode = "stamp") {
-    this.editorTool = tool;
-    this.editorPlacementMode = placementMode;
-    this.paintButton = -1;
-    this.lastPaintedCell = "";
-  }
-
   #install() {
     this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
     this.canvas.addEventListener("pointerenter", () => {
       this.mouseInside = true;
+      this.refreshPointerWorld();
+      if (this.mode === "edit") {
+        this.actions.editorPointerMove?.(this.mouseWorld.x, this.mouseWorld.z, true);
+      }
     });
     this.canvas.addEventListener("pointerleave", () => {
       this.mouseInside = false;
+      if (this.mode === "edit") this.actions.editorPointerLeave?.();
     });
     this.canvas.addEventListener("pointermove", (event) => this.#onPointerMove(event));
     // Pointer capture preserves drags, while mouse events report every button
@@ -92,18 +91,20 @@ export class InputController {
     this.canvas.addEventListener("pointercancel", (event) => {
       this.#releasePointer(event);
       this.rightHeld = false;
-      this.paintButton = -1;
+      this.editorButton = -1;
       this.panning = false;
       this.pointerDown.button = -1;
+      this.actions.cancelEditorAction?.();
     });
     this.canvas.addEventListener("mousedown", (event) => this.#onMouseDown(event));
     this.canvas.addEventListener("wheel", (event) => this.#onWheel(event), { passive: false });
     window.addEventListener("mouseup", (event) => this.#onMouseUp(event));
     window.addEventListener("blur", () => {
       this.rightHeld = false;
-      this.paintButton = -1;
+      this.editorButton = -1;
       this.panning = false;
       this.pointerDown.button = -1;
+      this.actions.cancelEditorAction?.();
     });
     window.addEventListener("keydown", (event) => this.#onKeyDown(event));
   }
@@ -130,16 +131,12 @@ export class InputController {
     }
     this.lastPointer = point;
     this.refreshPointerWorld();
-    if (
-      this.mode === "edit" &&
-      this.paintButton >= 0 &&
-      (
-        this.editorPlacementMode === "paint"
-        || this.editorTool === "erase"
-        || this.paintButton === 2
-      )
-    ) {
-      this.#editCurrentPoint();
+    if (this.mode === "edit") {
+      this.actions.editorPointerMove?.(
+        this.mouseWorld.x,
+        this.mouseWorld.z,
+        this.mouseInside,
+      );
     }
   }
 
@@ -159,7 +156,9 @@ export class InputController {
   #onMouseDown(event) {
     const point = this.#viewportPoint(event);
     this.lastPointer = point;
-    if (event.button === 0) this.pointerDown = { ...point, button: event.button };
+    if (event.button === 0 || (this.mode === "edit" && event.button === 2)) {
+      this.pointerDown = { ...point, button: event.button };
+    }
     this.refreshPointerWorld();
     if (event.button === 1) {
       this.panning = this.mode === "edit";
@@ -168,9 +167,12 @@ export class InputController {
     }
     if (this.mode === "edit") {
       if (event.button === 0 || event.button === 2) {
-        this.paintButton = event.button;
-        this.lastPaintedCell = "";
-        this.#editCurrentPoint();
+        this.editorButton = event.button;
+        this.actions.editorPointerDown?.(
+          event.button,
+          this.mouseWorld.x,
+          this.mouseWorld.z,
+        );
       }
       return;
     }
@@ -186,8 +188,26 @@ export class InputController {
   #onMouseUp(event) {
     const point = this.#viewportPoint(event);
     if (event.button === 1) this.panning = false;
+    if (this.mode === "edit") {
+      if (event.button === this.editorButton) {
+        this.lastPointer = point;
+        this.refreshPointerWorld();
+        const moved = Math.hypot(
+          point.x - this.pointerDown.x,
+          point.y - this.pointerDown.y,
+        );
+        this.actions.editorPointerUp?.(
+          event.button,
+          this.mouseWorld.x,
+          this.mouseWorld.z,
+          { moved: moved >= POINTER_CLICK_SLOP_VIEWPORT_UNITS },
+        );
+        this.editorButton = -1;
+        this.pointerDown.button = -1;
+      }
+      return;
+    }
     if (event.button === 2) this.rightHeld = false;
-    if (event.button === this.paintButton) this.paintButton = -1;
     const moved = Math.hypot(point.x - this.pointerDown.x, point.y - this.pointerDown.y);
     if (
       this.mode === "play"
@@ -200,20 +220,6 @@ export class InputController {
       this.actions.pinAt(world.x, world.z);
     }
     if (event.button === 0) this.pointerDown.button = -1;
-  }
-
-  #editCurrentPoint() {
-    const cx = Math.floor(this.mouseWorld.x);
-    const cz = Math.floor(this.mouseWorld.z);
-    const key = `${this.editorTool}:${cx}:${cz}:${this.paintButton}`;
-    if (key === this.lastPaintedCell) return;
-    this.lastPaintedCell = key;
-    this.actions.editAt(
-      this.editorTool,
-      this.paintButton,
-      this.mouseWorld.x,
-      this.mouseWorld.z,
-    );
   }
 
   /** @param {WheelEvent} event */
@@ -254,6 +260,12 @@ export class InputController {
     } else if (event.key === ".") {
       event.preventDefault();
       this.actions.step();
+    } else if (event.key === "Escape" && this.mode === "edit") {
+      event.preventDefault();
+      this.actions.cancelEditorAction?.();
+    } else if (event.key.toLowerCase() === "r" && this.mode === "edit") {
+      event.preventDefault();
+      this.actions.rotateEditorSelection?.();
     } else if (event.key.toLowerCase() === "r") {
       event.preventDefault();
       this.actions.reset(event.shiftKey);

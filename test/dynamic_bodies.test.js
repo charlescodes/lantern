@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { placeInstance } from "../src/authoring/authoring_commands.js";
+import { ROCK_ARCHETYPES } from "../src/config.js";
 import { firstSolidContact } from "../src/sim/collision.js";
 import { GridMap } from "../src/sim/grid_map.js";
 import { ArenaScenario } from "../src/sim/scenario.js";
@@ -117,6 +119,61 @@ test("sustained locomotion pushes lighter rocks farther without storing release 
 
   assert.ok(displacements[0] > displacements[1]);
   assert.ok(displacements[1] > displacements[2]);
+});
+
+test("the player pushes a lightweight standing torch while its authored start stays fixed", () => {
+  const map = borderedMap(16, 8, { x: 2, z: 4 });
+  const source = new ArenaScenario(map).toAuthoringJSON();
+  const placed = placeInstance(source, "object.torch", 4, 4);
+  const simulation = new Simulation({
+    scenario: new ArenaScenario(placed.document),
+    particleBurstCount: 0,
+  });
+
+  for (let tick = 0; tick < 120; tick += 1) {
+    simulation.tick({ move: { x: 14, z: 4 } });
+  }
+
+  assert.ok(simulation.rocks.x[0] > 4.1, "the torch should be pushed along the floor");
+  assert.equal(simulation.snapshot().rocks[0].kind, "torch");
+  assert.equal(simulation.snapshot().rocks[0].upright, true);
+  assert.equal(JSON.parse(simulation.saveMap()).layers[0].instances[0].x, 4);
+});
+
+test("the player pushes a table without pivoting or rewriting its authored transform", () => {
+  const map = borderedMap(24, 8, { x: 2, z: 4.5 });
+  const source = new ArenaScenario(map).toAuthoringJSON();
+  const placed = placeInstance(source, "object.table", 4.5, 4.5, { rotation: 0 });
+  const simulation = new Simulation({
+    scenario: new ArenaScenario(placed.document),
+    particleBurstCount: 0,
+  });
+  const initial = simulation.snapshot().rocks[0];
+
+  for (let tick = 0; tick < 180; tick += 1) {
+    simulation.tick({ move: { x: 20, z: 4.5 } });
+  }
+
+  const table = simulation.snapshot().rocks[0];
+  const saved = JSON.parse(simulation.saveMap()).layers[0].instances[0];
+  assert.equal(table.kind, "table");
+  assert.equal(table.collider, "box");
+  assert.equal(table.fixedRotation, true);
+  assert.ok(table.x > initial.x + 1, "the table should slide when pushed");
+  assert.equal(table.rotation, 0, "translation must not create physical rotation");
+  assert.equal(Object.hasOwn(table, "angularVelocity"), false);
+  assert.ok(table.massKg > ROCK_ARCHETYPES.medium.massKg);
+  assert.ok(table.massKg < ROCK_ARCHETYPES.medium.massKg * 1.15);
+  assert.equal(saved.id, placed.instanceId);
+  assert.equal(saved.x, 4.5);
+  assert.equal(saved.z, 4.5);
+  assert.equal(saved.rotation, 0);
+
+  simulation.reset();
+  const resetTable = simulation.snapshot().rocks[0];
+  assert.equal(resetTable.x, initial.x);
+  assert.equal(resetTable.z, initial.z);
+  assert.equal(resetTable.rotation, initial.rotation);
 });
 
 test("an independently moving rock still produces damped external knockback", () => {

@@ -5,7 +5,13 @@ import { attribute, instancedDynamicBufferAttribute, pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ENEMY_WIZARD, ROCK_ARCHETYPES } from "../config.js";
-import { getPlaceableDefinition } from "../authoring/definition_catalog.js";
+import {
+  getPlaceableDefinition,
+  isDynamicBodyDefinition,
+  isDynamicCircleDefinition,
+} from "../authoring/definition_catalog.js";
+import { occupiedCellsForTarget } from "../authoring/editor_interaction.js";
+import { getOccupiedCells } from "../authoring/footprint.js";
 import {
   FIREBALL_PRESENTATION_HEIGHT_METERS,
   HEALTH_BAR,
@@ -32,6 +38,7 @@ import {
 } from "./kinetic_fragments.js";
 import { PresentationLightBudget } from "./light_budget.js";
 import { applyLightPool } from "./light_pool.js";
+import { mergeCatalogPropLights } from "./catalog_lights.js";
 import { PresentationFlags } from "./options.js";
 import { interpolateRenderValue } from "./player_camera.js";
 import { PresentationProfiler } from "./profiler.js";
@@ -185,7 +192,10 @@ export class ThreePresentation {
     this.fadedWallCount = 0;
     this.authoringInstanceHash = -1;
     this.pillarMesh = null;
-    this.torchMesh = null;
+    this.torchPoleMesh = null;
+    this.torchLampMesh = null;
+    this.tableMesh = null;
+    this.authoringOverlayMesh = null;
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
@@ -363,14 +373,35 @@ export class ThreePresentation {
       roughness: 0.86,
       metalness: 0.01,
     }));
-    this.torchGeometry = new THREE.ConeGeometry(0.17, 1.35, 8);
-    this.torchMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
-      color: 0xe19b45,
-      emissive: 0x9a3f12,
-      emissiveIntensity: 0.45,
-      roughness: 0.7,
+    this.torchPoleGeometry = new THREE.CylinderGeometry(0.06, 0.1, 1.72, 10);
+    this.torchPoleMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x554735,
+      roughness: 0.72,
+      metalness: 0.18,
+    }));
+    this.torchLampGeometry = new THREE.SphereGeometry(0.17, 12, 8);
+    this.torchLampMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0xef4e1f,
+      emissive: 0xff3512,
+      emissiveIntensity: 2.4,
+      roughness: 0.34,
       metalness: 0,
     }));
+    this.tableGeometry = new THREE.BoxGeometry(1.8, 0.52, 0.72);
+    this.tableMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x7b5b3f,
+      roughness: 0.82,
+      metalness: 0,
+    }));
+    this.authoringOverlayGeometry = new THREE.BoxGeometry(0.94, 0.025, 0.94);
+    this.authoringOverlayMaterial = new THREE.MeshBasicNodeMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.34,
+      depthTest: false,
+      depthWrite: false,
+    });
     this.rockGeometry = new THREE.IcosahedronGeometry(1, 1);
     this.rockMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffffff,
@@ -631,6 +662,7 @@ export class ThreePresentation {
     this._matrix = new THREE.Matrix4();
     this._position = new THREE.Vector3();
     this._quaternion = new THREE.Quaternion();
+    this._authoringQuaternion = new THREE.Quaternion();
     this._billboardQuaternion = new THREE.Quaternion();
     this._scale = new THREE.Vector3();
     this._color = new THREE.Color();
@@ -716,7 +748,7 @@ export class ThreePresentation {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {number} alpha
-   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
+   * @param {{mouseWorld:{x:number,z:number},mouseInside:boolean,hover:Record<string,unknown>|null,selected:Record<string,unknown>|null,mode:string,editorTool:string,placementValid:boolean,authoringEditor?:Record<string,any>|null,sightFrame?:import('../visibility/true_sight.js').TrueSightFrame,developerToolsOpen?:boolean}} view
    */
   render(snapshot, alpha, view) {
     const totalStarted = performance.now();
@@ -933,6 +965,10 @@ export class ThreePresentation {
       this.selectedMarker,
       this.editCellPreview,
       this.editRockPreview,
+      ...(this.authoringOverlayMesh ? [this.authoringOverlayMesh] : []),
+      ...(this.tableMesh ? [this.tableMesh] : []),
+      ...(this.torchPoleMesh ? [this.torchPoleMesh] : []),
+      ...(this.torchLampMesh ? [this.torchLampMesh] : []),
       this.scorchCoreMesh,
       this.scorchFleckMesh,
       this.kineticFragmentMesh,
@@ -1348,7 +1384,8 @@ export class ThreePresentation {
   /** @param {number} capacity */
   #replaceAuthoringMeshes(capacity) {
     if (this.pillarMesh) this.scene.remove(this.pillarMesh);
-    if (this.torchMesh) this.scene.remove(this.torchMesh);
+    if (this.tableMesh) this.scene.remove(this.tableMesh);
+    if (this.authoringOverlayMesh) this.scene.remove(this.authoringOverlayMesh);
     this.pillarMesh = createDynamicInstancedPool(
       this.pillarGeometry,
       this.pillarMaterial,
@@ -1357,15 +1394,28 @@ export class ThreePresentation {
     );
     this.pillarMesh.castShadow = true;
     this.pillarMesh.receiveShadow = true;
-    this.torchMesh = createDynamicInstancedPool(
-      this.torchGeometry,
-      this.torchMaterial,
+    this.tableMesh = createDynamicInstancedPool(
+      this.tableGeometry,
+      this.tableMaterial,
       capacity,
-      "authored-standing-torches",
+      "authored-tables",
     );
-    this.torchMesh.castShadow = false;
-    this.torchMesh.receiveShadow = true;
-    this.scene.add(this.pillarMesh, this.torchMesh);
+    this.tableMesh.castShadow = true;
+    this.tableMesh.receiveShadow = true;
+    this.authoringOverlayMesh = createDynamicInstancedPool(
+      this.authoringOverlayGeometry,
+      this.authoringOverlayMaterial,
+      capacity + 1_024,
+      "authoring-footprint-overlays",
+      { instanceColors: true },
+    );
+    this.authoringOverlayMesh.visible = false;
+    this.authoringOverlayMesh.renderOrder = 12;
+    this.scene.add(
+      this.pillarMesh,
+      this.tableMesh,
+      this.authoringOverlayMesh,
+    );
     this.authoringInstanceHash = -1;
   }
 
@@ -1374,29 +1424,24 @@ export class ThreePresentation {
     const nextHash = hashAuthoringInstances(instances);
     if (nextHash === this.authoringInstanceHash) return;
     this.authoringInstanceHash = nextHash;
-    if (!this.pillarMesh || !this.torchMesh) {
+    if (!this.pillarMesh || !this.tableMesh) {
       this.#replaceAuthoringMeshes(Math.max(1, this.mapWidth * this.mapHeight));
     }
     let pillarCount = 0;
-    let torchCount = 0;
+    let tableCount = 0;
     for (const instance of instances) {
       const definition = getPlaceableDefinition(instance.definitionId);
+      if (isDynamicBodyDefinition(definition)) continue;
       if (definition?.traits.shape === "pillar") {
         this._position.set(instance.x, 0.95, instance.z);
         this._scale.set(1, 1, 1);
         this._matrix.compose(this._position, this._quaternion, this._scale);
         this.pillarMesh.setMatrixAt(pillarCount, this._matrix);
         pillarCount += 1;
-      } else if (definition?.traits.shape === "standing-torch") {
-        this._position.set(instance.x, 0.675, instance.z);
-        this._scale.set(1, 1, 1);
-        this._matrix.compose(this._position, this._quaternion, this._scale);
-        this.torchMesh.setMatrixAt(torchCount, this._matrix);
-        torchCount += 1;
       }
     }
     publishInstancedPool(this.pillarMesh, pillarCount);
-    publishInstancedPool(this.torchMesh, torchCount);
+    publishInstancedPool(this.tableMesh, tableCount);
   }
 
   /** @param {Record<string, any>} player @param {number} alpha */
@@ -1628,8 +1673,18 @@ export class ThreePresentation {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #updateRocks(snapshot, alpha) {
     const capacity = snapshot.pools.rocks.capacity;
-    if (!this.rockMesh || this.rockMesh.userData.capacity !== capacity) {
+    if (!this.tableMesh) {
+      this.#replaceAuthoringMeshes(Math.max(1, this.mapWidth * this.mapHeight));
+    }
+    if (
+      !this.rockMesh
+      || !this.torchPoleMesh
+      || !this.torchLampMesh
+      || this.rockMesh.userData.capacity !== capacity
+    ) {
       if (this.rockMesh) this.scene.remove(this.rockMesh);
+      if (this.torchPoleMesh) this.scene.remove(this.torchPoleMesh);
+      if (this.torchLampMesh) this.scene.remove(this.torchLampMesh);
       this.rockMesh = createDynamicInstancedPool(
         this.rockGeometry,
         this.rockMaterial,
@@ -1639,16 +1694,58 @@ export class ThreePresentation {
       );
       this.rockMesh.castShadow = true;
       this.rockMesh.receiveShadow = true;
-      this.scene.add(this.rockMesh);
+      this.torchPoleMesh = createDynamicInstancedPool(
+        this.torchPoleGeometry,
+        this.torchPoleMaterial,
+        capacity,
+        "upright-torch-poles",
+      );
+      this.torchPoleMesh.castShadow = false;
+      this.torchPoleMesh.receiveShadow = true;
+      this.torchLampMesh = createDynamicInstancedPool(
+        this.torchLampGeometry,
+        this.torchLampMaterial,
+        capacity,
+        "upright-torch-lamps",
+      );
+      this.torchLampMesh.castShadow = false;
+      this.torchLampMesh.receiveShadow = true;
+      this.scene.add(this.rockMesh, this.torchPoleMesh, this.torchLampMesh);
     }
+    let rockCount = 0;
+    let torchCount = 0;
+    let tableCount = 0;
     for (let index = 0; index < snapshot.rocks.length; index += 1) {
       const rock = snapshot.rocks[index];
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
+      if (rock.kind === "table") {
+        this._position.set(x, 0.34, z);
+        this._scale.set(1, 1, 1);
+        this._authoringQuaternion.setFromAxisAngle(
+          this._facingOrigin,
+          -rock.rotation * Math.PI / 2,
+        );
+        this._matrix.compose(this._position, this._authoringQuaternion, this._scale);
+        this.tableMesh.setMatrixAt(tableCount, this._matrix);
+        tableCount += 1;
+        continue;
+      }
+      if (rock.kind === "torch") {
+        this._position.set(x, 0.86, z);
+        this._scale.set(1, 1, 1);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.torchPoleMesh.setMatrixAt(torchCount, this._matrix);
+        this._position.set(x, 1.82, z);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.torchLampMesh.setMatrixAt(torchCount, this._matrix);
+        torchCount += 1;
+        continue;
+      }
       this._position.set(x, rock.radius, z);
       this._scale.setScalar(rock.radius);
       this._matrix.compose(this._position, this._quaternion, this._scale);
-      this.rockMesh.setMatrixAt(index, this._matrix);
+      this.rockMesh.setMatrixAt(rockCount, this._matrix);
       this._color.set(
         rock.archetype === "small"
           ? 0xabb09c
@@ -1656,11 +1753,15 @@ export class ThreePresentation {
             ? 0x858b7c
             : 0x676f65,
       );
-      this.rockMesh.setColorAt(index, this._color);
+      this.rockMesh.setColorAt(rockCount, this._color);
+      rockCount += 1;
     }
-    publishInstancedPool(this.rockMesh, snapshot.rocks.length, {
+    publishInstancedPool(this.rockMesh, rockCount, {
       instanceColors: true,
     });
+    publishInstancedPool(this.torchPoleMesh, torchCount);
+    publishInstancedPool(this.torchLampMesh, torchCount);
+    publishInstancedPool(this.tableMesh, tableCount);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
@@ -1767,10 +1868,15 @@ export class ThreePresentation {
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
   #updateLights(snapshot) {
-    const assignments = this.lightBudget.allocate(
+    const transientAssignments = this.lightBudget.allocate(
       snapshot,
       this.flags.values.dynamicLights,
       this.flags.values.lightColorVariation,
+    );
+    const assignments = mergeCatalogPropLights(
+      transientAssignments,
+      snapshot.rocks,
+      this.lightBudget.capacity,
     );
     this.activeLightCount = applyLightPool(
       this.dynamicLights,
@@ -1789,16 +1895,22 @@ export class ThreePresentation {
     this.#positionInspectionMarker(this.hoverMarker, view.hover);
     this.#positionInspectionMarker(this.selectedMarker, view.selected);
 
-    const editing = view.mouseInside && view.mode === "edit";
+    const editor = view.authoringEditor ?? null;
+    this.#updateAuthoringOverlays(
+      snapshot,
+      editor,
+      view.mode === "edit" && view.developerToolsOpen !== false,
+    );
+    const editing = view.mouseInside && view.mode === "edit" && !editor;
     const definition = getPlaceableDefinition(view.editorTool);
-    const rockDefinition = definition?.traits.runtimeKind === "rock" ? definition : null;
-    this.editRockPreview.visible = Boolean(editing && rockDefinition);
-    this.editCellPreview.visible = Boolean(editing && !rockDefinition);
+    const dynamicDefinition = isDynamicCircleDefinition(definition) ? definition : null;
+    this.editRockPreview.visible = Boolean(editing && dynamicDefinition);
+    this.editCellPreview.visible = Boolean(editing && !dynamicDefinition);
     const previewColor = view.placementValid ? 0x69d4b3 : 0xff5b63;
-    if (this.editRockPreview.visible && rockDefinition) {
+    if (this.editRockPreview.visible && dynamicDefinition) {
       const x = Math.round(view.mouseWorld.x * 10) / 10;
       const z = Math.round(view.mouseWorld.z * 10) / 10;
-      const radius = Number(rockDefinition.traits.radius);
+      const radius = Number(dynamicDefinition.traits.radius);
       this.editRockPreview.position.set(x, radius, z);
       this.editRockPreview.scale.setScalar(radius);
       setMaterialColor(this.editRockPreview.material, previewColor);
@@ -1817,6 +1929,58 @@ export class ThreePresentation {
       0.012,
       snapshot.map.playerSpawn.z,
     );
+  }
+
+  /**
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
+   * @param {Record<string,any>|null} editor
+   * @param {boolean} visible
+   */
+  #updateAuthoringOverlays(snapshot, editor, visible) {
+    const mesh = this.authoringOverlayMesh;
+    if (!mesh) return;
+    mesh.visible = visible && Boolean(editor);
+    if (!mesh.visible || !editor) {
+      publishInstancedPool(mesh, 0, { instanceColors: true });
+      return;
+    }
+    let count = 0;
+    const addCells = (cells, color, height) => {
+      this._color.setHex(color);
+      for (const cell of cells) {
+        if (count >= mesh.userData.capacity) return;
+        this._position.set(cell.cx + 0.5, height, cell.cz + 0.5);
+        this._scale.set(1, 1, 1);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        mesh.setMatrixAt(count, this._matrix);
+        mesh.setColorAt(count, this._color);
+        count += 1;
+      }
+    };
+    if (editor.showAuthoringExtents) {
+      for (const instance of snapshot.authoring.instances) {
+        const definition = getPlaceableDefinition(instance.definitionId);
+        if (definition) addCells(getOccupiedCells(definition, instance), 0x829287, 0.028);
+      }
+    }
+    addCells(
+      occupiedCellsForTarget(snapshot.authoring, editor.hoveredTarget),
+      0x69d4b3,
+      0.036,
+    );
+    addCells(
+      occupiedCellsForTarget(snapshot.authoring, editor.selectedTarget),
+      0xfff1b0,
+      0.044,
+    );
+    if (editor.placementPreview?.occupiedCells) {
+      addCells(
+        editor.placementPreview.occupiedCells,
+        editor.placementPreview.valid ? 0x69d4b3 : 0xff5b63,
+        0.052,
+      );
+    }
+    publishInstancedPool(mesh, count, { instanceColors: true });
   }
 
   /** @param {THREE.Mesh} marker @param {Record<string,unknown>|null} entity */

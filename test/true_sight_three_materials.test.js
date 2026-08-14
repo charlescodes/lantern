@@ -49,6 +49,8 @@ test("Three world materials share one resident red-byte TrueSight node pipeline"
     presentation.scorchFleckMaterial,
     presentation.kineticFragmentMaterial,
     presentation.rockMaterial,
+    presentation.torchPoleMaterial,
+    presentation.torchLampMaterial,
     presentation.projectileMaterial,
     presentation.particleMaterial,
     presentation.player.material,
@@ -133,6 +135,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     scorchFleck: presentation.scorchFleckMaterial,
     kineticFragment: presentation.kineticFragmentMaterial,
     rock: presentation.rockMaterial,
+    torchPole: presentation.torchPoleMaterial,
+    torchLamp: presentation.torchLampMaterial,
     projectile: presentation.projectileMaterial,
     particle: presentation.particleMaterial,
     player: presentation.player.material,
@@ -164,6 +168,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     presentation.scorchFleckMesh.material,
     presentation.kineticFragmentMesh.material,
     presentation.rockMesh.material,
+    presentation.torchPoleMesh.material,
+    presentation.torchLampMesh.material,
     presentation.projectileMesh.material,
     presentation.particleMesh.material,
   ];
@@ -191,6 +197,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
     presentation.kineticFragmentMaterial,
   );
   assert.equal(presentation.rockMesh.material, presentation.rockMaterial);
+  assert.equal(presentation.torchPoleMesh.material, presentation.torchPoleMaterial);
+  assert.equal(presentation.torchLampMesh.material, presentation.torchLampMaterial);
   assert.equal(presentation.projectileMesh.material, presentation.projectileMaterial);
   assert.equal(presentation.particleMesh.material, presentation.particleMaterial);
   assert.equal(presentation.projectileMaterial.emissive.getHex(), 0xff4d0d);
@@ -216,6 +224,8 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
       scorchFleck: presentation.scorchFleckMaterial,
       kineticFragment: presentation.kineticFragmentMaterial,
       rock: presentation.rockMaterial,
+      torchPole: presentation.torchPoleMaterial,
+      torchLamp: presentation.torchLampMaterial,
       projectile: presentation.projectileMaterial,
       particle: presentation.particleMaterial,
       player: presentation.player.material,
@@ -235,4 +245,145 @@ test("warmup scene assets retain mask, shadow, bloom, and light topology coverag
   );
   assert.equal(presentation.residentLightCount, 8);
   assert.equal(presentation.sightTransport.uploadCount, 2);
+});
+
+test("Three renders the movable table from its fixed-orientation runtime transform", () => {
+  const options = parsePresentationOptions("?renderer=3d&aa=1");
+  const flags = new PresentationFlags(options);
+  const simulation = new Simulation({ particleBurstCount: 0 });
+  simulation.tick({
+    type: "placeInstance",
+    definitionId: "object.table",
+    x: 12.5,
+    z: 12.5,
+    rotation: 1,
+  });
+  assert.equal(simulation.lastError, null);
+  const snapshot = simulation.snapshot();
+  const table = snapshot.authoring.instances.find(
+    (instance) => instance.definitionId === "object.table",
+  );
+  const runtimeTable = snapshot.rocks.find((rock) => rock.kind === "table");
+  assert.ok(runtimeTable);
+  const sightFrame = new TrueSightSystem({ flags }).update(
+    snapshot,
+    0,
+    { mode: "edit", deltaMs: 0 },
+  );
+  const presentation = new ThreePresentation(
+    fakeCanvas(),
+    new Camera3D(),
+    options,
+    performance.now(),
+    flags,
+    sightFrame,
+  );
+  presentation.resize = () => {};
+  presentation.webRenderer.render = () => {};
+  presentation.render(snapshot, 0, {
+    mouseWorld: { x: table.x, z: table.z },
+    mouseInside: true,
+    hover: null,
+    selected: null,
+    mode: "edit",
+    editorTool: "object.table",
+    placementValid: true,
+    authoringEditor: {
+      hoveredTarget: null,
+      selectedTarget: {
+        kind: "instance",
+        layerId: snapshot.authoring.activeLayer.id,
+        instanceId: table.id,
+      },
+      placementPreview: null,
+      showAuthoringExtents: true,
+    },
+    sightFrame,
+  });
+
+  assert.equal(presentation.tableMesh.count, 1);
+  assert.equal(presentation.authoringOverlayMesh.count >= 2, true);
+  assert.equal(presentation.authoringOverlayMesh.visible, true);
+  assert.equal(presentation.tableMaterial.opacityNode, presentation.sightOpacityNode);
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  presentation.tableMesh.getMatrixAt(0, matrix);
+  position.setFromMatrixPosition(matrix);
+  assert.equal(position.x, 12.5);
+  assert.equal(position.z, 13);
+
+  simulation.rocks.x[runtimeTable.index] = 14;
+  simulation.rocks.previousX[runtimeTable.index] = 14;
+  presentation.render(simulation.snapshot(), 1, {
+    mouseWorld: { x: table.x, z: table.z },
+    mouseInside: false,
+    hover: null,
+    selected: null,
+    mode: "play",
+    editorTool: "select",
+    placementValid: false,
+    sightFrame,
+  });
+  presentation.tableMesh.getMatrixAt(0, matrix);
+  position.setFromMatrixPosition(matrix);
+  assert.equal(position.x, 14);
+  assert.equal(position.z, 13);
+  assert.equal(runtimeTable.rotation, 1);
+});
+
+test("Three renders a movable torch as a two-meter pole and glowing lamp without shadow maps", () => {
+  const options = parsePresentationOptions("?renderer=3d&aa=1&lights=16");
+  const flags = new PresentationFlags(options);
+  const simulation = new Simulation({ particleBurstCount: 0 });
+  simulation.tick({
+    type: "placeInstance",
+    definitionId: "object.torch",
+    x: 12.5,
+    z: 12.5,
+    rotation: 0,
+  });
+  assert.equal(simulation.lastError, null);
+  const snapshot = simulation.snapshot();
+  const sightFrame = new TrueSightSystem({ flags }).update(
+    snapshot,
+    0,
+    { mode: "edit", deltaMs: 0 },
+  );
+  const presentation = new ThreePresentation(
+    fakeCanvas(),
+    new Camera3D(),
+    options,
+    performance.now(),
+    flags,
+    sightFrame,
+  );
+  presentation.resize = () => {};
+  presentation.webRenderer.render = () => {};
+  presentation.render(snapshot, 0, {
+    mouseWorld: { x: 12.5, z: 12.5 },
+    mouseInside: false,
+    hover: null,
+    selected: null,
+    mode: "edit",
+    editorTool: "object.torch",
+    placementValid: true,
+    sightFrame,
+  });
+
+  assert.equal(presentation.torchPoleMesh.count, 1);
+  assert.equal(presentation.torchLampMesh.count, 1);
+  assert.equal(presentation.torchPoleGeometry.parameters.height, 1.72);
+  assert.equal(presentation.torchPoleGeometry.parameters.radiusBottom, 0.1);
+  assert.equal(presentation.torchLampGeometry.parameters.radius, 0.17);
+  assert.equal(presentation.torchPoleMesh.castShadow, false);
+  assert.equal(presentation.torchLampMesh.castShadow, false);
+  assert.equal(presentation.torchPoleMaterial.opacityNode, presentation.sightOpacityNode);
+  assert.equal(presentation.torchLampMaterial.emissiveIntensity, 2.4);
+  const torchLight = presentation.dynamicLights.find(
+    (light) => String(light.userData.assignment).startsWith("prop:"),
+  );
+  assert.ok(torchLight);
+  assert.equal(torchLight.position.x, 12.5);
+  assert.equal(torchLight.position.y, 1.82);
+  assert.equal(torchLight.castShadow, false);
 });

@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  boxBoxContact,
+  circleBoxContact,
+  firstSolidBoxContact,
   firstSolidContact,
   resolveCircleAgainstGrid,
   sanitizePointAgainstGrid,
@@ -22,6 +25,24 @@ function borderedMap(width, height, spawn) {
   }
   return map;
 }
+
+test("fixed boxes use deterministic circle, box, and grid contacts without angular state", () => {
+  const bodyContact = { nx: 0, nz: 0, penetration: 0, x: 0, z: 0 };
+  assert.equal(circleBoxContact(1.1, 0, 0.3, 0, 0, 0.9, 0.36, bodyContact), true);
+  assert.equal(bodyContact.nx, -1);
+  assert.ok(Math.abs(bodyContact.penetration - 0.1) < 1e-12);
+  assert.equal(circleBoxContact(0, 0.7, 0.3, 0, 0, 0.9, 0.36, bodyContact), false);
+  assert.equal(boxBoxContact(0, 0, 0.9, 0.36, 1.5, 0, 0.9, 0.36, bodyContact), true);
+  assert.equal(bodyContact.nx, 1);
+
+  const map = new GridMap(6, 6, undefined, { x: 1.5, z: 1.5 });
+  map.set(3, 2, 1);
+  const gridContact = { nx: 0, nz: 0, penetration: 0, px: 0, pz: 0, cx: 0, cz: 0 };
+  assert.equal(firstSolidBoxContact(map, 2.25, 2.5, 0.9, 0.36, gridContact), true);
+  assert.equal(gridContact.nx, -1);
+  assert.equal(gridContact.cx, 3);
+  assert.equal(gridContact.cz, 2);
+});
 
 test("penetrating circles are fully corrected and inward velocity is removed", () => {
   const map = borderedMap(6, 6, { x: 1.5, z: 1.5 });

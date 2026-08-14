@@ -46,9 +46,18 @@ import {
 } from "../authoring/authoring_map.js";
 import {
   getPlaceableDefinition,
+  isDynamicBodyDefinition,
+  isDynamicBoxDefinition,
+  isDynamicCircleDefinition,
   listPlaceableDefinitions,
   rockDefinitionId,
 } from "../authoring/definition_catalog.js";
+import {
+  getOccupiedCells,
+  getRuntimeBodyTransform,
+  normalizeQuarterTurns,
+} from "../authoring/footprint.js";
+import { circleTouchesFootprint } from "../authoring/placement_validation.js";
 import {
   cloneFireballDefinition,
   DEFAULT_FIREBALL_DEFINITION,
@@ -68,7 +77,10 @@ import {
 } from "../spells/random.js";
 import { SpellRegistry } from "../spells/spell_registry.js";
 import {
+  boxBoxContact,
+  circleBoxContact,
   circleCircleContact,
+  firstSolidBoxContact,
   firstSolidContact,
   gridRayBlocked,
   sanitizePointAgainstGrid,
@@ -144,9 +156,12 @@ import {
 const TAU = Math.PI * 2;
 const CONTACT_CAPACITY = 256;
 const BROADPHASE_CORRECTION_MARGIN = 2;
-const MAX_ROCK_RADIUS = Math.max(
+const MAX_DYNAMIC_BODY_EXTENT = Math.max(
+  0.9,
   ...Object.values(ROCK_ARCHETYPES).map((definition) => definition.radius),
 );
+const DYNAMIC_COLLIDER_CIRCLE = 0;
+const DYNAMIC_COLLIDER_FIXED_BOX = 1;
 const BODY_PLAYER = 1;
 const BODY_ROCK = 2;
 const BODY_CELL = 3;
@@ -203,6 +218,53 @@ const SPAWN_OFFSETS = Object.freeze([
 const ROCK_NAME_BY_CODE = new Map(
   Object.entries(ROCK_ARCHETYPES).map(([name, definition]) => [definition.code, name]),
 );
+
+/** @param {Record<string, any>} entity */
+function isDynamicRuntimeEntity(entity) {
+  return entity.kind === "rock" || entity.kind === "dynamicInstance";
+}
+
+/** @param {Record<string, any>|null|undefined} definition */
+function dynamicBodyKind(definition) {
+  if (definition?.traits.shape === "standing-torch") return "torch";
+  if (definition?.traits.shape === "table") return "table";
+  return "rock";
+}
+
+/** @param {Record<string, any>} entity */
+function dynamicBodyParameters(entity) {
+  const catalogDefinition = getPlaceableDefinition(entity.definitionId);
+  if (isDynamicBodyDefinition(catalogDefinition)) {
+    const rockArchetype = catalogDefinition.traits.runtimeKind === "rock"
+      ? getRockArchetype(String(catalogDefinition.traits.rockArchetype))
+      : null;
+    const isBox = isDynamicBoxDefinition(catalogDefinition);
+    return {
+      definitionId: catalogDefinition.id,
+      archetype: rockArchetype?.code ?? 0,
+      collider: isBox ? DYNAMIC_COLLIDER_FIXED_BOX : DYNAMIC_COLLIDER_CIRCLE,
+      rotation: normalizeQuarterTurns(entity.rotation ?? 0),
+      radius: isBox ? 0 : Number(catalogDefinition.traits.radius),
+      halfWidth: isBox ? Number(catalogDefinition.traits.halfWidth) : 0,
+      halfDepth: isBox ? Number(catalogDefinition.traits.halfDepth) : 0,
+      massKg: Number(catalogDefinition.traits.massKg),
+    };
+  }
+  if (entity.kind !== "rock") return null;
+  const rockArchetype = getRockArchetype(entity.archetype);
+  return rockArchetype
+    ? {
+      definitionId: rockDefinitionId(entity.archetype),
+      archetype: rockArchetype.code,
+      collider: DYNAMIC_COLLIDER_CIRCLE,
+      rotation: 0,
+      radius: rockArchetype.radius,
+      halfWidth: 0,
+      halfDepth: 0,
+      massKg: rockArchetype.massKg,
+    }
+    : null;
+}
 
 /** @param {string} profile */
 function usesPerceptionProfile(profile) {
@@ -265,6 +327,38 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+/** @param {unknown} document */
+function stableAuthoringRevision(document) {
+  const text = JSON.stringify(document);
+  let hash = 2_166_136_261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0 || 1;
+}
+
+const MAX_AUTHORING_STROKE_CELLS = 65_536;
+
+/** @param {unknown} value */
+function canonicalAuthoringCells(value) {
+  if (!Array.isArray(value)) return [];
+  const cells = [];
+  const seen = new Set();
+  for (const candidate of value.slice(0, MAX_AUTHORING_STROKE_CELLS)) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const source = /** @type {Record<string, unknown>} */ (candidate);
+    const cx = Math.trunc(Number(source.cx));
+    const cz = Math.trunc(Number(source.cz));
+    if (!Number.isFinite(cx) || !Number.isFinite(cz)) continue;
+    const key = `${cx}:${cz}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cells.push({ cx, cz });
+  }
+  return cells;
+}
+
 /** @param {unknown} value */
 function canonicalAction(value) {
   if (!value || typeof value !== "object") return null;
@@ -284,6 +378,23 @@ function canonicalAction(value) {
         cz: Math.trunc(Number(action.cz)),
         definitionId: String(action.definitionId),
       };
+    case "paintSurfaceStroke":
+      return {
+        type: "paintSurfaceStroke",
+        cells: canonicalAuthoringCells(action.cells),
+        definitionId: String(action.definitionId),
+      };
+    case "eraseSurface":
+      return {
+        type: "eraseSurface",
+        cx: Math.trunc(Number(action.cx)),
+        cz: Math.trunc(Number(action.cz)),
+      };
+    case "eraseSurfaceStroke":
+      return {
+        type: "eraseSurfaceStroke",
+        cells: canonicalAuthoringCells(action.cells),
+      };
     case "paintStructure":
       return {
         type: "paintStructure",
@@ -291,11 +402,22 @@ function canonicalAction(value) {
         cz: Math.trunc(Number(action.cz)),
         definitionId: String(action.definitionId),
       };
+    case "paintStructureStroke":
+      return {
+        type: "paintStructureStroke",
+        cells: canonicalAuthoringCells(action.cells),
+        definitionId: String(action.definitionId),
+      };
     case "eraseStructure":
       return {
         type: "eraseStructure",
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
+      };
+    case "eraseStructureStroke":
+      return {
+        type: "eraseStructureStroke",
+        cells: canonicalAuthoringCells(action.cells),
       };
     case "loadMap":
     case "loadScenario":
@@ -323,6 +445,14 @@ function canonicalAction(value) {
       return {
         type: "removeInstance",
         authoringId: String(action.authoringId),
+      };
+    case "updateInstanceTransform":
+      return {
+        type: "updateInstanceTransform",
+        authoringId: String(action.authoringId),
+        x: Number(action.x),
+        z: Number(action.z),
+        rotation: Number(action.rotation),
       };
     case "removeEntity":
       return {
@@ -540,6 +670,7 @@ export class Simulation {
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
     this.map = this.scenario.map;
+    this.authoringRevision = 1;
     this._preparedAuthoringState = null;
     this.#refreshPreparedAuthoringState();
     this.seed = normalizeSeed(options.seed ?? 0x1a2b3c4d);
@@ -601,8 +732,10 @@ export class Simulation {
     if (!Number.isInteger(rockCapacity) || rockCapacity <= 0) {
       throw new RangeError("Rock capacity must be a positive integer");
     }
-    if (this.scenario.entities.filter((entity) => entity.kind === "rock").length > rockCapacity) {
-      throw new RangeError("Scenario has more rocks than the configured rock pool");
+    if (this.scenario.entities.filter(isDynamicRuntimeEntity).length > rockCapacity) {
+      throw new RangeError(
+        "Scenario has more rocks than the configured rock pool; upright props share this capacity",
+      );
     }
     const defaultEnemyCapacity = usesPerceptionProfile(this.enemyAiProfile)
       ? ENEMY_WIZARD.capacity
@@ -961,15 +1094,20 @@ export class Simulation {
       nextSpawnSequence: 1,
     });
     for (const entity of this.scenario.entities) {
-      if (entity.kind !== "rock") continue;
-      const definition = getRockArchetype(entity.archetype);
+      if (!isDynamicRuntimeEntity(entity)) continue;
+      const definition = dynamicBodyParameters(entity);
       if (!definition) continue;
       this.rocks.spawn({
         spawnId: entity.spawnId,
-        archetype: definition.code,
+        definitionId: definition.definitionId,
+        archetype: definition.archetype,
+        collider: definition.collider,
+        rotation: definition.rotation,
         x: entity.x,
         z: entity.z,
         radius: definition.radius,
+        halfWidth: definition.halfWidth,
+        halfDepth: definition.halfDepth,
         massKg: definition.massKg,
       });
     }
@@ -1081,8 +1219,26 @@ export class Simulation {
           if (!this.#paintSurface(action.cx, action.cz, action.definitionId)) {
             throw new RangeError(this.scenario.lastMutationError ?? "Surface paint is invalid");
           }
+        } else if (action.type === "paintSurfaceStroke") {
+          if (!this.#paintSurfaceCells(action.cells, action.definitionId)) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Surface paint is invalid");
+          }
+        } else if (action.type === "eraseSurface") {
+          if (!this.#eraseSurfaceCells([{ cx: action.cx, cz: action.cz }])) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Surface cannot be reset");
+          }
+        } else if (action.type === "eraseSurfaceStroke") {
+          if (!this.#eraseSurfaceCells(action.cells)) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Surface cannot be reset");
+          }
         } else if (action.type === "paintStructure") {
           if (!this.#paintStructure(action.cx, action.cz, action.definitionId)) {
+            throw new RangeError(
+              this.scenario.lastMutationError ?? "Structure would overlap an authored or active body",
+            );
+          }
+        } else if (action.type === "paintStructureStroke") {
+          if (!this.#paintStructureCells(action.cells, action.definitionId)) {
             throw new RangeError(
               this.scenario.lastMutationError ?? "Structure would overlap an authored or active body",
             );
@@ -1091,16 +1247,23 @@ export class Simulation {
           if (!this.#eraseStructure(action.cx, action.cz)) {
             throw new RangeError(this.scenario.lastMutationError ?? "Structure cannot be erased");
           }
+        } else if (action.type === "eraseStructureStroke") {
+          if (!this.#eraseStructureCells(action.cells)) {
+            throw new RangeError(this.scenario.lastMutationError ?? "Structure cannot be erased");
+          }
         } else if (action.type === "loadScenario") {
           const loadedScenario = ArenaScenario.fromJSON(action.json);
           if (
-            loadedScenario.entities.filter((entity) => entity.kind === "rock").length
+            loadedScenario.entities.filter(isDynamicRuntimeEntity).length
             > this.rocks.capacity
           ) {
-            throw new RangeError("Scenario has more rocks than the configured rock pool");
+            throw new RangeError(
+              "Scenario has more rocks than the configured rock pool; upright props share this capacity",
+            );
           }
           this.scenario = loadedScenario;
           this.map = loadedScenario.map;
+          this.authoringRevision += 1;
           this.#refreshPreparedAuthoringState();
           this.mapRevision += 1;
           this.#restoreAuthoredState();
@@ -1130,6 +1293,17 @@ export class Simulation {
         } else if (action.type === "removeInstance") {
           if (!this.#removeAuthoredInstance(action.authoringId)) {
             throw new RangeError(this.scenario.lastMutationError ?? "Authoring instance no longer exists");
+          }
+        } else if (action.type === "updateInstanceTransform") {
+          if (!this.#updateAuthoredInstanceTransform(
+            action.authoringId,
+            action.x,
+            action.z,
+            action.rotation,
+          )) {
+            throw new RangeError(
+              this.scenario.lastMutationError ?? "Instance transform is invalid",
+            );
           }
         } else if (action.type === "removeEntity") {
           if (action.kind !== "rock") throw new RangeError("Only authored rocks can be removed");
@@ -1181,10 +1355,169 @@ export class Simulation {
 
   /** @param {number} cx @param {number} cz @param {string} definitionId */
   #paintSurface(cx, cz, definitionId) {
-    if (!this.map.inBounds(cx, cz)) return false;
-    if (!this.scenario.paintSurface(cx, cz, definitionId)) return false;
+    return this.#paintSurfaceCells([{ cx, cz }], definitionId);
+  }
+
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId */
+  #paintSurfaceCells(cells, definitionId) {
+    if (cells.length === 0) return true;
+    if (cells.some((cell) => !this.map.inBounds(cell.cx, cell.cz))) return false;
+    if (!this.scenario.paintSurfaceCells(cells, definitionId)) return false;
+    this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
+  }
+
+  /** @param {Array<{cx:number,cz:number}>} cells */
+  #eraseSurfaceCells(cells) {
+    if (cells.length === 0) return true;
+    if (cells.some((cell) => !this.map.inBounds(cell.cx, cell.cz))) return false;
+    if (!this.scenario.eraseSurfaceCells(cells)) return false;
+    this.authoringRevision += 1;
+    this.#refreshPreparedAuthoringState();
+    return true;
+  }
+
+  /** @param {number} index */
+  #dynamicBodyHalfX(index) {
+    if (this.rocks.collider[index] !== DYNAMIC_COLLIDER_FIXED_BOX) {
+      return this.rocks.radius[index];
+    }
+    return (this.rocks.rotation[index] & 1) === 1
+      ? this.rocks.halfDepth[index]
+      : this.rocks.halfWidth[index];
+  }
+
+  /** @param {number} index */
+  #dynamicBodyHalfZ(index) {
+    if (this.rocks.collider[index] !== DYNAMIC_COLLIDER_FIXED_BOX) {
+      return this.rocks.radius[index];
+    }
+    return (this.rocks.rotation[index] & 1) === 1
+      ? this.rocks.halfWidth[index]
+      : this.rocks.halfDepth[index];
+  }
+
+  /** @param {number} index */
+  #dynamicBodyExtent(index) {
+    return Math.max(this.#dynamicBodyHalfX(index), this.#dynamicBodyHalfZ(index));
+  }
+
+  /** @param {number} index */
+  #dynamicBodyMinimumExtent(index) {
+    return Math.min(this.#dynamicBodyHalfX(index), this.#dynamicBodyHalfZ(index));
+  }
+
+  /**
+   * @param {GridMap} map
+   * @param {number} index
+   * @param {Record<string,number>} out
+   */
+  #dynamicBodyGridContact(map, index, out) {
+    if (this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX) {
+      return firstSolidBoxContact(
+        map,
+        this.rocks.x[index],
+        this.rocks.z[index],
+        this.#dynamicBodyHalfX(index),
+        this.#dynamicBodyHalfZ(index),
+        out,
+      );
+    }
+    return firstSolidContact(
+      map,
+      this.rocks.x[index],
+      this.rocks.z[index],
+      this.rocks.radius[index],
+      out,
+    );
+  }
+
+  /**
+   * Writes a contact whose normal points from the circle toward the authored
+   * dynamic body.
+   * @param {number} x @param {number} z @param {number} radius @param {number} index
+   * @param {Record<string,number>} out
+   */
+  #circleDynamicBodyContact(x, z, radius, index, out) {
+    if (this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX) {
+      return circleBoxContact(
+        x,
+        z,
+        radius,
+        this.rocks.x[index],
+        this.rocks.z[index],
+        this.#dynamicBodyHalfX(index),
+        this.#dynamicBodyHalfZ(index),
+        out,
+      );
+    }
+    return circleCircleContact(
+      x,
+      z,
+      radius,
+      this.rocks.x[index],
+      this.rocks.z[index],
+      this.rocks.radius[index],
+      out,
+    );
+  }
+
+  /** @param {number} left @param {number} right @param {Record<string,number>} out */
+  #dynamicBodyPairContact(left, right, out) {
+    const leftBox = this.rocks.collider[left] === DYNAMIC_COLLIDER_FIXED_BOX;
+    const rightBox = this.rocks.collider[right] === DYNAMIC_COLLIDER_FIXED_BOX;
+    if (!leftBox) {
+      if (!rightBox) {
+        return circleCircleContact(
+          this.rocks.x[left],
+          this.rocks.z[left],
+          this.rocks.radius[left],
+          this.rocks.x[right],
+          this.rocks.z[right],
+          this.rocks.radius[right],
+          out,
+        );
+      }
+      return circleBoxContact(
+        this.rocks.x[left],
+        this.rocks.z[left],
+        this.rocks.radius[left],
+        this.rocks.x[right],
+        this.rocks.z[right],
+        this.#dynamicBodyHalfX(right),
+        this.#dynamicBodyHalfZ(right),
+        out,
+      );
+    }
+    if (rightBox) {
+      return boxBoxContact(
+        this.rocks.x[left],
+        this.rocks.z[left],
+        this.#dynamicBodyHalfX(left),
+        this.#dynamicBodyHalfZ(left),
+        this.rocks.x[right],
+        this.rocks.z[right],
+        this.#dynamicBodyHalfX(right),
+        this.#dynamicBodyHalfZ(right),
+        out,
+      );
+    }
+    const hit = circleBoxContact(
+      this.rocks.x[right],
+      this.rocks.z[right],
+      this.rocks.radius[right],
+      this.rocks.x[left],
+      this.rocks.z[left],
+      this.#dynamicBodyHalfX(left),
+      this.#dynamicBodyHalfZ(left),
+      out,
+    );
+    if (hit) {
+      out.nx = -out.nx;
+      out.nz = -out.nz;
+    }
+    return hit;
   }
 
   /** @param {GridMap} candidateMap */
@@ -1200,13 +1533,7 @@ export class Simulation {
     ) return false;
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       if (
-        firstSolidContact(
-          candidateMap,
-          this.rocks.x[index],
-          this.rocks.z[index],
-          this.rocks.radius[index],
-          this._gridContact,
-        )
+        this.#dynamicBodyGridContact(candidateMap, index, this._gridContact)
       ) return false;
     }
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
@@ -1236,9 +1563,15 @@ export class Simulation {
 
   /** @param {number} cx @param {number} cz @param {string} definitionId */
   #paintStructure(cx, cz, definitionId) {
-    if (!this.map.inBounds(cx, cz)) return false;
+    return this.#paintStructureCells([{ cx, cz }], definitionId);
+  }
+
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId */
+  #paintStructureCells(cells, definitionId) {
+    if (cells.length === 0) return true;
+    if (cells.some((cell) => !this.map.inBounds(cell.cx, cell.cz))) return false;
     const candidate = this.scenario.clone();
-    if (!candidate.paintStructure(cx, cz, definitionId)) {
+    if (!candidate.paintStructureCells(cells, definitionId)) {
       this.scenario.lastMutationError = candidate.lastMutationError;
       return false;
     }
@@ -1246,20 +1579,34 @@ export class Simulation {
       this.scenario.lastMutationError = "Structure would overlap an active body";
       return false;
     }
-    const before = this.scenario.structure.cells[this.map.index(cx, cz)];
-    if (!this.scenario.paintStructure(cx, cz, definitionId)) return false;
-    const after = this.scenario.structure.cells[this.map.index(cx, cz)];
-    if (before !== after) this.mapRevision += 1;
+    const mapChanged = cells.some((cell) => (
+      this.map.get(cell.cx, cell.cz) !== candidate.map.get(cell.cx, cell.cz)
+      || this.scenario.occluderMask[this.map.index(cell.cx, cell.cz)]
+        !== candidate.occluderMask[candidate.map.index(cell.cx, cell.cz)]
+    ));
+    if (!this.scenario.paintStructureCells(cells, definitionId)) return false;
+    if (mapChanged) this.mapRevision += 1;
+    this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
   }
 
   /** @param {number} cx @param {number} cz */
   #eraseStructure(cx, cz) {
-    if (!this.map.inBounds(cx, cz)) return false;
-    const before = this.scenario.structure.cells[this.map.index(cx, cz)];
-    if (!this.scenario.eraseStructure(cx, cz)) return false;
-    if (before !== 0) this.mapRevision += 1;
+    return this.#eraseStructureCells([{ cx, cz }]);
+  }
+
+  /** @param {Array<{cx:number,cz:number}>} cells */
+  #eraseStructureCells(cells) {
+    if (cells.length === 0) return true;
+    if (cells.some((cell) => !this.map.inBounds(cell.cx, cell.cz))) return false;
+    const mapChanged = cells.some((cell) => {
+      const index = this.map.index(cell.cx, cell.cz);
+      return this.map.cells[index] !== 0 || this.scenario.occluderMask[index] !== 0;
+    });
+    if (!this.scenario.eraseStructureCells(cells)) return false;
+    if (mapChanged) this.mapRevision += 1;
+    this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
   }
@@ -1272,38 +1619,108 @@ export class Simulation {
    * @param {Record<string,unknown>|undefined} [properties]
    */
   #placeDefinition(definitionId, x, z, rotation, properties) {
-    if (!this.canPlaceDefinition(definitionId, x, z, rotation)) return false;
+    const placement = this.validateInstanceTransform(definitionId, x, z, rotation);
+    if (!placement.valid) {
+      this.scenario.lastMutationError = placement.message;
+      return false;
+    }
     const definition = getPlaceableDefinition(definitionId);
     if (!definition) return false;
+    const transform = placement.transform;
     const authoringId = this.scenario.placeInstance(
       definitionId,
-      x,
-      z,
-      { rotation, ...(properties === undefined ? {} : { properties }) },
+      transform.x,
+      transform.z,
+      {
+        rotation: transform.rotation,
+        ...(properties === undefined ? {} : { properties }),
+      },
     );
     if (!authoringId) return false;
-    if (definition.traits.runtimeKind === "rock") {
-      const archetype = getRockArchetype(String(definition.traits.rockArchetype));
+    if (isDynamicBodyDefinition(definition)) {
+      const entity = this.scenario.entities.find(
+        (candidate) => candidate.authoringId === authoringId,
+      );
+      const body = entity ? dynamicBodyParameters(entity) : null;
       const spawnId = this.scenario.spawnIdForAuthoringId(authoringId);
-      const id = archetype && spawnId
+      const id = spawnId && entity && body
         ? this.rocks.spawn({
           spawnId,
-          archetype: archetype.code,
-          x,
-          z,
-          radius: archetype.radius,
-          massKg: archetype.massKg,
+          definitionId: body.definitionId,
+          archetype: body.archetype,
+          collider: body.collider,
+          rotation: body.rotation,
+          x: entity.x,
+          z: entity.z,
+          radius: body.radius,
+          halfWidth: body.halfWidth,
+          halfDepth: body.halfDepth,
+          massKg: body.massKg,
         })
         : 0;
       if (id === 0) {
         this.scenario.removeInstance(authoringId);
-        this.scenario.lastMutationError = "Rock pool capacity reached";
+        this.scenario.lastMutationError = "Dynamic prop pool capacity reached";
         return false;
       }
     }
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
       this.mapRevision += 1;
     }
+    this.authoringRevision += 1;
+    this.#refreshPreparedAuthoringState();
+    return true;
+  }
+
+  /**
+   * @param {string} authoringId
+   * @param {number} x
+   * @param {number} z
+   * @param {number} rotation
+   */
+  #updateAuthoredInstanceTransform(authoringId, x, z, rotation) {
+    const instance = this.scenario.instanceById(authoringId);
+    if (!instance) return false;
+    const placement = this.validateInstanceTransform(
+      instance.definitionId,
+      x,
+      z,
+      rotation,
+      authoringId,
+    );
+    if (!placement.valid) {
+      this.scenario.lastMutationError = placement.message;
+      return false;
+    }
+    const definition = getPlaceableDefinition(instance.definitionId);
+    if (!definition) return false;
+    const spawnId = this.scenario.spawnIdForAuthoringId(authoringId);
+    if (!this.scenario.updateInstanceTransform(authoringId, placement.transform)) return false;
+    if (isDynamicBodyDefinition(definition) && spawnId !== null) {
+      const rockIndex = this.rocks.findIndexBySpawnId(spawnId);
+      const entity = this.scenario.entities.find(
+        (candidate) => candidate.authoringId === authoringId,
+      );
+      const body = entity ? dynamicBodyParameters(entity) : null;
+      if (rockIndex >= 0) {
+        if (!entity || !body) return false;
+        this.rocks.x[rockIndex] = entity.x;
+        this.rocks.z[rockIndex] = entity.z;
+        this.rocks.previousX[rockIndex] = entity.x;
+        this.rocks.previousZ[rockIndex] = entity.z;
+        this.rocks.collider[rockIndex] = body.collider;
+        this.rocks.rotation[rockIndex] = body.rotation;
+        this.rocks.radius[rockIndex] = body.radius;
+        this.rocks.halfWidth[rockIndex] = body.halfWidth;
+        this.rocks.halfDepth[rockIndex] = body.halfDepth;
+        this.rocks.vx[rockIndex] = 0;
+        this.rocks.vz[rockIndex] = 0;
+      }
+    }
+    if (definition.traits.blocksMovement || definition.traits.blocksSight) {
+      this.mapRevision += 1;
+    }
+    this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
   }
@@ -1320,6 +1737,7 @@ export class Simulation {
     if (definition?.traits.blocksMovement || definition?.traits.blocksSight) {
       this.mapRevision += 1;
     }
+    this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
   }
@@ -2291,10 +2709,13 @@ export class Simulation {
       return false;
     }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
-      if (
-        Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index])
-        < ENEMY_WIZARD.radius + this.rocks.radius[index]
-      ) {
+      if (this.#circleDynamicBodyContact(
+        x,
+        z,
+        ENEMY_WIZARD.radius,
+        index,
+        this._bodyContact,
+      )) {
         return false;
       }
     }
@@ -3609,7 +4030,7 @@ export class Simulation {
       } else {
         maximumSpeed = Math.max(maximumSpeed, speed);
       }
-      minimumRadius = Math.min(minimumRadius, this.rocks.radius[index]);
+      minimumRadius = Math.min(minimumRadius, this.#dynamicBodyMinimumExtent(index));
     }
     for (let index = 0; index < deadBodies.activeCount; index += 1) {
       deadBodies.vx[index] *= deadBodyDamping;
@@ -3669,7 +4090,7 @@ export class Simulation {
           this.projectiles,
           this.dynamicDeadBodies,
         );
-        const playerRockRange = player.radius + MAX_ROCK_RADIUS
+        const playerRockRange = player.radius + MAX_DYNAMIC_BODY_EXTENT
           + BROADPHASE_CORRECTION_MARGIN;
         const playerRockCount = this.broadphase.queryRocks(
           player.x - playerRockRange,
@@ -3692,7 +4113,7 @@ export class Simulation {
           this.#resolvePlayerEnemy(this.broadphase.enemyCandidates[candidate], record);
         }
         for (let enemyIndex = 0; enemyIndex < enemies.activeCount; enemyIndex += 1) {
-          const enemyRockRange = enemies.radius[enemyIndex] + MAX_ROCK_RADIUS
+          const enemyRockRange = enemies.radius[enemyIndex] + MAX_DYNAMIC_BODY_EXTENT
             + BROADPHASE_CORRECTION_MARGIN;
           const enemyRockCount = this.broadphase.queryRocks(
             enemies.x[enemyIndex] - enemyRockRange,
@@ -3725,7 +4146,7 @@ export class Simulation {
           }
         }
         for (let left = 0; left < this.rocks.activeCount; left += 1) {
-          const rockRange = this.rocks.radius[left] + MAX_ROCK_RADIUS
+          const rockRange = this.#dynamicBodyExtent(left) + MAX_DYNAMIC_BODY_EXTENT
             + BROADPHASE_CORRECTION_MARGIN;
           const rightRockCount = this.broadphase.queryRocks(
             this.rocks.x[left] - rockRange,
@@ -3770,7 +4191,7 @@ export class Simulation {
           }
         }
         for (let rockIndex = 0; rockIndex < this.rocks.activeCount; rockIndex += 1) {
-          const range = this.rocks.radius[rockIndex] + ENEMY_WIZARD.radius
+          const range = this.#dynamicBodyExtent(rockIndex) + ENEMY_WIZARD.radius
             + BROADPHASE_CORRECTION_MARGIN;
           const count = this.broadphase.queryDeadBodies(
             this.rocks.x[rockIndex] - range,
@@ -3926,13 +4347,7 @@ export class Simulation {
     const pool = this.rocks;
     for (let pass = 0; pass < 8; pass += 1) {
       if (
-        !firstSolidContact(
-          this.map,
-          pool.x[index],
-          pool.z[index],
-          pool.radius[index],
-          this._gridContact,
-        )
+        !this.#dynamicBodyGridContact(this.map, index, this._gridContact)
       ) {
         break;
       }
@@ -3994,13 +4409,11 @@ export class Simulation {
     const player = this.player;
     const pool = this.rocks;
     if (
-      !circleCircleContact(
+      !this.#circleDynamicBodyContact(
         player.x,
         player.z,
         player.radius,
-        pool.x[index],
-        pool.z[index],
-        pool.radius[index],
+        index,
         this._bodyContact,
       )
     ) {
@@ -4046,13 +4459,11 @@ export class Simulation {
     const enemies = this.enemies;
     const rocks = this.rocks;
     if (
-      !circleCircleContact(
+      !this.#circleDynamicBodyContact(
         enemies.x[enemyIndex],
         enemies.z[enemyIndex],
         enemies.radius[enemyIndex],
-        rocks.x[rockIndex],
-        rocks.z[rockIndex],
-        rocks.radius[rockIndex],
+        rockIndex,
         this._bodyContact,
       )
     ) {
@@ -4251,15 +4662,7 @@ export class Simulation {
   #resolveRockRock(left, right, record) {
     const pool = this.rocks;
     if (
-      !circleCircleContact(
-        pool.x[left],
-        pool.z[left],
-        pool.radius[left],
-        pool.x[right],
-        pool.z[right],
-        pool.radius[right],
-        this._bodyContact,
-      )
+      !this.#dynamicBodyPairContact(left, right, this._bodyContact)
     ) {
       return;
     }
@@ -4438,19 +4841,19 @@ export class Simulation {
     const rocks = this.rocks;
     const bodies = this.dynamicDeadBodies;
     if (
-      !circleCircleContact(
-        rocks.x[rockIndex],
-        rocks.z[rockIndex],
-        rocks.radius[rockIndex],
+      !this.#circleDynamicBodyContact(
         bodies.x[bodyIndex],
         bodies.z[bodyIndex],
         bodies.radius[bodyIndex],
+        rockIndex,
         this._bodyContact,
       )
     ) {
       return;
     }
     const contact = this._bodyContact;
+    contact.nx = -contact.nx;
+    contact.nz = -contact.nz;
     const inverseMassSum = rocks.inverseMass[rockIndex] + bodies.inverseMass[bodyIndex];
     const correction =
       (Math.max(contact.penetration - DYNAMIC_PHYSICS.penetrationSlop, 0)
@@ -4721,7 +5124,7 @@ export class Simulation {
       const distance = Math.hypot(deltaX, deltaZ);
       const stepLength = Math.max(0.025, pool.radius[index] * 0.5);
       const steps = Math.max(1, Math.ceil(distance / stepLength));
-      const rockPadding = pool.radius[index] + MAX_ROCK_RADIUS;
+      const rockPadding = pool.radius[index] + MAX_DYNAMIC_BODY_EXTENT;
       const rockCandidateCount = this.broadphase.queryRocks(
         Math.min(startX, startX + deltaX) - rockPadding,
         Math.min(startZ, startZ + deltaZ) - rockPadding,
@@ -4762,13 +5165,13 @@ export class Simulation {
         }
         for (let candidate = 0; candidate < rockCandidateCount; candidate += 1) {
           const rockIndex = this.broadphase.rockCandidates[candidate];
-          const combinedRadius = pool.radius[index] + this.rocks.radius[rockIndex];
-          if (
-            Math.hypot(
-              testX - this.rocks.x[rockIndex],
-              testZ - this.rocks.z[rockIndex],
-            ) <= combinedRadius
-          ) {
+          if (this.#circleDynamicBodyContact(
+            testX,
+            testZ,
+            pool.radius[index],
+            rockIndex,
+            this._bodyContact,
+          )) {
             hitKind = "rock";
             hitRockIndex = rockIndex;
             hitX = testX;
@@ -5021,8 +5424,24 @@ export class Simulation {
     let hit;
     let cell = null;
     if (hitKind === "rock") {
-      const dx = hitX - this.rocks.x[rockIndex];
-      const dz = hitZ - this.rocks.z[rockIndex];
+      let dx = hitX - this.rocks.x[rockIndex];
+      let dz = hitZ - this.rocks.z[rockIndex];
+      if (this.rocks.collider[rockIndex] === DYNAMIC_COLLIDER_FIXED_BOX) {
+        const halfX = this.#dynamicBodyHalfX(rockIndex);
+        const halfZ = this.#dynamicBodyHalfZ(rockIndex);
+        contactX = clamp(
+          hitX,
+          this.rocks.x[rockIndex] - halfX,
+          this.rocks.x[rockIndex] + halfX,
+        );
+        contactZ = clamp(
+          hitZ,
+          this.rocks.z[rockIndex] - halfZ,
+          this.rocks.z[rockIndex] + halfZ,
+        );
+        dx = hitX - contactX;
+        dz = hitZ - contactZ;
+      }
       const distance = Math.hypot(dx, dz);
       if (distance > 1e-9) {
         nx = dx / distance;
@@ -5032,8 +5451,10 @@ export class Simulation {
         nx = velocityLength > 0 ? -pool.vx[projectileIndex] / velocityLength : 1;
         nz = velocityLength > 0 ? -pool.vz[projectileIndex] / velocityLength : 0;
       }
-      contactX = this.rocks.x[rockIndex] + nx * this.rocks.radius[rockIndex];
-      contactZ = this.rocks.z[rockIndex] + nz * this.rocks.radius[rockIndex];
+      if (this.rocks.collider[rockIndex] !== DYNAMIC_COLLIDER_FIXED_BOX) {
+        contactX = this.rocks.x[rockIndex] + nx * this.rocks.radius[rockIndex];
+        contactZ = this.rocks.z[rockIndex] + nz * this.rocks.radius[rockIndex];
+      }
       hit = { kind: "rock", id: this.rocks.id[rockIndex] };
     } else if (
       hitKind === "player"
@@ -5430,7 +5851,7 @@ export class Simulation {
       originZ: event.originZ,
       bodyX: this.rocks.x[index],
       bodyZ: this.rocks.z[index],
-      bodyRadius: this.rocks.radius[index],
+      bodyRadius: this.#dynamicBodyExtent(index),
       massKg: this.rocks.massKg[index],
       blastRadius: event.radius,
       pressureImpulse: event.pressureImpulse,
@@ -6514,11 +6935,25 @@ export class Simulation {
   snapshot() {
     const rocks = new Array(this.rocks.activeCount);
     for (let index = 0; index < rocks.length; index += 1) {
+      const definitionId = this.rocks.definitionId[index];
+      const definition = getPlaceableDefinition(definitionId);
+      const kind = dynamicBodyKind(definition);
       rocks[index] = {
-        kind: "rock",
+        kind,
         id: this.rocks.id[index],
         spawnId: this.rocks.spawnId[index],
         authoringId: this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]),
+        definitionId,
+        shape: definition?.traits.shape ?? "rock",
+        height: Number(definition?.traits.height ?? this.rocks.radius[index] * 2),
+        upright: definition?.traits.upright === true,
+        collider: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+          ? "box"
+          : "circle",
+        rotation: this.rocks.rotation[index],
+        fixedRotation: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX,
+        halfWidth: this.rocks.halfWidth[index],
+        halfDepth: this.rocks.halfDepth[index],
         archetype: ROCK_NAME_BY_CODE.get(this.rocks.archetype[index]) ?? "unknown",
         index,
         x: this.rocks.x[index],
@@ -6985,7 +7420,11 @@ export class Simulation {
     }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       const distance = Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index]);
-      if (distance <= this.rocks.radius[index] + 0.08 && distance < bestDistance) {
+      const hit = this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+        ? Math.abs(x - this.rocks.x[index]) <= this.#dynamicBodyHalfX(index) + 0.08
+          && Math.abs(z - this.rocks.z[index]) <= this.#dynamicBodyHalfZ(index) + 0.08
+        : distance <= this.rocks.radius[index] + 0.08;
+      if (hit && distance < bestDistance) {
         best = this.#describeRock(index);
         bestDistance = distance;
       }
@@ -7030,7 +7469,7 @@ export class Simulation {
     if (selection.kind === "player" && Number(selection.id) === this.player.id) {
       return this.#describePlayer();
     }
-    if (selection.kind === "rock") {
+    if (selection.kind === "rock" || selection.kind === "torch") {
       const index = this.rocks.findIndexById(Number(selection.id));
       return index < 0 ? null : this.#describeRock(index);
     }
@@ -7201,20 +7640,32 @@ export class Simulation {
 
   /** @param {number} index */
   #describeRock(index) {
+    const definitionId = this.rocks.definitionId[index];
+    const definition = getPlaceableDefinition(definitionId);
+    const kind = dynamicBodyKind(definition);
     return {
-      kind: "rock",
+      kind,
       id: this.rocks.id[index],
       index,
       spawnId: this.rocks.spawnId[index],
+      authoringId: this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]),
+      definitionId,
       archetype: ROCK_NAME_BY_CODE.get(this.rocks.archetype[index]) ?? "unknown",
       position: { x: this.rocks.x[index], y: 0, z: this.rocks.z[index] },
       velocity: { x: this.rocks.vx[index], y: 0, z: this.rocks.vz[index] },
+      collider: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+        ? "box"
+        : "circle",
+      rotation: this.rocks.rotation[index],
+      fixedRotation: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX,
       radius: this.rocks.radius[index],
+      halfWidth: this.rocks.halfWidth[index],
+      halfDepth: this.rocks.halfDepth[index],
       massKg: this.rocks.massKg[index],
       cell: null,
       age: null,
       lifetime: null,
-      flags: { authored: true },
+      flags: { authored: true, upright: definition?.traits.upright === true },
     };
   }
 
@@ -7318,14 +7769,25 @@ export class Simulation {
   }
 
   #refreshPreparedAuthoringState() {
+    this.authoringRevision = stableAuthoringRevision(this.scenario.authoringMap);
     this._preparedAuthoringState = deepFreeze({
       authoring: {
         format: this.scenario.authoringMap.format,
         schemaVersion: AUTHORING_MAP_VERSION,
+        revision: this.authoringRevision,
         metadata: { ...this.scenario.authoringMap.metadata },
         activeLayer: { ...this.scenario.activeLayer },
+        defaultSurfaceDefinitionId: this.scenario.surface.legend[0],
         availableDefinitionIds: listPlaceableDefinitions().map((definition) => definition.id),
-        instances: this.scenario.instances.map((instance) => cloneUnknown(instance)),
+        instances: this.scenario.instances.map((instance) => {
+          const definition = getPlaceableDefinition(instance.definitionId);
+          return {
+            ...cloneUnknown(instance),
+            occupiedCells: definition
+              ? getOccupiedCells(definition, instance)
+              : [],
+          };
+        }),
         runtimeMappings: this.scenario.runtimeMappings.map((mapping) => ({
           ...mapping,
           collisionCells: mapping.collisionCells.map((cell) => ({ ...cell })),
@@ -7347,76 +7809,200 @@ export class Simulation {
     return cloneUnknown(this._preparedAuthoringState.authoring);
   }
 
+  /** @param {string} authoringId */
+  getAuthoredInstance(authoringId) {
+    const instance = this._preparedAuthoringState.authoring.instances.find(
+      (candidate) => candidate.id === authoringId,
+    );
+    return instance ? cloneUnknown(instance) : null;
+  }
+
+  /** @param {number} cx @param {number} cz */
+  authoredCell(cx, cz) {
+    if (!this.map.inBounds(cx, cz)) return null;
+    const index = this.map.index(cx, cz);
+    const surfaceCode = this.scenario.surface.cells[index];
+    const structureCode = this.scenario.structure.cells[index];
+    return {
+      kind: "cell",
+      layerId: this.scenario.activeLayer.id,
+      x: cx,
+      z: cz,
+      surfaceDefinitionId: this.scenario.surface.legend[surfaceCode] ?? null,
+      structureDefinitionId: this.scenario.structure.legend[structureCode] ?? null,
+      solid: this.map.cells[index] === 1,
+      occluding: this.scenario.occluderMask[index] === 1,
+    };
+  }
+
   /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] */
   canPlaceDefinition(definitionId, x, z, rotation = 0) {
+    return this.validateInstanceTransform(definitionId, x, z, rotation).valid;
+  }
+
+  /**
+   * Stateless authoring validation plus current-runtime body checks. The source
+   * document is never mutated and no compiled map is allocated.
+   * @param {string} definitionId
+   * @param {number} x
+   * @param {number} z
+   * @param {number} [rotation]
+   * @param {string|null} [ignoreAuthoringId]
+   */
+  validateInstanceTransform(definitionId, x, z, rotation = 0, ignoreAuthoringId = null) {
+    const source = this.scenario.validateInstanceTransform(
+      definitionId,
+      { x, z, rotation },
+      ignoreAuthoringId ?? undefined,
+    );
+    if (!source.valid) return source;
     const definition = getPlaceableDefinition(definitionId);
-    if (!definition || definition.placementTarget !== "instance") return false;
-    if (definition.traits.runtimeKind === "rock") {
-      return this.canPlaceRock(String(definition.traits.rockArchetype), x, z);
+    if (!definition) return source;
+    const reject = (code, message) => ({ ...source, valid: false, code, message });
+    const ownSpawnId = ignoreAuthoringId
+      ? this.scenario.spawnIdForAuthoringId(ignoreAuthoringId)
+      : null;
+
+    if (
+      isDynamicBodyDefinition(definition)
+      && ignoreAuthoringId === null
+      && this.rocks.activeCount >= this.rocks.capacity
+    ) {
+      return reject("rock_capacity", "Dynamic prop pool capacity reached");
     }
-    const candidate = this.scenario.clone();
-    if (!candidate.placeInstance(definitionId, x, z, { rotation })) return false;
-    return this.#activeBodiesFitMap(candidate.map);
+
+    const candidateIsDynamicCircle = isDynamicCircleDefinition(definition);
+    const candidateIsDynamicBox = isDynamicBoxDefinition(definition);
+    const candidateRuntimeTransform = getRuntimeBodyTransform(definition, source.transform);
+    const radius = Number(definition.traits.radius ?? 0);
+    const candidateHalfX = candidateIsDynamicBox
+      ? ((candidateRuntimeTransform.rotation & 1) === 1
+        ? Number(definition.traits.halfDepth)
+        : Number(definition.traits.halfWidth))
+      : 0;
+    const candidateHalfZ = candidateIsDynamicBox
+      ? ((candidateRuntimeTransform.rotation & 1) === 1
+        ? Number(definition.traits.halfWidth)
+        : Number(definition.traits.halfDepth))
+      : 0;
+    const hitsBody = (bodyX, bodyZ, bodyRadius) => {
+      if (candidateIsDynamicCircle) {
+        return Math.hypot(
+          candidateRuntimeTransform.x - bodyX,
+          candidateRuntimeTransform.z - bodyZ,
+        ) < radius + bodyRadius;
+      }
+      if (candidateIsDynamicBox) {
+        return circleBoxContact(
+          bodyX,
+          bodyZ,
+          bodyRadius,
+          candidateRuntimeTransform.x,
+          candidateRuntimeTransform.z,
+          candidateHalfX,
+          candidateHalfZ,
+          this._bodyContact,
+        );
+      }
+      return circleTouchesFootprint(bodyX, bodyZ, bodyRadius, source.occupiedCells);
+    };
+    const hitsDynamicBody = (index) => {
+      const activeIsBox = this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX;
+      if (candidateIsDynamicCircle) {
+        return this.#circleDynamicBodyContact(
+          candidateRuntimeTransform.x,
+          candidateRuntimeTransform.z,
+          radius,
+          index,
+          this._bodyContact,
+        );
+      }
+      if (candidateIsDynamicBox) {
+        if (activeIsBox) {
+          return boxBoxContact(
+            candidateRuntimeTransform.x,
+            candidateRuntimeTransform.z,
+            candidateHalfX,
+            candidateHalfZ,
+            this.rocks.x[index],
+            this.rocks.z[index],
+            this.#dynamicBodyHalfX(index),
+            this.#dynamicBodyHalfZ(index),
+            this._bodyContact,
+          );
+        }
+        return circleBoxContact(
+          this.rocks.x[index],
+          this.rocks.z[index],
+          this.rocks.radius[index],
+          candidateRuntimeTransform.x,
+          candidateRuntimeTransform.z,
+          candidateHalfX,
+          candidateHalfZ,
+          this._bodyContact,
+        );
+      }
+      if (!activeIsBox) {
+        return circleTouchesFootprint(
+          this.rocks.x[index],
+          this.rocks.z[index],
+          this.rocks.radius[index],
+          source.occupiedCells,
+        );
+      }
+      return source.occupiedCells.some((cell) => boxBoxContact(
+        cell.cx + 0.5,
+        cell.cz + 0.5,
+        0.5,
+        0.5,
+        this.rocks.x[index],
+        this.rocks.z[index],
+        this.#dynamicBodyHalfX(index),
+        this.#dynamicBodyHalfZ(index),
+        this._bodyContact,
+      ));
+    };
+    if (definition.traits.blocksMovement && hitsBody(
+      this.player.x,
+      this.player.z,
+      this.player.radius,
+    )) {
+      return reject("active_player_overlap", "Placement overlaps the active player");
+    }
+    if (definition.traits.blocksMovement) {
+      for (let index = 0; index < this.rocks.activeCount; index += 1) {
+        if (ownSpawnId !== null && this.rocks.spawnId[index] === ownSpawnId) continue;
+        if (hitsDynamicBody(index)) {
+          return reject("active_rock_overlap", "Placement overlaps an active rock");
+        }
+      }
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        if (hitsBody(this.enemies.x[index], this.enemies.z[index], this.enemies.radius[index])) {
+          return reject("active_enemy_overlap", "Placement overlaps an active enemy");
+        }
+      }
+      for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+        if (hitsBody(
+          this.dynamicDeadBodies.x[index],
+          this.dynamicDeadBodies.z[index],
+          this.dynamicDeadBodies.radius[index],
+        )) {
+          return reject("active_body_overlap", "Placement overlaps an active body");
+        }
+      }
+    }
+    return source;
   }
 
   /** @param {number} x @param {number} z */
   authoredInstanceAt(x, z) {
-    for (let index = this.rocks.activeCount - 1; index >= 0; index -= 1) {
-      if (
-        Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index])
-        <= this.rocks.radius[index]
-      ) {
-        const authoringId = this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]);
-        const instance = this.scenario.instances.find((candidate) => candidate.id === authoringId);
-        if (instance) return { ...instance, runtimeId: this.rocks.id[index] };
-      }
-    }
     return this.scenario.instanceAt(x, z);
   }
 
   /** @param {string} archetype @param {number} x @param {number} z */
   canPlaceRock(archetype, x, z) {
-    const definition = getRockArchetype(archetype);
-    if (
-      !definition ||
-      this.rocks.activeCount >= this.rocks.capacity ||
-      !this.scenario.canPlaceRock(archetype, x, z)
-    ) {
-      return false;
-    }
-    if (
-      Math.hypot(x - this.player.x, z - this.player.z) <
-      definition.radius + this.player.radius
-    ) {
-      return false;
-    }
-    for (let index = 0; index < this.rocks.activeCount; index += 1) {
-      if (
-        Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index]) <
-        definition.radius + this.rocks.radius[index]
-      ) {
-        return false;
-      }
-    }
-    for (let index = 0; index < this.enemies.activeCount; index += 1) {
-      if (
-        Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index]) <
-        definition.radius + this.enemies.radius[index]
-      ) {
-        return false;
-      }
-    }
-    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
-      if (
-        Math.hypot(
-          x - this.dynamicDeadBodies.x[index],
-          z - this.dynamicDeadBodies.z[index],
-        ) < definition.radius + this.dynamicDeadBodies.radius[index]
-      ) {
-        return false;
-      }
-    }
-    return true;
+    const definitionId = rockDefinitionId(archetype);
+    return Boolean(definitionId && this.validateInstanceTransform(definitionId, x, z, 0).valid);
   }
 
   saveScenario() {

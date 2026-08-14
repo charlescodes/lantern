@@ -3,6 +3,8 @@
 import { InputController } from "./browser/input.js";
 import { AiView } from "./browser/ai_view.js";
 import { DeveloperToolbox } from "./browser/developer_toolbox.js";
+import { AuthoringEditorController } from "./browser/authoring_editor.js";
+import { AuthoringInspector } from "./browser/authoring_inspector.js";
 import { MapPalette } from "./browser/map_palette.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
@@ -22,8 +24,7 @@ import {
 } from "./presentation/performance_capture.js";
 import { RenderLab } from "./presentation/render_lab.js";
 import { FixedStepRuntime } from "./runtime/fixed_step_runtime.js";
-import { snapDefinitionPlacement } from "./authoring/authoring_commands.js";
-import { getPlaceableDefinition } from "./authoring/definition_catalog.js";
+import { normalizeQuarterTurns } from "./authoring/footprint.js";
 import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
 import { TrueSightSystem } from "./visibility/true_sight.js";
@@ -75,7 +76,6 @@ if (presentationBundle) {
 const { camera, presentation } = presentationBundle;
 renderLab.attachPresentation(presentation);
 document.body.dataset.backend = presentation.diagnostics().activeBackend;
-let editorTool = "structure.wall";
 let resumeAfterEdit = false;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
@@ -83,6 +83,8 @@ let spellLab;
 let aiView;
 let performanceCapture;
 let mapPalette;
+let authoringEditor;
+let authoringInspector;
 
 function presentationDiagnostics() {
   const diagnostics = presentation.diagnostics();
@@ -129,19 +131,14 @@ const runtime = new FixedStepRuntime({
       : { entity: null, hidden: false };
     const selected = selection.entity;
     const pinnedHidden = selection.hidden;
-    const editorDefinition = getPlaceableDefinition(editorTool);
-    let placementValid = true;
-    if (editorDefinition?.placementTarget === "instance") {
-      const snapped = snapDefinitionPlacement(
-        editorDefinition.id,
-        input.mouseWorld.x,
-        input.mouseWorld.z,
-      );
-      placementValid = simulation.canPlaceDefinition(
-        editorDefinition.id,
-        snapped.x,
-        snapped.z,
-      );
+    const editorView = authoringEditor?.sync(snapshot, {
+      x: input.mouseWorld.x,
+      z: input.mouseWorld.z,
+      inside: input.mouseInside && developerToolsOpen && mode === "edit",
+    }) ?? null;
+    if (editorView) {
+      mapPalette?.sync(editorView);
+      authoringInspector?.update(snapshot, editorView);
     }
     presentation.render(snapshot, alpha, {
       mouseWorld: input.mouseWorld,
@@ -149,8 +146,9 @@ const runtime = new FixedStepRuntime({
       hover,
       selected,
       mode,
-      editorTool,
-      placementValid,
+      editorTool: editorView?.selectedDefinitionId ?? "structure.wall",
+      placementValid: editorView?.placementPreview?.valid ?? true,
+      authoringEditor: editorView,
       sightFrame,
       developerToolsOpen,
     });
@@ -186,6 +184,18 @@ function injectMutation(command) {
   const accepted = runtime.injectCommand(command);
   if (accepted) flushPausedMutation();
   return accepted;
+}
+
+/** @param {Record<string,unknown>} action */
+function commitAuthoringAction(action) {
+  const accepted = injectMutation(action);
+  const consumed = runtime.paused;
+  const error = accepted && consumed ? simulation.lastError : null;
+  return {
+    ok: accepted && !error,
+    error: accepted ? error : "Runtime command queue is full",
+    snapshot: simulation.snapshot(),
+  };
 }
 
 function singleStep() {
@@ -236,6 +246,7 @@ function toggleMode() {
     runtime.pause();
     mode = "edit";
   } else {
+    authoringEditor?.cancel();
     trueSight.requestSnap("reset");
     injectMutation({ type: "restoreScenario" });
     pinned = null;
@@ -244,6 +255,11 @@ function toggleMode() {
     resumeAfterEdit = false;
   }
   input.setMode(mode);
+  authoringEditor?.sync(simulation.snapshot(), {
+    x: input.mouseWorld.x,
+    z: input.mouseWorld.z,
+    inside: input.mouseInside && mode === "edit",
+  });
   if (syncPlayerCamera(
     camera,
     runtime.lastSnapshot.player,
@@ -293,45 +309,14 @@ function pinAt(x, z) {
   }
 }
 
-/** @param {string} tool @param {number} button @param {number} x @param {number} z */
-function editAt(tool, button, x, z) {
-  const cx = Math.floor(x);
-  const cz = Math.floor(z);
-  if (button === 2 || tool === "erase") {
-    const instance = simulation.authoredInstanceAt(x, z);
-    if (instance) {
-      injectMutation({ type: "removeInstance", authoringId: instance.id });
-      if (
-        pinned?.kind === "rock"
-        && instance.runtimeId !== undefined
-        && Number(pinned.id) === Number(instance.runtimeId)
-      ) pinned = null;
-    } else {
-      injectMutation({ type: "eraseStructure", cx, cz });
-    }
-    return;
-  }
-  const definition = getPlaceableDefinition(tool);
-  if (!definition) return;
-  if (definition.placementTarget === "surface") {
-    injectMutation({ type: "paintSurface", cx, cz, definitionId: definition.id });
-    return;
-  }
-  if (definition.placementTarget === "structure") {
-    injectMutation({ type: "paintStructure", cx, cz, definitionId: definition.id });
-    return;
-  }
-  if (definition.placementTarget === "instance") {
-    const snapped = snapDefinitionPlacement(definition.id, x, z);
-    injectMutation({
-      type: "placeInstance",
-      definitionId: definition.id,
-      x: snapped.x,
-      z: snapped.z,
-      rotation: 0,
-    });
-  }
-}
+authoringEditor = new AuthoringEditorController({
+  snapshot: initialSnapshot,
+  validatePlacement: (definitionId, x, z, rotation, ignoreId) => (
+    simulation.validateInstanceTransform(definitionId, x, z, rotation, ignoreId)
+  ),
+  commit: commitAuthoringAction,
+  announce: (message) => ui.announce(message),
+});
 
 spellLab = new SpellLab({
   listSpells: () => simulation.listSpells(),
@@ -356,7 +341,14 @@ input = new InputController(canvas, camera, {
   developerToolsOpen: () => developerToolbox.isOpen,
   focusPlayer,
   pinAt,
-  editAt,
+  editorPointerMove: (x, z, inside) => authoringEditor.pointerMove(x, z, inside),
+  editorPointerLeave: () => authoringEditor.pointerLeave(),
+  editorPointerDown: (button, x, z) => authoringEditor.pointerDown(button, x, z),
+  editorPointerUp: (button, x, z, options) => (
+    authoringEditor.pointerUp(button, x, z, options)
+  ),
+  cancelEditorAction: () => authoringEditor.cancel(),
+  rotateEditorSelection: () => authoringEditor.rotate(),
   createCast: (x, z) => spellLab.createCast(x, z),
 });
 
@@ -369,18 +361,39 @@ function restoreAuthoredPositions() {
 
 mapPalette = new MapPalette({
   definitions: simulation.listPlaceableDefinitions(),
-  selectedId: editorTool,
+  selectedId: authoringEditor.snapshot().selectedDefinitionId,
   onSelect: (definitionId) => {
-    editorTool = definitionId ?? "erase";
-    const definition = definitionId ? getPlaceableDefinition(definitionId) : null;
-    input.setEditorTool(
-      editorTool,
-      definition?.placementMode === "paint" ? "paint" : "stamp",
-    );
-    ui.setEditorTool(editorTool);
+    authoringEditor.setDefinition(definitionId);
+    ui.setEditorTool(definitionId);
   },
+  onTool: (tool) => authoringEditor.setTool(tool),
+  onChannel: (channel) => authoringEditor.setChannel(channel),
+  onRotate: () => authoringEditor.rotate(),
+  onExtents: (value) => authoringEditor.setShowAuthoringExtents(value),
   onRestore: restoreAuthoredPositions,
 });
+mapPalette.sync(authoringEditor.snapshot());
+
+authoringInspector = new AuthoringInspector({
+  onUpdate: (instanceId, transform) => {
+    const ok = authoringEditor.updateInstanceTransform(instanceId, transform);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onRotate: (instanceId) => {
+    const instance = simulation.getAuthoredInstance(instanceId);
+    const ok = Boolean(instance && authoringEditor.updateInstanceTransform(instanceId, {
+      x: instance.x,
+      z: instance.z,
+      rotation: normalizeQuarterTurns(instance.rotation + 1),
+    }));
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onDelete: (instanceId) => {
+    const ok = authoringEditor.removeInstance(instanceId);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+});
+authoringInspector.update(simulation.snapshot(), authoringEditor.snapshot());
 
 /** @param {string} id @param {()=>void} handler */
 function onButton(id, handler) {
@@ -522,11 +535,23 @@ const probe = Object.freeze({
     return simulation.queryAt(Number(x), Number(z));
   },
   authoring() {
+    const editor = authoringEditor.snapshot();
     return {
       ...simulation.authoringSnapshot(),
       selectedPaletteDefinition: mapPalette.snapshot().selectedDefinitionId,
       palette: mapPalette.snapshot(),
+      editor,
+      activeTool: editor.activeTool,
+      activeChannel: editor.activeChannel,
+      selectedDefinitionId: editor.selectedDefinitionId,
+      hoveredTarget: editor.hoveredTarget,
+      selectedTarget: editor.selectedTarget,
+      placementPreview: editor.placementPreview,
+      showAuthoringExtents: editor.showAuthoringExtents,
     };
+  },
+  editor() {
+    return authoringEditor.snapshot();
   },
   listPlaceableDefinitions() {
     return simulation.listPlaceableDefinitions();
@@ -535,6 +560,21 @@ const probe = Object.freeze({
     return mapPalette.setSelected(
       definitionId === null || definitionId === "erase" ? null : String(definitionId),
     );
+  },
+  setEditorTool(tool) {
+    return mapPalette.setTool(String(tool));
+  },
+  setAuthoringChannel(channel) {
+    return mapPalette.setChannel(String(channel));
+  },
+  setAuthoringExtents(value) {
+    return mapPalette.setExtents(Boolean(value));
+  },
+  selectAuthoringAt(x, z) {
+    return authoringEditor.selectAt(Number(x), Number(z));
+  },
+  getAuthoredInstance(authoringId) {
+    return simulation.getAuthoredInstance(String(authoringId));
   },
   setTile(cx, cz, tile) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
@@ -547,6 +587,10 @@ const probe = Object.freeze({
   paintStructure(cx, cz, definitionId = "structure.wall") {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
     return injectMutation({ type: "paintStructure", cx, cz, definitionId });
+  },
+  eraseSurface(cx, cz) {
+    if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
+    return injectMutation({ type: "eraseSurface", cx, cz });
   },
   eraseStructure(cx, cz) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
@@ -605,6 +649,33 @@ const probe = Object.freeze({
       return false;
     }
     return injectMutation({ type: "removeInstance", authoringId });
+  },
+  updateInstanceTransform(authoringId, transform = {}) {
+    const instance = simulation.getAuthoredInstance(String(authoringId));
+    if (!instance) return false;
+    return authoringEditor.updateInstanceTransform(instance.id, {
+      x: Number(transform.x ?? instance.x),
+      z: Number(transform.z ?? instance.z),
+      rotation: Number(transform.rotation ?? instance.rotation),
+    });
+  },
+  moveInstance(authoringId, x, z) {
+    const instance = simulation.getAuthoredInstance(String(authoringId));
+    if (!instance) return false;
+    return authoringEditor.updateInstanceTransform(instance.id, {
+      x: Number(x),
+      z: Number(z),
+      rotation: instance.rotation,
+    });
+  },
+  rotateInstance(authoringId, delta = 1) {
+    const instance = simulation.getAuthoredInstance(String(authoringId));
+    if (!instance) return false;
+    return authoringEditor.updateInstanceTransform(instance.id, {
+      x: instance.x,
+      z: instance.z,
+      rotation: normalizeQuarterTurns(instance.rotation + Number(delta)),
+    });
   },
   removeEntity(kind, id) {
     if (String(kind) !== "rock") return false;
@@ -832,7 +903,7 @@ Object.defineProperty(window, "__lantern", {
   writable: false,
 });
 ui.setMode(mode);
-ui.setEditorTool(editorTool);
+ui.setEditorTool(authoringEditor.snapshot().selectedDefinitionId);
 focusPlayer();
 runtime.start();
 ui.finishPresentationWarmup();

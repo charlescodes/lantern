@@ -13,6 +13,7 @@ import {
   writeSparkFireColor,
 } from "../src/presentation/light_budget.js";
 import { applyLightPool } from "../src/presentation/light_pool.js";
+import { mergeCatalogPropLights } from "../src/presentation/catalog_lights.js";
 
 /** @param {number} id @param {number} x @param {number} z @param {number} [size] @param {number} [age] */
 function particle(id, x, z, size = 0.06, age = 0.1) {
@@ -76,6 +77,34 @@ function burst(firstId, x, z, count = 8) {
     )
   ));
 }
+
+test("catalog prop lights lease bounded resident slots and follow runtime torch positions", () => {
+  const transient = Array.from({ length: 16 }, (_, residentSlot) => ({
+    key: `transient:${residentSlot}`,
+    residentSlot,
+  }));
+  const torches = Array.from({ length: 6 }, (_, index) => ({
+    kind: "torch",
+    id: index + 1,
+    authoringId: `torch-${5 - index}`,
+    definitionId: "object.torch",
+    x: 10 + index,
+    z: 20 + index,
+  }));
+  const assignments = mergeCatalogPropLights(transient, torches, 16);
+  const propLights = assignments.filter((assignment) => assignment.kind === "catalog-prop");
+
+  assert.equal(assignments.length, 16);
+  assert.deepEqual(propLights.map((light) => light.residentSlot), [12, 13, 14, 15]);
+  assert.deepEqual(
+    propLights.map((light) => light.authoringId),
+    ["torch-0", "torch-1", "torch-2", "torch-3"],
+  );
+  assert.equal(propLights[0].x, 15);
+  assert.equal(propLights[0].y, 1.82);
+  assert.equal(propLights[0].intensity, 18);
+  assert.equal(assignments.some((light) => light.key === "transient:15"), false);
+});
 
 test("default topology is two atomic eight-slot effect groups", () => {
   const budget = new PresentationLightBudget();

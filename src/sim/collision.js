@@ -323,6 +323,61 @@ export function firstSolidContact(map, x, z, radius, out) {
 }
 
 /**
+ * Writes fixed axis-aligned box-vs-cell contact data. The normal points from
+ * the solid cell toward the dynamic box so callers can apply the same positive
+ * correction used for circular bodies.
+ * @param {number} x
+ * @param {number} z
+ * @param {number} halfX
+ * @param {number} halfZ
+ * @param {number} cx
+ * @param {number} cz
+ * @param {{nx:number,nz:number,penetration:number,px:number,pz:number,cx:number,cz:number}} out
+ */
+export function boxCellContact(x, z, halfX, halfZ, cx, cz, out) {
+  const overlapX = Math.min(x + halfX, cx + 1) - Math.max(x - halfX, cx);
+  const overlapZ = Math.min(z + halfZ, cz + 1) - Math.max(z - halfZ, cz);
+  if (overlapX < 0 || overlapZ < 0) return false;
+  out.cx = cx;
+  out.cz = cz;
+  out.px = clamp(x, cx, cx + 1);
+  out.pz = clamp(z, cz, cz + 1);
+  if (overlapX <= overlapZ) {
+    out.nx = x < cx + 0.5 ? -1 : 1;
+    out.nz = 0;
+    out.penetration = overlapX;
+  } else {
+    out.nx = 0;
+    out.nz = z < cz + 0.5 ? -1 : 1;
+    out.penetration = overlapZ;
+  }
+  return true;
+}
+
+/**
+ * @param {{get(cx:number,cz:number):number}} map
+ * @param {number} x
+ * @param {number} z
+ * @param {number} halfX
+ * @param {number} halfZ
+ * @param {{nx:number,nz:number,penetration:number,px:number,pz:number,cx:number,cz:number}} out
+ */
+export function firstSolidBoxContact(map, x, z, halfX, halfZ, out) {
+  const minX = Math.floor(x - halfX);
+  const maxX = Math.floor(x + halfX);
+  const minZ = Math.floor(z - halfZ);
+  const maxZ = Math.floor(z + halfZ);
+  for (let cz = minZ; cz <= maxZ; cz += 1) {
+    for (let cx = minX; cx <= maxX; cx += 1) {
+      if (map.get(cx, cz) === 1 && boxCellContact(x, z, halfX, halfZ, cx, cz, out)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Iteratively moves a circle out of solid cells and removes inward velocity.
  * @param {{get(cx:number,cz:number):number}} map
  * @param {{x:number,z:number,vx:number,vz:number}} body
@@ -375,6 +430,85 @@ export function circleCircleContact(ax, az, aRadius, bx, bz, bRadius, out) {
   }
   out.x = ax + out.nx * aRadius;
   out.z = az + out.nz * aRadius;
+  return true;
+}
+
+/**
+ * Contact normal points from circle A toward fixed-orientation box B, matching
+ * circleCircleContact's A-to-B convention.
+ * @param {number} ax
+ * @param {number} az
+ * @param {number} aRadius
+ * @param {number} bx
+ * @param {number} bz
+ * @param {number} bHalfX
+ * @param {number} bHalfZ
+ * @param {{nx:number,nz:number,penetration:number,x:number,z:number}} out
+ */
+export function circleBoxContact(ax, az, aRadius, bx, bz, bHalfX, bHalfZ, out) {
+  const minimumX = bx - bHalfX;
+  const maximumX = bx + bHalfX;
+  const minimumZ = bz - bHalfZ;
+  const maximumZ = bz + bHalfZ;
+  const closestX = clamp(ax, minimumX, maximumX);
+  const closestZ = clamp(az, minimumZ, maximumZ);
+  const dx = closestX - ax;
+  const dz = closestZ - az;
+  const distanceSquared = dx * dx + dz * dz;
+  if (distanceSquared > aRadius * aRadius) return false;
+  if (distanceSquared > 1e-12) {
+    const distance = Math.sqrt(distanceSquared);
+    out.nx = dx / distance;
+    out.nz = dz / distance;
+    out.penetration = aRadius - distance;
+  } else {
+    const toLeft = ax - minimumX;
+    const toRight = maximumX - ax;
+    const toTop = az - minimumZ;
+    const toBottom = maximumZ - az;
+    const nearest = Math.min(toLeft, toRight, toTop, toBottom);
+    out.nx = 0;
+    out.nz = 0;
+    if (nearest === toLeft) out.nx = 1;
+    else if (nearest === toRight) out.nx = -1;
+    else if (nearest === toTop) out.nz = 1;
+    else out.nz = -1;
+    out.penetration = aRadius + nearest;
+  }
+  out.x = ax + out.nx * aRadius;
+  out.z = az + out.nz * aRadius;
+  return out.penetration >= 0;
+}
+
+/**
+ * Contact normal points from fixed-orientation box A toward box B.
+ * @param {number} ax
+ * @param {number} az
+ * @param {number} aHalfX
+ * @param {number} aHalfZ
+ * @param {number} bx
+ * @param {number} bz
+ * @param {number} bHalfX
+ * @param {number} bHalfZ
+ * @param {{nx:number,nz:number,penetration:number,x:number,z:number}} out
+ */
+export function boxBoxContact(ax, az, aHalfX, aHalfZ, bx, bz, bHalfX, bHalfZ, out) {
+  const deltaX = bx - ax;
+  const deltaZ = bz - az;
+  const overlapX = aHalfX + bHalfX - Math.abs(deltaX);
+  const overlapZ = aHalfZ + bHalfZ - Math.abs(deltaZ);
+  if (overlapX <= 0 || overlapZ <= 0) return false;
+  if (overlapX <= overlapZ) {
+    out.nx = deltaX < 0 ? -1 : 1;
+    out.nz = 0;
+    out.penetration = overlapX;
+  } else {
+    out.nx = 0;
+    out.nz = deltaZ < 0 ? -1 : 1;
+    out.penetration = overlapZ;
+  }
+  out.x = ax + out.nx * aHalfX;
+  out.z = az + out.nz * aHalfZ;
   return true;
 }
 

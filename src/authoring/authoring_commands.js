@@ -2,6 +2,7 @@
 
 import { cloneAuthoringMap } from "./authoring_map.js";
 import { getPlaceableDefinition } from "./definition_catalog.js";
+import { normalizeQuarterTurns } from "./footprint.js";
 
 /** @param {ReturnType<typeof cloneAuthoringMap>} document @param {string|undefined} layerId */
 function layerFor(document, layerId) {
@@ -42,18 +43,68 @@ function legendIndex(legend, definitionId) {
 
 /**
  * @param {unknown} input
+ * @param {Array<{cx:number,cz:number}>} cells
+ * @param {"surface"|"structure"} target
+ * @param {string|null} definitionId
+ * @param {string} [layerId]
+ */
+function mutateCells(input, cells, target, definitionId, layerId) {
+  if (!Array.isArray(cells) || cells.length === 0) return cloneAuthoringMap(input);
+  if (definitionId !== null) definitionFor(definitionId, target);
+  const document = cloneAuthoringMap(input);
+  const layer = layerFor(document, layerId);
+  const code = definitionId === null ? 0 : legendIndex(layer[target].legend, definitionId);
+  const visited = new Set();
+  for (const cell of cells) {
+    const index = cellIndex(layer, Number(cell.cx), Number(cell.cz));
+    if (visited.has(index)) continue;
+    visited.add(index);
+    layer[target].cells[index] = code;
+  }
+  return document;
+}
+
+/**
+ * Atomically paints a surface stroke in one cloned authoring document.
+ * @param {unknown} input
+ * @param {Array<{cx:number,cz:number}>} cells
+ * @param {string} definitionId
+ * @param {string} [layerId]
+ */
+export function paintSurfaceCells(input, cells, definitionId, layerId) {
+  return mutateCells(input, cells, "surface", definitionId, layerId);
+}
+
+/**
+ * Atomically paints a structure stroke in one cloned authoring document.
+ * @param {unknown} input
+ * @param {Array<{cx:number,cz:number}>} cells
+ * @param {string} definitionId
+ * @param {string} [layerId]
+ */
+export function paintStructureCells(input, cells, definitionId, layerId) {
+  return mutateCells(input, cells, "structure", definitionId, layerId);
+}
+
+/** @param {unknown} input @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
+export function eraseSurfaceCells(input, cells, layerId) {
+  return mutateCells(input, cells, "surface", null, layerId);
+}
+
+/** @param {unknown} input @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
+export function eraseStructureCells(input, cells, layerId) {
+  return mutateCells(input, cells, "structure", null, layerId);
+}
+
+/**
+ * @param {unknown} input
  * @param {number} cx
  * @param {number} cz
  * @param {string} definitionId
  * @param {string} [layerId]
  */
 export function paintSurface(input, cx, cz, definitionId, layerId) {
-  definitionFor(definitionId, "surface");
-  const document = cloneAuthoringMap(input);
-  const layer = layerFor(document, layerId);
-  const index = cellIndex(layer, cx, cz);
-  layer.surface.cells[index] = legendIndex(layer.surface.legend, definitionId);
-  return document;
+  return paintSurfaceCells(input, [{ cx, cz }], definitionId, layerId);
 }
 
 /**
@@ -64,12 +115,18 @@ export function paintSurface(input, cx, cz, definitionId, layerId) {
  * @param {string} [layerId]
  */
 export function paintStructure(input, cx, cz, definitionId, layerId) {
-  definitionFor(definitionId, "structure");
-  const document = cloneAuthoringMap(input);
-  const layer = layerFor(document, layerId);
-  const index = cellIndex(layer, cx, cz);
-  layer.structure.cells[index] = legendIndex(layer.structure.legend, definitionId);
-  return document;
+  return paintStructureCells(input, [{ cx, cz }], definitionId, layerId);
+}
+
+/**
+ * Resets a surface cell to the active layer's documented default (legend code 0).
+ * @param {unknown} input
+ * @param {number} cx
+ * @param {number} cz
+ * @param {string} [layerId]
+ */
+export function eraseSurface(input, cx, cz, layerId) {
+  return eraseSurfaceCells(input, [{ cx, cz }], layerId);
 }
 
 /**
@@ -79,10 +136,7 @@ export function paintStructure(input, cx, cz, definitionId, layerId) {
  * @param {string} [layerId]
  */
 export function eraseStructure(input, cx, cz, layerId) {
-  const document = cloneAuthoringMap(input);
-  const layer = layerFor(document, layerId);
-  layer.structure.cells[cellIndex(layer, cx, cz)] = 0;
-  return document;
+  return eraseStructureCells(input, [{ cx, cz }], layerId);
 }
 
 /** @param {string} definitionId @param {number} ordinal */
@@ -137,10 +191,42 @@ export function placeInstance(input, definitionId, x, z, options = {}) {
     definitionId,
     x: Number(x),
     z: Number(z),
-    rotation: options.rotation ?? 0,
+    rotation: normalizeQuarterTurns(options.rotation ?? 0),
     ...(options.properties === undefined ? {} : { properties: options.properties }),
   });
   return { document: cloneAuthoringMap(document), instanceId };
+}
+
+/**
+ * Updates common sparse-instance transform fields as one semantic mutation.
+ * Stable authoring identity, definition, placement order, and properties remain
+ * unchanged.
+ * @param {unknown} input
+ * @param {string} instanceId
+ * @param {{x?:number,z?:number,rotation?:number}} transform
+ * @param {string} [layerId]
+ */
+export function updateInstanceTransform(input, instanceId, transform, layerId) {
+  const document = cloneAuthoringMap(input);
+  const layer = layerFor(document, layerId);
+  const instance = layer.instances.find((candidate) => candidate.id === instanceId);
+  if (!instance) throw new RangeError(`Unknown authoring instance "${instanceId}"`);
+  if (transform.x !== undefined) instance.x = Number(transform.x);
+  if (transform.z !== undefined) instance.z = Number(transform.z);
+  if (transform.rotation !== undefined) {
+    instance.rotation = normalizeQuarterTurns(transform.rotation);
+  }
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} input @param {string} instanceId @param {number} x @param {number} z @param {string} [layerId] */
+export function moveInstance(input, instanceId, x, z, layerId) {
+  return updateInstanceTransform(input, instanceId, { x, z }, layerId);
+}
+
+/** @param {unknown} input @param {string} instanceId @param {number} rotation @param {string} [layerId] */
+export function rotateInstance(input, instanceId, rotation, layerId) {
+  return updateInstanceTransform(input, instanceId, { rotation }, layerId);
 }
 
 /**

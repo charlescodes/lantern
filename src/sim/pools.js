@@ -510,7 +510,10 @@ export class RockPool {
     this.nextId = 1;
     this.id = new Uint32Array(capacity);
     this.spawnId = new Uint32Array(capacity);
+    this.definitionId = new Array(capacity).fill(null);
     this.archetype = new Uint8Array(capacity);
+    this.collider = new Uint8Array(capacity);
+    this.rotation = new Uint8Array(capacity);
     this.x = new Float32Array(capacity);
     this.z = new Float32Array(capacity);
     this.previousX = new Float32Array(capacity);
@@ -518,6 +521,8 @@ export class RockPool {
     this.vx = new Float32Array(capacity);
     this.vz = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
+    this.halfWidth = new Float32Array(capacity);
+    this.halfDepth = new Float32Array(capacity);
     this.massKg = new Float32Array(capacity);
     this.inverseMass = new Float32Array(capacity);
   }
@@ -529,7 +534,7 @@ export class RockPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnId:number,archetype:number,x:number,z:number,radius:number,massKg:number}} value */
+  /** @param {{spawnId:number,definitionId?:string|null,archetype:number,collider?:number,rotation?:number,x:number,z:number,radius:number,halfWidth?:number,halfDepth?:number,massKg:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -540,7 +545,10 @@ export class RockPool {
     this.nextId = (this.nextId + 1) >>> 0 || 1;
     this.id[index] = id;
     this.spawnId[index] = value.spawnId;
+    this.definitionId[index] = value.definitionId ?? null;
     this.archetype[index] = value.archetype;
+    this.collider[index] = value.collider ?? 0;
+    this.rotation[index] = value.rotation ?? 0;
     this.x[index] = value.x;
     this.z[index] = value.z;
     this.previousX[index] = value.x;
@@ -548,6 +556,8 @@ export class RockPool {
     this.vx[index] = 0;
     this.vz[index] = 0;
     this.radius[index] = value.radius;
+    this.halfWidth[index] = value.halfWidth ?? 0;
+    this.halfDepth[index] = value.halfDepth ?? 0;
     this.massKg[index] = value.massKg;
     this.inverseMass[index] = 1 / value.massKg;
     this.activeCount += 1;
@@ -561,7 +571,10 @@ export class RockPool {
     if (index !== last) {
       this.id[index] = this.id[last];
       this.spawnId[index] = this.spawnId[last];
+      this.definitionId[index] = this.definitionId[last];
       this.archetype[index] = this.archetype[last];
+      this.collider[index] = this.collider[last];
+      this.rotation[index] = this.rotation[last];
       this.x[index] = this.x[last];
       this.z[index] = this.z[last];
       this.previousX[index] = this.previousX[last];
@@ -569,10 +582,13 @@ export class RockPool {
       this.vx[index] = this.vx[last];
       this.vz[index] = this.vz[last];
       this.radius[index] = this.radius[last];
+      this.halfWidth[index] = this.halfWidth[last];
+      this.halfDepth[index] = this.halfDepth[last];
       this.massKg[index] = this.massKg[last];
       this.inverseMass[index] = this.inverseMass[last];
     }
     this.activeCount = last;
+    this.definitionId[last] = null;
     return true;
   }
 

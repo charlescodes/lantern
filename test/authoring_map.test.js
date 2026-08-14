@@ -138,6 +138,32 @@ test("a sparse pillar footprint contributes collision and sight occlusion", () =
   assert.equal(compiled.entities.some((entity) => entity.authoringId === placed.instanceId), false);
 });
 
+test("a table compiles as a movable fixed-orientation box without blocking TrueSight", () => {
+  const placed = placeInstance(
+    sourceDocument(),
+    "object.table",
+    3.5,
+    3.5,
+    { rotation: 1 },
+  );
+  const compiled = compileAuthoringMap(placed.document);
+  for (const [cx, cz] of [[3, 3], [3, 4]]) {
+    const index = cz * compiled.map.width + cx;
+    assert.equal(compiled.solidMask[index], 0);
+    assert.equal(compiled.occluderMask[index], 0);
+  }
+  const entity = compiled.entities.find(
+    (candidate) => candidate.authoringId === placed.instanceId,
+  );
+  assert.equal(entity?.kind, "dynamicInstance");
+  assert.equal(entity?.collider, "box");
+  assert.equal(entity?.fixedRotation, true);
+  assert.equal(entity?.rotation, 1);
+  assert.equal(entity?.x, 3.5);
+  assert.equal(entity?.z, 4);
+  assert.equal(entity?.massKg, 320);
+});
+
 test("unknown definitions and malformed legacy data report useful diagnostics", () => {
   const unknown = JSON.parse(JSON.stringify(sourceDocument()));
   unknown.layers[0].surface.legend[0] = "surface.missing";
@@ -200,6 +226,34 @@ test("runtime rock movement never rewrites its saved authoring placement", () =>
   assert.equal(saved.layers[0].instances[0].x, authoredX);
   simulation.tick({ type: "restoreScenario" });
   assert.equal(simulation.rocks.x[0], authoredX);
+});
+
+test("an upright torch is a movable runtime circle without rewriting its authored placement", () => {
+  const placed = placeInstance(sourceDocument(), "object.torch", 4.5, 4.5);
+  const simulation = new Simulation({
+    scenario: new ArenaScenario(placed.document),
+    particleBurstCount: 0,
+  });
+  const initial = simulation.snapshot().rocks.find(
+    (body) => body.authoringId === placed.instanceId,
+  );
+
+  assert.equal(initial?.kind, "torch");
+  assert.equal(initial?.definitionId, "object.torch");
+  assert.equal(initial?.upright, true);
+  assert.equal(initial?.height, 2);
+  assert.ok(Math.abs(Number(initial?.radius) - 0.1) < 1e-6);
+  assert.equal(initial?.massKg, 8);
+  assert.equal(simulation.map.get(4, 4), 0);
+  assert.equal(simulation.snapshot().map.occluderCells[4 * 8 + 4], 0);
+
+  simulation.rocks.vx[0] = 2;
+  simulation.tick(null);
+  assert.notEqual(simulation.rocks.x[0], 4.5);
+  assert.equal(JSON.parse(simulation.saveMap()).layers[0].instances[0].x, 4.5);
+  simulation.tick({ type: "restoreScenario" });
+  assert.equal(simulation.rocks.x[0], 4.5);
+  assert.equal(simulation.snapshot().rocks[0].kind, "torch");
 });
 
 test("prepared authoring presentation data is reused between ticks and refreshed after edits", () => {

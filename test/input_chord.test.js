@@ -39,7 +39,7 @@ function dispatch(target, type, values) {
   target.dispatchEvent(event);
 }
 
-function createInput() {
+function createInput(overrides = {}) {
   const canvas = new FakeCanvas();
   const camera = new Camera2D({ centerX: 10, centerZ: 20 });
   camera.resize(800, 400);
@@ -54,7 +54,7 @@ function createInput() {
       toggleMode: () => {},
       focusPlayer: () => {},
       pinAt: () => {},
-      editAt: () => {},
+      ...overrides,
     },
   );
   return { canvas, input };
@@ -144,4 +144,42 @@ test("right-button movement can begin while the left button remains held", () =>
     });
     dispatch(window, "mouseup", { button: 0, clientX: 570, clientY: 120 });
   });
+});
+
+test("edit-mode pointer actions never invoke play movement, casting, or pinning", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const fakeWindow = new EventTarget();
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: fakeWindow,
+  });
+  try {
+    const calls = { casts: 0, pins: 0, downs: 0, ups: 0 };
+    const { canvas, input } = createInput({
+      createCast: () => {
+        calls.casts += 1;
+        return { x: 0, z: 0 };
+      },
+      pinAt: () => { calls.pins += 1; },
+      editorPointerDown: () => { calls.downs += 1; },
+      editorPointerUp: () => { calls.ups += 1; },
+    });
+    input.setMode("edit");
+    dispatch(canvas, "pointermove", { clientX: 420, clientY: 180 });
+    dispatch(canvas, "mousedown", { button: 2, clientX: 420, clientY: 180 });
+    assert.deepEqual(input.sampleCommand(), { move: null, cast: null });
+    dispatch(fakeWindow, "mouseup", { button: 2, clientX: 420, clientY: 180 });
+    dispatch(canvas, "mousedown", { button: 0, clientX: 420, clientY: 180 });
+    assert.deepEqual(input.sampleCommand(), { move: null, cast: null });
+    dispatch(fakeWindow, "mouseup", { button: 0, clientX: 420, clientY: 180 });
+
+    assert.deepEqual(calls, { casts: 0, pins: 0, downs: 2, ups: 2 });
+  } finally {
+    if (previousWindow) {
+      Object.defineProperty(globalThis, "window", previousWindow);
+    } else {
+      delete globalThis.window;
+    }
+  }
 });

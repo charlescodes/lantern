@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Seed |
 | Authority | Non-authoritative soft specification |
-| Last reviewed | 2026-08-10 |
+| Last reviewed | 2026-08-13 |
 | Scheduling | Unprioritized; no dates, releases, or commitments |
 
 This is the low-friction home for gameplay sparks that are worth keeping but
@@ -54,6 +54,14 @@ story and leave the unrelated ideas here.
 
 - **Electricity needs its hook.** The element wants a distinctive interaction,
   target, or environmental use; the fantasy is still open.
+- **Catalog-defined ranged interaction.** Movement blocking, TrueSight
+  occlusion, and ranged-projectile interaction should remain separate traits.
+  Tables and small rocks are the motivating cases for letting Fireballs,
+  arrows, and similar ranged objects pass over without striking or affecting
+  the prop. Once there are more placeable objects, each definition should be
+  able to opt into the relevant ranged interactions instead of inheriting them
+  from `blocksMovement`. Exact trait names, projectile classes, and whether
+  height or trajectory should matter remain open for that later content pass.
 - **Lighted projectile trails.** Fireballs and arrows leave visible trails.
   This feels especially right for MoM, *Missiles of Magic*.
 - **Bouncing spells.** A spell ricochets off walls for a fixed number of
