@@ -38,6 +38,9 @@ export class AuthoringEditorController {
    * snapshot:Record<string,any>,
    * validatePlacement:(definitionId:string,x:number,z:number,rotation:number,ignoreId?:string|null)=>Record<string,any>,
    * commit:(action:Record<string,unknown>)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
+   * historySnapshot?:()=>Record<string,any>,
+   * undo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
+   * redo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
    * announce?:(message:string)=>void,
    * }} options
    */
@@ -45,6 +48,9 @@ export class AuthoringEditorController {
     this.currentSnapshot = options.snapshot;
     this.validatePlacement = options.validatePlacement;
     this.commitAction = options.commit;
+    this.getHistorySnapshot = options.historySnapshot ?? (() => ({}));
+    this.undoHistory = options.undo ?? (() => ({ ok: false, error: "Undo is unavailable" }));
+    this.redoHistory = options.redo ?? (() => ({ ok: false, error: "Redo is unavailable" }));
     this.announce = options.announce ?? (() => {});
     this.state = new EditorInteractionState({ selectedDefinitionId: "structure.wall" });
     this.pointer = { x: 0, z: 0, inside: false };
@@ -321,6 +327,26 @@ export class AuthoringEditorController {
     return result;
   }
 
+  /** @param {string} instanceId @param {Record<string,unknown>|undefined} properties */
+  updateInstanceProperties(instanceId, properties) {
+    if (!this.#instance(instanceId)) return false;
+    const result = this.#commit({
+      type: "updateInstanceProperties",
+      authoringId: instanceId,
+      properties,
+    });
+    if (result) this.#message(`Updated properties for ${instanceId}`, true);
+    return result;
+  }
+
+  undo() {
+    return this.#traverseHistory("undo");
+  }
+
+  redo() {
+    return this.#traverseHistory("redo");
+  }
+
   /** @param {string} instanceId */
   selectInstance(instanceId) {
     const instance = this.#instance(instanceId);
@@ -347,6 +373,10 @@ export class AuthoringEditorController {
     const hoveredDefinition = hoveredInstance
       ? getPlaceableDefinition(hoveredInstance.definitionId)
       : null;
+    const history = {
+      ...this.getHistorySnapshot(),
+      transactionActive: Boolean(this.gesture),
+    };
     return {
       ...this.state.snapshot(),
       hoveredIdentity: hoveredInstance
@@ -358,6 +388,7 @@ export class AuthoringEditorController {
         : null,
       dragging: this.gesture?.kind === "move",
       pendingAction: this.gesture?.kind ?? null,
+      history,
       status: {
         message: this.lastMessage,
         valid: this.lastMessageValid,
@@ -545,6 +576,29 @@ export class AuthoringEditorController {
     this.state.reconcile(this.currentSnapshot.authoring);
     if (!result.ok) this.#message(result.error ?? "Authoring action was rejected", false);
     return result.ok;
+  }
+
+  /** @param {"undo"|"redo"} operation */
+  #traverseHistory(operation) {
+    if (this.gesture) {
+      this.cancel();
+      this.#refreshHoverAndPreview();
+      this.#message(`Canceled pending edit; ${operation} was not run`, true);
+      return false;
+    }
+    const result = operation === "undo" ? this.undoHistory() : this.redoHistory();
+    if (result.snapshot) this.currentSnapshot = result.snapshot;
+    this.state.reconcile(this.currentSnapshot.authoring);
+    this.#refreshHoverAndPreview();
+    if (!result.ok) {
+      this.#message(result.error ?? `Nothing to ${operation}`, false);
+      return false;
+    }
+    this.#message(
+      `${operation === "undo" ? "Undid" : "Redid"} ${result.label ?? "authoring action"}`,
+      true,
+    );
+    return true;
   }
 
   /** @param {string} instanceId */

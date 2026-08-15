@@ -44,6 +44,7 @@ import {
   AUTHORING_MAP_VERSION,
   cloneAuthoringMap,
 } from "../authoring/authoring_map.js";
+import { applyAuthoringCommand } from "../authoring/authoring_history.js";
 import {
   getPlaceableDefinition,
   isDynamicBodyDefinition,
@@ -453,6 +454,12 @@ function canonicalAction(value) {
         x: Number(action.x),
         z: Number(action.z),
         rotation: Number(action.rotation),
+      };
+    case "applyAuthoringCommand":
+      return {
+        type: "applyAuthoringCommand",
+        command: cloneUnknown(action.command),
+        direction: action.direction === "reverse" ? "reverse" : "forward",
       };
     case "removeEntity":
       return {
@@ -1195,6 +1202,7 @@ export class Simulation {
       if (
         defeatedOnly
         && action.type !== "reset"
+        && action.type !== "applyAuthoringCommand"
         && action.type !== "applySpellDefinition"
         && action.type !== "clearSpellEffects"
       ) {
@@ -1203,6 +1211,33 @@ export class Simulation {
       try {
         if (action.type === "reset") {
           this.reset(action.seed);
+        } else if (action.type === "applyAuthoringCommand") {
+          const nextDocument = applyAuthoringCommand(
+            this.scenario.toAuthoringJSON(),
+            action.command,
+            action.direction,
+          );
+          const candidate = new ArenaScenario(nextDocument);
+          if (
+            candidate.entities.filter(isDynamicRuntimeEntity).length
+            > this.rocks.capacity
+          ) {
+            throw new RangeError(
+              "Authoring command exceeds the configured dynamic prop pool capacity",
+            );
+          }
+          this.scenario = candidate;
+          this.map = candidate.map;
+          this.authoringRevision += 1;
+          this.#refreshPreparedAuthoringState();
+          this.mapRevision += 1;
+          this.#restoreAuthoredState();
+          this.impactEvents.clear();
+          this.combatEvents.clear();
+          this.combatEventDropped = 0;
+          this.perceptionEvents.clear();
+          this.perceptionEventDropped = 0;
+          this.#clearSoundEventHistory();
         } else if (action.type === "restoreScenario") {
           this.#restoreAuthoredState();
           this.impactEvents.clear();
@@ -7809,12 +7844,24 @@ export class Simulation {
     return cloneUnknown(this._preparedAuthoringState.authoring);
   }
 
+  /** Returns a detached saved-source document for editor command reduction. */
+  authoringDocument() {
+    return this.scenario.toAuthoringJSON();
+  }
+
   /** @param {string} authoringId */
   getAuthoredInstance(authoringId) {
     const instance = this._preparedAuthoringState.authoring.instances.find(
       (candidate) => candidate.id === authoringId,
     );
     return instance ? cloneUnknown(instance) : null;
+  }
+
+  /** @param {number} runtimeId */
+  authoringIdForRuntimeBodyId(runtimeId) {
+    const index = this.rocks.findIndexById(Number(runtimeId));
+    if (index < 0) return null;
+    return this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]);
   }
 
   /** @param {number} cx @param {number} cz */

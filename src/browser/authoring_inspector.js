@@ -31,6 +31,7 @@ export class AuthoringInspector {
    * @param {{
    * root?:HTMLElement|null,
    * onUpdate:(instanceId:string,transform:{x:number,z:number,rotation:number})=>boolean|{ok:boolean,message?:string},
+   * onUpdateProperties?:(instanceId:string,properties:Record<string,unknown>)=>boolean|{ok:boolean,message?:string},
    * onRotate:(instanceId:string)=>boolean|{ok:boolean,message?:string},
    * onDelete:(instanceId:string)=>boolean|{ok:boolean,message?:string},
    * }} options
@@ -39,6 +40,7 @@ export class AuthoringInspector {
     this.root = options.root ?? document.getElementById("authoring-inspector");
     if (!this.root) throw new Error("Missing #authoring-inspector");
     this.onUpdate = options.onUpdate;
+    this.onUpdateProperties = options.onUpdateProperties ?? (() => false);
     this.onRotate = options.onRotate;
     this.onDelete = options.onDelete;
     this.collapsed = false;
@@ -240,10 +242,45 @@ export class AuthoringInspector {
 
     const properties = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = "Definition-specific properties (read-only)";
-    const propertyText = document.createElement("pre");
-    propertyText.textContent = JSON.stringify(instance.properties ?? {}, null, 2);
-    properties.append(summary, propertyText);
+    summary.textContent = "Definition-specific properties";
+    const propertyForm = document.createElement("form");
+    propertyForm.className = "authoring-properties-form";
+    const propertyInput = document.createElement("textarea");
+    propertyInput.name = "properties";
+    propertyInput.rows = 5;
+    propertyInput.spellcheck = false;
+    propertyInput.value = JSON.stringify(instance.properties ?? {}, null, 2);
+    propertyInput.setAttribute("aria-label", "Instance properties JSON");
+    const propertyButton = document.createElement("button");
+    propertyButton.type = "submit";
+    propertyButton.textContent = "Apply properties";
+    propertyForm.append(propertyInput, propertyButton);
+    propertyForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      let parsed;
+      try {
+        parsed = JSON.parse(propertyInput.value);
+      } catch (error) {
+        this.showStatus(
+          `Properties must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+          false,
+        );
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        this.showStatus("Properties must be a JSON object", false);
+        return;
+      }
+      const result = this.onUpdateProperties(instance.id, parsed);
+      const ok = typeof result === "boolean" ? result : result.ok;
+      if (!ok) this.showStatus(
+        typeof result === "object" && result.message
+          ? result.message
+          : "Properties rejected; authored source was not changed",
+        false,
+      );
+    });
+    properties.append(summary, propertyForm);
     this.content.append(properties);
     this.showStatus("Transform edits validate and commit through authoring actions", true);
   }

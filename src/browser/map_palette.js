@@ -30,6 +30,8 @@ export class MapPalette {
    * onTool?:(tool:string)=>void,
    * onChannel?:(channel:string)=>void,
    * onRotate?:()=>void,
+   * onUndo?:()=>void,
+   * onRedo?:()=>void,
    * onExtents?:(value:boolean)=>void,
    * onRestore?:()=>void
    * }} options
@@ -43,6 +45,8 @@ export class MapPalette {
     this.onTool = options.onTool ?? (() => {});
     this.onChannel = options.onChannel ?? (() => {});
     this.onRotate = options.onRotate ?? (() => {});
+    this.onUndo = options.onUndo ?? (() => {});
+    this.onRedo = options.onRedo ?? (() => {});
     this.onExtents = options.onExtents ?? (() => {});
     this.onRestore = options.onRestore ?? (() => {});
     this.selectedId = this.definitionIds.has(options.selectedId)
@@ -53,6 +57,13 @@ export class MapPalette {
     this.activeChannel = "structure";
     this.previewRotation = 0;
     this.showAuthoringExtents = false;
+    this.history = {
+      canUndo: false,
+      canRedo: false,
+      dirty: false,
+      nextUndoLabel: null,
+      nextRedoLabel: null,
+    };
     this.definitionButtons = new Map();
     this.toolButtons = new Map();
     this.channelButtons = new Map();
@@ -90,6 +101,24 @@ export class MapPalette {
     this.selectionOutput = document.createElement("output");
     selection.append(this.selectionOutput);
     this.body.append(selection);
+
+    const history = document.createElement("div");
+    history.className = "map-palette-history";
+    const historyButtons = document.createElement("div");
+    historyButtons.className = "map-palette-history-buttons";
+    this.undoButton = document.createElement("button");
+    this.undoButton.type = "button";
+    this.undoButton.textContent = "Undo";
+    this.undoButton.addEventListener("click", () => this.onUndo());
+    this.redoButton = document.createElement("button");
+    this.redoButton.type = "button";
+    this.redoButton.textContent = "Redo";
+    this.redoButton.addEventListener("click", () => this.onRedo());
+    historyButtons.append(this.undoButton, this.redoButton);
+    this.dirtyOutput = document.createElement("output");
+    this.dirtyOutput.className = "map-palette-dirty";
+    history.append(historyButtons, this.dirtyOutput);
+    this.body.append(history);
 
     const stateLine = document.createElement("p");
     stateLine.className = "map-palette-state";
@@ -244,6 +273,7 @@ export class MapPalette {
     this.activeChannel = editor.activeChannel;
     this.previewRotation = editor.previewRotation;
     this.showAuthoringExtents = Boolean(editor.showAuthoringExtents);
+    this.history = { ...this.history, ...(editor.history ?? {}) };
     const hovered = editor.hoveredTarget;
     this.hoverOutput.textContent = editor.hoveredIdentity
       ? `Hover: ${editor.hoveredIdentity.label} · ${editor.hoveredIdentity.authoringId}`
@@ -267,6 +297,23 @@ export class MapPalette {
     this.rotationOutput.value = `${this.previewRotation * 90}°`;
     this.rotationOutput.textContent = `${this.previewRotation * 90}°`;
     this.extentsCheckbox.checked = this.showAuthoringExtents;
+    this.undoButton.disabled = !this.history.canUndo;
+    this.redoButton.disabled = !this.history.canRedo;
+    this.undoButton.textContent = this.history.nextUndoLabel
+      ? `Undo ${this.history.nextUndoLabel}`
+      : "Undo";
+    this.redoButton.textContent = this.history.nextRedoLabel
+      ? `Redo ${this.history.nextRedoLabel}`
+      : "Redo";
+    this.undoButton.title = this.history.nextUndoLabel
+      ? `Undo ${this.history.nextUndoLabel} (Ctrl/Meta+Z)`
+      : "Nothing to undo";
+    this.redoButton.title = this.history.nextRedoLabel
+      ? `Redo ${this.history.nextRedoLabel} (Ctrl/Meta+Shift+Z or Ctrl/Meta+Y)`
+      : "Nothing to redo";
+    this.dirtyOutput.value = this.history.dirty ? "Unsaved changes" : "Saved";
+    this.dirtyOutput.textContent = this.history.dirty ? "Unsaved changes" : "Saved";
+    this.dirtyOutput.dataset.dirty = String(Boolean(this.history.dirty));
     for (const [id, button] of this.definitionButtons) {
       const active = id === this.selectedId;
       button.classList.toggle("is-active", active);
@@ -304,6 +351,7 @@ export class MapPalette {
       activeChannel: this.activeChannel,
       previewRotation: this.previewRotation,
       showAuthoringExtents: this.showAuthoringExtents,
+      history: { ...this.history },
       collapsed: this.collapsed,
       availableDefinitionIds: [...this.definitionIds],
     };

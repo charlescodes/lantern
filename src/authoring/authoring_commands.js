@@ -219,6 +219,27 @@ export function updateInstanceTransform(input, instanceId, transform, layerId) {
   return cloneAuthoringMap(document);
 }
 
+/**
+ * Replaces the JSON-serializable, definition-specific property bag while
+ * preserving stable identity, transform, and placement order.
+ * @param {unknown} input
+ * @param {string} instanceId
+ * @param {Record<string,unknown>|undefined} properties
+ * @param {string} [layerId]
+ */
+export function updateInstanceProperties(input, instanceId, properties, layerId) {
+  const document = cloneAuthoringMap(input);
+  const layer = layerFor(document, layerId);
+  const instance = layer.instances.find((candidate) => candidate.id === instanceId);
+  if (!instance) throw new RangeError(`Unknown authoring instance "${instanceId}"`);
+  if (properties === undefined) {
+    delete instance.properties;
+  } else {
+    instance.properties = properties;
+  }
+  return cloneAuthoringMap(document);
+}
+
 /** @param {unknown} input @param {string} instanceId @param {number} x @param {number} z @param {string} [layerId] */
 export function moveInstance(input, instanceId, x, z, layerId) {
   return updateInstanceTransform(input, instanceId, { x, z }, layerId);

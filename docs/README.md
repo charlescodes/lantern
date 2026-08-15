@@ -20,7 +20,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 ## Current contracts
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
-- [M1A.1 map-authoring foundation](./notes/map-authoring-foundation.md) — authoring-map v1, catalog-driven palette, legacy migration, stateless compilation, and source/runtime identity boundaries.
+- [M1A.1–M1A.3 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v1, catalog-driven editing, deterministic selection, bounded semantic undo/redo, and source/runtime identity boundaries.
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.

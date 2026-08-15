@@ -21,6 +21,8 @@ export class InputController {
    * editorPointerUp?:(button:number,x:number,z:number,options:{moved:boolean})=>void,
    * cancelEditorAction?:()=>void,
    * rotateEditorSelection?:()=>void,
+   * undoEditor?:()=>void,
+   * redoEditor?:()=>void,
    * createCast?:(x:number,z:number)=>Record<string,unknown>|null
    * }} actions
    */
@@ -242,15 +244,29 @@ export class InputController {
   /** @param {KeyboardEvent} event */
   #onKeyDown(event) {
     const target = event.target;
-    if (
-      target instanceof HTMLInputElement
-      || target instanceof HTMLTextAreaElement
-      || target instanceof HTMLSelectElement
-      || target instanceof HTMLButtonElement
-      || (target instanceof HTMLElement && target.isContentEditable)
-    ) {
+    const isInstance = (name, value) => (
+      typeof globalThis[name] === "function"
+      && value instanceof globalThis[name]
+    );
+    const editingText = isInstance("HTMLInputElement", target)
+      || isInstance("HTMLTextAreaElement", target)
+      || isInstance("HTMLSelectElement", target)
+      || (isInstance("HTMLElement", target) && target.isContentEditable);
+    if (editingText) {
       return;
     }
+    const key = String(event.key ?? "").toLowerCase();
+    const commandModifier = event.ctrlKey || event.metaKey;
+    if (this.mode === "edit" && commandModifier && !event.altKey) {
+      const redo = key === "y" || (key === "z" && event.shiftKey);
+      if (key === "z" || key === "y") {
+        event.preventDefault();
+        if (redo) this.actions.redoEditor?.();
+        else this.actions.undoEditor?.();
+        return;
+      }
+    }
+    if (isInstance("HTMLButtonElement", target)) return;
     if (this.actions.developerToolsOpen && !this.actions.developerToolsOpen()) {
       return;
     }
@@ -263,16 +279,16 @@ export class InputController {
     } else if (event.key === "Escape" && this.mode === "edit") {
       event.preventDefault();
       this.actions.cancelEditorAction?.();
-    } else if (event.key.toLowerCase() === "r" && this.mode === "edit") {
+    } else if (key === "r" && this.mode === "edit") {
       event.preventDefault();
       this.actions.rotateEditorSelection?.();
-    } else if (event.key.toLowerCase() === "r") {
+    } else if (key === "r") {
       event.preventDefault();
       this.actions.reset(event.shiftKey);
-    } else if (event.key.toLowerCase() === "e") {
+    } else if (key === "e") {
       event.preventDefault();
       this.actions.toggleMode();
-    } else if (event.key.toLowerCase() === "f") {
+    } else if (key === "f") {
       event.preventDefault();
       this.actions.focusPlayer();
     }

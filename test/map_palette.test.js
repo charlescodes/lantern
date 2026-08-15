@@ -44,12 +44,16 @@ test("palette groups are derived from catalog categories in stable order", () =>
   assert.equal(groups[2].definitions.every((definition) => definition.placementMode === "stamp"), true);
 });
 
-test("editor markup provides one generated palette mount instead of per-definition buttons", async () => {
-  const [html, main] = await Promise.all([
+test("editor markup provides one generated palette mount and generated history controls", async () => {
+  const [html, main, palette] = await Promise.all([
     readFile(new URL("../index.html", import.meta.url), "utf8"),
     readFile(new URL("../src/main.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/browser/map_palette.js", import.meta.url), "utf8"),
   ]);
   assert.match(html, /id="map-palette"[\s\S]*?data-developer-surface/);
   assert.doesNotMatch(html, /data-editor-tool=/);
   assert.match(main, /new MapPalette\(\{[\s\S]*?simulation\.listPlaceableDefinitions\(\)/);
+  assert.match(palette, /this\.undoButton[\s\S]*?this\.redoButton/);
+  assert.match(palette, /Unsaved changes/);
+  assert.match(main, /onUndo: \(\) => authoringEditor\.undo\(\)/);
 });

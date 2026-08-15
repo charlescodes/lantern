@@ -25,6 +25,10 @@ import {
 import { RenderLab } from "./presentation/render_lab.js";
 import { FixedStepRuntime } from "./runtime/fixed_step_runtime.js";
 import { normalizeQuarterTurns } from "./authoring/footprint.js";
+import {
+  AuthoringHistory,
+  commandFromAuthoringAction,
+} from "./authoring/authoring_history.js";
 import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
 import { TrueSightSystem } from "./visibility/true_sight.js";
@@ -85,6 +89,7 @@ let performanceCapture;
 let mapPalette;
 let authoringEditor;
 let authoringInspector;
+let authoringHistory;
 
 function presentationDiagnostics() {
   const diagnostics = presentation.diagnostics();
@@ -186,16 +191,51 @@ function injectMutation(command) {
   return accepted;
 }
 
-/** @param {Record<string,unknown>} action */
-function commitAuthoringAction(action) {
-  const accepted = injectMutation(action);
-  const consumed = runtime.paused;
-  const error = accepted && consumed ? simulation.lastError : null;
-  return {
+/** Runs a mutation immediately so history advances only after fixed-tick acceptance. */
+function applyImmediateMutation(command) {
+  const resumeAfter = !runtime.paused && mode === "play";
+  if (!runtime.paused) runtime.pause();
+  const accepted = injectMutation(command);
+  const error = accepted ? simulation.lastError : "Runtime command queue is full";
+  const result = {
     ok: accepted && !error,
-    error: accepted ? error : "Runtime command queue is full",
+    error,
     snapshot: simulation.snapshot(),
   };
+  if (resumeAfter) runtime.resume();
+  return result;
+}
+
+/** @param {Record<string,any>} command @param {"forward"|"reverse"} direction */
+function applyHistoryCommand(command, direction) {
+  trueSight.requestSnap("map");
+  pinned = null;
+  return applyImmediateMutation({
+    type: "applyAuthoringCommand",
+    command,
+    direction,
+  });
+}
+
+/** @param {Record<string,unknown>} action */
+function commitAuthoringAction(action) {
+  try {
+    const command = commandFromAuthoringAction(simulation.authoringDocument(), action);
+    const result = authoringHistory.execute(command);
+    return {
+      ok: result.ok,
+      error: result.error,
+      snapshot: result.snapshot ?? simulation.snapshot(),
+      recorded: result.recorded,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      snapshot: simulation.snapshot(),
+      recorded: false,
+    };
+  }
 }
 
 function singleStep() {
@@ -309,12 +349,19 @@ function pinAt(x, z) {
   }
 }
 
+authoringHistory = new AuthoringHistory({
+  apply: applyHistoryCommand,
+});
+
 authoringEditor = new AuthoringEditorController({
   snapshot: initialSnapshot,
   validatePlacement: (definitionId, x, z, rotation, ignoreId) => (
     simulation.validateInstanceTransform(definitionId, x, z, rotation, ignoreId)
   ),
   commit: commitAuthoringAction,
+  historySnapshot: () => authoringHistory.snapshot(),
+  undo: () => authoringHistory.undo(),
+  redo: () => authoringHistory.redo(),
   announce: (message) => ui.announce(message),
 });
 
@@ -349,6 +396,8 @@ input = new InputController(canvas, camera, {
   ),
   cancelEditorAction: () => authoringEditor.cancel(),
   rotateEditorSelection: () => authoringEditor.rotate(),
+  undoEditor: () => authoringEditor.undo(),
+  redoEditor: () => authoringEditor.redo(),
   createCast: (x, z) => spellLab.createCast(x, z),
 });
 
@@ -369,6 +418,8 @@ mapPalette = new MapPalette({
   onTool: (tool) => authoringEditor.setTool(tool),
   onChannel: (channel) => authoringEditor.setChannel(channel),
   onRotate: () => authoringEditor.rotate(),
+  onUndo: () => authoringEditor.undo(),
+  onRedo: () => authoringEditor.redo(),
   onExtents: (value) => authoringEditor.setShowAuthoringExtents(value),
   onRestore: restoreAuthoredPositions,
 });
@@ -377,6 +428,10 @@ mapPalette.sync(authoringEditor.snapshot());
 authoringInspector = new AuthoringInspector({
   onUpdate: (instanceId, transform) => {
     const ok = authoringEditor.updateInstanceTransform(instanceId, transform);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onUpdateProperties: (instanceId, properties) => {
+    const ok = authoringEditor.updateInstanceProperties(instanceId, properties);
     return { ok, message: authoringEditor.snapshot().status.message };
   },
   onRotate: (instanceId) => {
@@ -426,11 +481,17 @@ function downloadJson(filename, data) {
   link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
 }
 
 onButton("save-map-button", () => {
-  downloadJson("lantern-scenario.json", simulation.saveScenario());
-  ui.announce("Scenario JSON exported");
+  try {
+    downloadJson("lantern-scenario.json", simulation.saveScenario());
+    authoringHistory.markSaved();
+    ui.announce("Scenario JSON exported; saved revision updated");
+  } catch (error) {
+    ui.showError(error);
+  }
 });
 onButton("snapshot-button", () => {
   downloadJson("lantern-snapshot.json", { ...simulation.snapshot(), runtime: runtime.metrics() });
@@ -443,13 +504,28 @@ onButton("command-log-button", () => {
 
 const mapFileInput = /** @type {HTMLInputElement} */ (document.getElementById("map-file-input"));
 onButton("load-map-button", () => mapFileInput.click());
+
+/** @param {string|unknown} json */
+function loadAuthoringJson(json) {
+  const loadedScenario = ArenaScenario.fromJSON(json);
+  const result = applyImmediateMutation({ type: "loadScenario", json });
+  if (!result.ok) throw new RangeError(result.error ?? "Scenario load was rejected");
+  authoringHistory.clear();
+  authoringEditor.cancel();
+  authoringEditor.sync(result.snapshot, {
+    x: input.mouseWorld.x,
+    z: input.mouseWorld.z,
+    inside: input.mouseInside && mode === "edit",
+  });
+  return loadedScenario;
+}
+
 mapFileInput.addEventListener("change", async () => {
   const file = mapFileInput.files?.[0];
   if (!file) return;
   try {
     const json = await file.text();
-    const loadedScenario = ArenaScenario.fromJSON(json);
-    injectMutation({ type: "loadScenario", json });
+    const loadedScenario = loadAuthoringJson(json);
     pinned = null;
     focusWorldPoint(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
     ui.clearError();
@@ -536,6 +612,7 @@ const probe = Object.freeze({
   },
   authoring() {
     const editor = authoringEditor.snapshot();
+    const history = editor.history;
     return {
       ...simulation.authoringSnapshot(),
       selectedPaletteDefinition: mapPalette.snapshot().selectedDefinitionId,
@@ -548,10 +625,32 @@ const probe = Object.freeze({
       selectedTarget: editor.selectedTarget,
       placementPreview: editor.placementPreview,
       showAuthoringExtents: editor.showAuthoringExtents,
+      history,
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      undoDepth: history.undoDepth,
+      redoDepth: history.redoDepth,
+      historyCapacity: history.capacity,
+      currentCommandLabel: history.currentCommandLabel,
+      nextUndoLabel: history.nextUndoLabel,
+      nextRedoLabel: history.nextRedoLabel,
+      dirty: history.dirty,
+      currentAuthoringRevisionId: history.currentRevisionId,
+      savedAuthoringRevisionId: history.savedRevisionId,
+      transactionActive: history.transactionActive,
     };
   },
   editor() {
     return authoringEditor.snapshot();
+  },
+  authoringHistory() {
+    return { ...authoringEditor.snapshot().history };
+  },
+  undoAuthoring() {
+    return mode === "edit" && authoringEditor.undo();
+  },
+  redoAuthoring() {
+    return mode === "edit" && authoringEditor.redo();
   },
   listPlaceableDefinitions() {
     return simulation.listPlaceableDefinitions();
@@ -578,37 +677,43 @@ const probe = Object.freeze({
   },
   setTile(cx, cz, tile) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
-    return injectMutation({ type: "setTile", cx, cz, tile });
+    return commitAuthoringAction({ type: "setTile", cx, cz, tile }).ok;
   },
   paintSurface(cx, cz, definitionId = "surface.stone") {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
-    return injectMutation({ type: "paintSurface", cx, cz, definitionId });
+    return commitAuthoringAction({ type: "paintSurface", cx, cz, definitionId }).ok;
   },
   paintStructure(cx, cz, definitionId = "structure.wall") {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
-    return injectMutation({ type: "paintStructure", cx, cz, definitionId });
+    return commitAuthoringAction({ type: "paintStructure", cx, cz, definitionId }).ok;
   },
   eraseSurface(cx, cz) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
-    return injectMutation({ type: "eraseSurface", cx, cz });
+    return commitAuthoringAction({ type: "eraseSurface", cx, cz }).ok;
   },
   eraseStructure(cx, cz) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
-    return injectMutation({ type: "eraseStructure", cx, cz });
+    return commitAuthoringAction({ type: "eraseStructure", cx, cz }).ok;
   },
   saveMap() {
-    return simulation.saveMap();
+    const json = simulation.saveMap();
+    authoringHistory.markSaved();
+    return json;
   },
   saveScenario() {
-    return simulation.saveScenario();
+    const json = simulation.saveScenario();
+    authoringHistory.markSaved();
+    return json;
   },
   loadMap(json) {
-    const loadedScenario = ArenaScenario.fromJSON(json);
-    const accepted = injectMutation({ type: "loadScenario", json });
-    if (accepted) {
+    try {
+      const loadedScenario = loadAuthoringJson(json);
       focusWorldPoint(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
+      return true;
+    } catch (error) {
+      ui.showError(error);
+      return false;
     }
-    return accepted;
   },
   loadScenario(json) {
     return this.loadMap(json);
@@ -621,7 +726,7 @@ const probe = Object.freeze({
   },
   placeRock(archetype, x, z) {
     if (!simulation.canPlaceRock(String(archetype), Number(x), Number(z))) return false;
-    return injectMutation({ type: "placeRock", archetype, x, z });
+    return commitAuthoringAction({ type: "placeRock", archetype, x, z }).ok;
   },
   canPlaceInstance(definitionId, x, z, rotation = 0) {
     return simulation.canPlaceDefinition(
@@ -635,20 +740,20 @@ const probe = Object.freeze({
     const id = String(definitionId);
     const rotation = Number(options.rotation ?? 0);
     if (!simulation.canPlaceDefinition(id, Number(x), Number(z), rotation)) return false;
-    return injectMutation({
+    return commitAuthoringAction({
       type: "placeInstance",
       definitionId: id,
       x,
       z,
       rotation,
       ...(options.properties === undefined ? {} : { properties: options.properties }),
-    });
+    }).ok;
   },
   removeInstance(authoringId) {
     if (!simulation.authoringSnapshot().instances.some((instance) => instance.id === String(authoringId))) {
       return false;
     }
-    return injectMutation({ type: "removeInstance", authoringId });
+    return commitAuthoringAction({ type: "removeInstance", authoringId }).ok;
   },
   updateInstanceTransform(authoringId, transform = {}) {
     const instance = simulation.getAuthoredInstance(String(authoringId));
@@ -677,16 +782,45 @@ const probe = Object.freeze({
       rotation: normalizeQuarterTurns(instance.rotation + Number(delta)),
     });
   },
+  updateInstanceProperties(authoringId, properties = {}) {
+    return authoringEditor.updateInstanceProperties(String(authoringId), properties);
+  },
   removeEntity(kind, id) {
     if (String(kind) !== "rock") return false;
-    if (!simulation.resolveSelection({ kind: "rock", id: Number(id) })) return false;
-    return injectMutation({ type: "removeEntity", kind: "rock", id });
+    const authoringId = simulation.authoringIdForRuntimeBodyId(Number(id));
+    return authoringId
+      ? commitAuthoringAction({ type: "removeInstance", authoringId }).ok
+      : false;
   },
   restoreScenario() {
     trueSight.requestSnap("reset");
     return injectMutation({ type: "restoreScenario" });
   },
   injectCommand(command) {
+    if (command && typeof command === "object" && !Array.isArray(command)) {
+      const action = /** @type {Record<string,any>} */ (command);
+      if (action.type === "loadMap" || action.type === "loadScenario") {
+        return this.loadMap(action.json);
+      }
+      if (new Set([
+        "setTile",
+        "paintSurface",
+        "paintSurfaceStroke",
+        "eraseSurface",
+        "eraseSurfaceStroke",
+        "paintStructure",
+        "paintStructureStroke",
+        "eraseStructure",
+        "eraseStructureStroke",
+        "placeRock",
+        "placeInstance",
+        "removeInstance",
+        "updateInstanceTransform",
+        "updateInstanceProperties",
+      ]).has(String(action.type))) {
+        return commitAuthoringAction(action).ok;
+      }
+    }
     return injectMutation(command);
   },
   exportCommandLog() {
