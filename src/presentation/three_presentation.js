@@ -82,6 +82,10 @@ function clamp(value, minimum, maximum) {
 /** @param {{width:number,height:number,cells:number[]}} map @param {Array<{cell:{cx:number,cz:number}}>} [obelisks] */
 function hashMap(map, obelisks = []) {
   let hash = 2_166_136_261;
+  const identity = `${map.layerId ?? "legacy"}|${map.playerSpawn.x}|${map.playerSpawn.z}`;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash = Math.imul(hash ^ identity.charCodeAt(index), 16_777_619);
+  }
   hash = Math.imul(hash ^ map.width, 16_777_619);
   hash = Math.imul(hash ^ map.height, 16_777_619);
   for (const cell of map.cells) hash = Math.imul(hash ^ cell, 16_777_619);
@@ -686,6 +690,14 @@ export class ThreePresentation {
     this.gpuCaptureActive = false;
     this.gpuRenderSamples = [];
     this._gpuResolvePromise = null;
+    this.activeBaseY = 0;
+    this.worldRoot = new THREE.Group();
+    this.worldRoot.name = "active-runtime-layer";
+    for (const child of [...this.scene.children]) {
+      if (child === this.threeCamera || child === this.ambientLight) continue;
+      this.worldRoot.add(child);
+    }
+    this.scene.add(this.worldRoot);
     this.#applyShadowFlag();
   }
 
@@ -752,6 +764,7 @@ export class ThreePresentation {
    */
   render(snapshot, alpha, view) {
     const totalStarted = performance.now();
+    this.#setActiveBaseY(snapshot.map.baseY);
     this.resize();
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
@@ -790,6 +803,7 @@ export class ThreePresentation {
     completeInstancedPoolSubmission(this.particleMesh);
     completeInstancedPoolSubmission(this.projectileMesh);
     completeInstancedPoolSubmission(this.kineticFragmentMesh);
+    completeInstancedPoolSubmission(this.authoringOverlayMesh);
     this._bloomEnabled = bloomEnabled;
     const submitFinished = performance.now();
     this.#sampleGpuTimer();
@@ -935,6 +949,7 @@ export class ThreePresentation {
       editorTool: "structure.wall",
       placementValid: true,
     };
+    this.#setActiveBaseY(snapshot.map.baseY);
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
     this.#updateAuthoringInstances(snapshot.authoring?.instances ?? []);
@@ -1124,11 +1139,26 @@ export class ThreePresentation {
     this.threeCamera.bottom = pose.bottom;
     this.threeCamera.near = pose.near;
     this.threeCamera.far = pose.far;
-    this.threeCamera.position.set(pose.position.x, pose.position.y, pose.position.z);
-    this._cameraTarget.set(pose.target.x, pose.target.y, pose.target.z);
+    this.threeCamera.position.set(
+      pose.position.x,
+      pose.position.y + this.activeBaseY,
+      pose.position.z,
+    );
+    this._cameraTarget.set(
+      pose.target.x,
+      pose.target.y + this.activeBaseY,
+      pose.target.z,
+    );
     this.threeCamera.lookAt(this._cameraTarget);
     this.threeCamera.updateProjectionMatrix();
     this.threeCamera.updateMatrixWorld();
+  }
+
+  /** @param {unknown} value */
+  #setActiveBaseY(value) {
+    const baseY = Number(value);
+    this.activeBaseY = Number.isFinite(baseY) ? baseY : 0;
+    this.worldRoot.position.y = this.activeBaseY;
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
@@ -1288,7 +1318,7 @@ export class ThreePresentation {
 
     if (dimensionsChanged) {
       if (this.gridLines) {
-        this.scene.remove(this.gridLines);
+        this.worldRoot.remove(this.gridLines);
         this.gridLines.geometry.dispose();
         if (!Array.isArray(this.gridLines.material)) this.gridLines.material.dispose();
       }
@@ -1310,7 +1340,7 @@ export class ThreePresentation {
         })),
       );
       this.gridLines.name = "metric-grid";
-      this.scene.add(this.gridLines);
+      this.worldRoot.add(this.gridLines);
       this.#replaceSurfaceMesh(map.width * map.height);
       this.#replaceAuthoringMeshes(map.width * map.height);
       this.#replaceWallMesh(map.width * map.height);
@@ -1369,7 +1399,7 @@ export class ThreePresentation {
 
   /** @param {number} capacity */
   #replaceSurfaceMesh(capacity) {
-    if (this.surfaceMesh) this.scene.remove(this.surfaceMesh);
+    if (this.surfaceMesh) this.worldRoot.remove(this.surfaceMesh);
     this.surfaceMesh = createDynamicInstancedPool(
       this.surfaceGeometry,
       this.surfaceMaterial,
@@ -1378,14 +1408,14 @@ export class ThreePresentation {
       { instanceColors: true },
     );
     this.surfaceMesh.receiveShadow = true;
-    this.scene.add(this.surfaceMesh);
+    this.worldRoot.add(this.surfaceMesh);
   }
 
   /** @param {number} capacity */
   #replaceAuthoringMeshes(capacity) {
-    if (this.pillarMesh) this.scene.remove(this.pillarMesh);
-    if (this.tableMesh) this.scene.remove(this.tableMesh);
-    if (this.authoringOverlayMesh) this.scene.remove(this.authoringOverlayMesh);
+    if (this.pillarMesh) this.worldRoot.remove(this.pillarMesh);
+    if (this.tableMesh) this.worldRoot.remove(this.tableMesh);
+    if (this.authoringOverlayMesh) this.worldRoot.remove(this.authoringOverlayMesh);
     this.pillarMesh = createDynamicInstancedPool(
       this.pillarGeometry,
       this.pillarMaterial,
@@ -1405,13 +1435,13 @@ export class ThreePresentation {
     this.authoringOverlayMesh = createDynamicInstancedPool(
       this.authoringOverlayGeometry,
       this.authoringOverlayMaterial,
-      capacity + 1_024,
+      capacity * 3 + 1_024,
       "authoring-footprint-overlays",
       { instanceColors: true },
     );
     this.authoringOverlayMesh.visible = false;
     this.authoringOverlayMesh.renderOrder = 12;
-    this.scene.add(
+    this.worldRoot.add(
       this.pillarMesh,
       this.tableMesh,
       this.authoringOverlayMesh,
@@ -1499,7 +1529,7 @@ export class ThreePresentation {
 
   /** @param {number} capacity */
   #replaceWallMesh(capacity) {
-    if (this.wallMesh) this.scene.remove(this.wallMesh);
+    if (this.wallMesh) this.worldRoot.remove(this.wallMesh);
     this.wallOpacityAttribute = new THREE.InstancedBufferAttribute(
       new Float32Array(Math.max(1, Math.trunc(capacity))).fill(1),
       1,
@@ -1518,7 +1548,7 @@ export class ThreePresentation {
     this.wallMesh.castShadow = true;
     this.wallMesh.receiveShadow = true;
     this.wallOcclusionMapHash = -1;
-    this.scene.add(this.wallMesh);
+    this.worldRoot.add(this.wallMesh);
   }
 
   /** @param {Record<string, any>} player @param {number} alpha */
@@ -1577,7 +1607,7 @@ export class ThreePresentation {
       );
       this.deadBodyMesh.castShadow = true;
       this.deadBodyMesh.receiveShadow = true;
-      this.scene.add(this.deadBodyMesh);
+      this.worldRoot.add(this.deadBodyMesh);
     } else if (this.deadBodyMesh.userData.capacity !== Math.max(1, capacity)) {
       throw new Error("Dead-body presentation capacity changed after warmup");
     }
@@ -1682,9 +1712,9 @@ export class ThreePresentation {
       || !this.torchLampMesh
       || this.rockMesh.userData.capacity !== capacity
     ) {
-      if (this.rockMesh) this.scene.remove(this.rockMesh);
-      if (this.torchPoleMesh) this.scene.remove(this.torchPoleMesh);
-      if (this.torchLampMesh) this.scene.remove(this.torchLampMesh);
+      if (this.rockMesh) this.worldRoot.remove(this.rockMesh);
+      if (this.torchPoleMesh) this.worldRoot.remove(this.torchPoleMesh);
+      if (this.torchLampMesh) this.worldRoot.remove(this.torchLampMesh);
       this.rockMesh = createDynamicInstancedPool(
         this.rockGeometry,
         this.rockMaterial,
@@ -1710,7 +1740,7 @@ export class ThreePresentation {
       );
       this.torchLampMesh.castShadow = false;
       this.torchLampMesh.receiveShadow = true;
-      this.scene.add(this.rockMesh, this.torchPoleMesh, this.torchLampMesh);
+      this.worldRoot.add(this.rockMesh, this.torchPoleMesh, this.torchLampMesh);
     }
     let rockCount = 0;
     let torchCount = 0;
@@ -1768,7 +1798,7 @@ export class ThreePresentation {
   #updateProjectiles(snapshot, alpha) {
     const capacity = snapshot.pools.projectiles.capacity;
     if (!this.projectileMesh || this.projectileMesh.userData.capacity !== capacity) {
-      if (this.projectileMesh) this.scene.remove(this.projectileMesh);
+      if (this.projectileMesh) this.worldRoot.remove(this.projectileMesh);
       this.projectileMesh = createDynamicInstancedPool(
         this.projectileGeometry,
         this.projectileMaterial,
@@ -1780,7 +1810,7 @@ export class ThreePresentation {
         this.projectileMesh.userData.instanceEmissive,
         "vec3",
       );
-      this.scene.add(this.projectileMesh);
+      this.worldRoot.add(this.projectileMesh);
     }
     for (let index = 0; index < snapshot.projectiles.length; index += 1) {
       const projectile = snapshot.projectiles[index];
@@ -1820,7 +1850,7 @@ export class ThreePresentation {
   #updateParticles(snapshot) {
     const capacity = snapshot.pools.particles.capacity;
     if (!this.particleMesh || this.particleMesh.userData.capacity !== capacity) {
-      if (this.particleMesh) this.scene.remove(this.particleMesh);
+      if (this.particleMesh) this.worldRoot.remove(this.particleMesh);
       this.particleMesh = createDynamicInstancedPool(
         this.particleGeometry,
         this.particleMaterial,
@@ -1832,7 +1862,7 @@ export class ThreePresentation {
         this.particleMesh.userData.instanceEmissive,
         "vec3",
       );
-      this.scene.add(this.particleMesh);
+      this.worldRoot.add(this.particleMesh);
     }
     for (let index = 0; index < snapshot.particles.length; index += 1) {
       const particle = snapshot.particles[index];
@@ -1957,6 +1987,29 @@ export class ThreePresentation {
         count += 1;
       }
     };
+    if (editor.referenceLayer) {
+      const reference = editor.referenceLayer;
+      const referenceCells = [];
+      for (let cx = 0; cx < reference.width; cx += 1) {
+        referenceCells.push({ cx, cz: 0 });
+        if (reference.height > 1) referenceCells.push({ cx, cz: reference.height - 1 });
+      }
+      for (let cz = 1; cz < reference.height - 1; cz += 1) {
+        referenceCells.push({ cx: 0, cz });
+        if (reference.width > 1) referenceCells.push({ cx: reference.width - 1, cz });
+      }
+      for (let index = 0; index < reference.structure.cells.length; index += 1) {
+        if (!reference.structure.legend[reference.structure.cells[index]]) continue;
+        referenceCells.push({
+          cx: index % reference.width,
+          cz: Math.floor(index / reference.width),
+        });
+      }
+      for (const instance of reference.instances) {
+        referenceCells.push(...(instance.occupiedCells ?? []));
+      }
+      addCells(referenceCells, 0x78bee0, 0.022);
+    }
     if (editor.showAuthoringExtents) {
       for (const instance of snapshot.authoring.instances) {
         const definition = getPlaceableDefinition(instance.definitionId);
@@ -1980,7 +2033,14 @@ export class ThreePresentation {
         0.052,
       );
     }
-    publishInstancedPool(mesh, count, { instanceColors: true });
+    // A paint stroke grows this pool one cell at a time. Do not expose a new
+    // draw slot until the frame that uploads its matrix/color has submitted;
+    // otherwise the GPU can briefly draw stale cells from the prior stroke or
+    // an untouched identity matrix at the map origin.
+    publishInstancedPool(mesh, count, {
+      deferCountGrowth: true,
+      instanceColors: true,
+    });
   }
 
   /** @param {THREE.Mesh} marker @param {Record<string,unknown>|null} entity */

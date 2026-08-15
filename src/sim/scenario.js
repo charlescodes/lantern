@@ -27,7 +27,7 @@ import {
   getPlaceableDefinition,
   rockDefinitionId,
 } from "../authoring/definition_catalog.js";
-import { compileAuthoringMap } from "../authoring/map_compiler.js";
+import { compileAuthoringMap, getCompiledLayer } from "../authoring/map_compiler.js";
 import { pointHitsInstanceExtent } from "../authoring/footprint.js";
 import { validateInstancePlacement } from "../authoring/placement_validation.js";
 import { createDebugArenaMap, GridMap } from "./grid_map.js";
@@ -35,6 +35,16 @@ import { createDebugArenaMap, GridMap } from "./grid_map.js";
 /** @param {string} archetype */
 export function getRockArchetype(archetype) {
   return Object.hasOwn(ROCK_ARCHETYPES, archetype) ? ROCK_ARCHETYPES[archetype] : null;
+}
+
+/** @param {Record<string,any>} instance */
+function cloneInstance(instance) {
+  return {
+    ...instance,
+    ...(instance.properties
+      ? { properties: JSON.parse(JSON.stringify(instance.properties)) }
+      : {}),
+  };
 }
 
 export class ArenaScenario {
@@ -51,42 +61,60 @@ export class ArenaScenario {
         { id: "arena", name: "Lantern arena" },
       );
     this.lastMutationError = null;
-    this.#applyCompiled(compileAuthoringMap(authoringMap), true);
+    this.#applyCompiled(compileAuthoringMap(authoringMap), true, authoringMap.playerStart.layerId);
   }
 
-  /** @param {ReturnType<typeof compileAuthoringMap>} compiled @param {boolean} initial */
-  #applyCompiled(compiled, initial = false) {
+  /** @param {ReturnType<typeof compileAuthoringMap>} compiled @param {boolean} initial @param {string} requestedLayerId */
+  #applyCompiled(compiled, initial = false, requestedLayerId = compiled.startLayerId) {
     this.authoringMap = compiled.document;
+    this.playerStart = { ...compiled.playerStart };
+    this.startLayerId = compiled.startLayerId;
+    this.compiledLayerIds = [...compiled.layerIds];
+    this.validationDiagnostics = compiled.diagnostics.map((entry) => ({ ...entry }));
+    this._compiledLayers = compiled.layers;
+    const selected = getCompiledLayer(compiled, requestedLayerId)
+      ?? getCompiledLayer(compiled, compiled.startLayerId);
+    if (!selected) throw new RangeError("Compiled authoring map has no playable layer");
+    this.#activateCompiledLayer(selected, initial);
+  }
+
+  /** @param {ReturnType<typeof compileAuthoringMap>["layers"][number]} compiledLayer @param {boolean} initial */
+  #activateCompiledLayer(compiledLayer, initial = false) {
+    const sameLayer = this.activeLayer?.id === compiledLayer.id;
     if (
       !initial
+      && sameLayer
       && this.map
-      && this.map.width === compiled.map.width
-      && this.map.height === compiled.map.height
+      && this.map.width === compiledLayer.map.width
+      && this.map.height === compiledLayer.map.height
     ) {
-      this.map.cells.set(compiled.map.cells);
-      this.map.playerSpawn = { ...compiled.map.playerSpawn };
+      this.map.cells.set(compiledLayer.map.cells);
+      this.map.playerSpawn = { ...compiledLayer.map.playerSpawn };
     } else {
-      this.map = compiled.map;
+      this.map = compiledLayer.map.clone();
     }
-    this.activeLayer = { ...compiled.activeLayer };
+    this.activeLayer = {
+      id: compiledLayer.id,
+      name: compiledLayer.name,
+      baseY: compiledLayer.baseY,
+      width: compiledLayer.width,
+      height: compiledLayer.height,
+    };
     this.surface = {
-      legend: [...compiled.surface.legend],
-      cells: new Uint16Array(compiled.surface.cells),
+      legend: [...compiledLayer.surface.legend],
+      cells: new Uint16Array(compiledLayer.surface.cells),
     };
     this.structure = {
-      legend: [...compiled.structure.legend],
-      cells: new Uint16Array(compiled.structure.cells),
+      legend: [...compiledLayer.structure.legend],
+      cells: new Uint16Array(compiledLayer.structure.cells),
     };
-    this.occluderMask = new Uint8Array(compiled.occluderMask);
-    this.instances = compiled.instances.map((instance) => ({
-      ...instance,
-      ...(instance.properties ? { properties: { ...instance.properties } } : {}),
-    }));
-    this.runtimeMappings = compiled.runtimeMappings.map((mapping) => ({
+    this.occluderMask = new Uint8Array(compiledLayer.occluderMask);
+    this.instances = compiledLayer.instances.map(cloneInstance);
+    this.runtimeMappings = compiledLayer.runtimeMappings.map((mapping) => ({
       ...mapping,
       collisionCells: mapping.collisionCells.map((cell) => ({ ...cell })),
     }));
-    this.entities = compiled.entities.map((entity) => ({ ...entity }));
+    this.entities = compiledLayer.entities.map((entity) => ({ ...entity }));
     this.nextSpawnId = this.entities.reduce(
       (maximum, entity) => Math.max(maximum, Number(entity.spawnId) + 1),
       1,
@@ -96,7 +124,8 @@ export class ArenaScenario {
   /** @param {unknown} nextDocument */
   #commit(nextDocument) {
     try {
-      this.#applyCompiled(compileAuthoringMap(nextDocument));
+      const requestedLayerId = this.activeLayer.id;
+      this.#applyCompiled(compileAuthoringMap(nextDocument), false, requestedLayerId);
       this.lastMutationError = null;
       return true;
     } catch (error) {
@@ -105,23 +134,41 @@ export class ArenaScenario {
     }
   }
 
-  clone() {
-    return new ArenaScenario(this.toAuthoringJSON());
+  /** Activates a precompiled layer recipe without changing saved source data. @param {string} layerId */
+  activateLayer(layerId) {
+    const compiledLayer = this._compiledLayers.find((layer) => layer.id === layerId);
+    if (!compiledLayer) {
+      this.lastMutationError = `Unknown authoring layer "${layerId}"`;
+      return false;
+    }
+    this.#activateCompiledLayer(compiledLayer, false);
+    this.lastMutationError = null;
+    return true;
   }
 
-  /**
-   * Legacy compiled scenario JSON remains the recording-schema-v11 boundary.
-   * User saves use toAuthoringJSON() through Simulation.saveScenario().
-   */
+  /** @param {string} layerId */
+  hasLayer(layerId) {
+    return this.compiledLayerIds.includes(layerId);
+  }
+
+  clone() {
+    const clone = new ArenaScenario(this.toAuthoringJSON());
+    clone.activateLayer(this.activeLayer.id);
+    return clone;
+  }
+
+  /** Legacy recording projection always uses the authored player-start layer. */
   toJSON() {
+    const start = this._compiledLayers.find((layer) => layer.id === this.startLayerId);
+    if (!start) throw new RangeError("Player-start layer is unavailable");
     return {
       version: SCENARIO_VERSION,
       authoringMetadata: { ...this.authoringMap.metadata },
-      width: this.map.width,
-      height: this.map.height,
-      cells: Array.from(this.map.cells),
-      playerSpawn: { ...this.map.playerSpawn },
-      entities: this.entities
+      width: start.map.width,
+      height: start.map.height,
+      cells: Array.from(start.map.cells),
+      playerSpawn: { ...start.map.playerSpawn },
+      entities: start.entities
         .filter((entity) => entity.kind === "rock" || entity.kind === "obelisk")
         .map((entity) => ({
           kind: entity.kind,
@@ -136,132 +183,139 @@ export class ArenaScenario {
     return cloneAuthoringMap(this.authoringMap);
   }
 
-  /** @param {number} cx @param {number} cz @param {number} tile */
-  setTile(cx, cz, tile) {
+  /** @param {string} layerId */
+  compiledLayer(layerId) {
+    return this._compiledLayers.find((layer) => layer.id === layerId) ?? null;
+  }
+
+  layerSummaries() {
+    return this.authoringMap.layers.map((layer, index) => ({
+      id: layer.id,
+      name: layer.name,
+      baseY: layer.baseY,
+      width: layer.width,
+      height: layer.height,
+      order: index,
+      instanceCount: layer.instances.length,
+      playerStart: layer.id === this.startLayerId,
+    }));
+  }
+
+  /** @param {number} cx @param {number} cz @param {number} tile @param {string} [layerId] */
+  setTile(cx, cz, tile, layerId = this.activeLayer.id) {
     return tile === 1
-      ? this.paintStructure(cx, cz, "structure.wall")
-      : this.eraseStructure(cx, cz);
+      ? this.paintStructure(cx, cz, "structure.wall", layerId)
+      : this.eraseStructure(cx, cz, layerId);
   }
 
-  /** @param {number} cx @param {number} cz @param {string} definitionId */
-  paintSurface(cx, cz, definitionId) {
+  /** @param {number} cx @param {number} cz @param {string} definitionId @param {string} [layerId] */
+  paintSurface(cx, cz, definitionId, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(
-        paintAuthoringSurface(this.authoringMap, cx, cz, definitionId),
-      );
+      return this.#commit(paintAuthoringSurface(this.authoringMap, cx, cz, definitionId, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId */
-  paintSurfaceCells(cells, definitionId) {
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId @param {string} [layerId] */
+  paintSurfaceCells(cells, definitionId, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(
-        paintAuthoringSurfaceCells(this.authoringMap, cells, definitionId),
-      );
+      return this.#commit(paintAuthoringSurfaceCells(this.authoringMap, cells, definitionId, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {number} cx @param {number} cz */
-  eraseSurface(cx, cz) {
+  /** @param {number} cx @param {number} cz @param {string} [layerId] */
+  eraseSurface(cx, cz, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(eraseAuthoringSurface(this.authoringMap, cx, cz));
+      return this.#commit(eraseAuthoringSurface(this.authoringMap, cx, cz, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {Array<{cx:number,cz:number}>} cells */
-  eraseSurfaceCells(cells) {
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
+  eraseSurfaceCells(cells, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(eraseAuthoringSurfaceCells(this.authoringMap, cells));
+      return this.#commit(eraseAuthoringSurfaceCells(this.authoringMap, cells, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {number} cx @param {number} cz @param {string} definitionId */
-  paintStructure(cx, cz, definitionId) {
+  /** @param {number} cx @param {number} cz @param {string} definitionId @param {string} [layerId] */
+  paintStructure(cx, cz, definitionId, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(
-        paintAuthoringStructure(this.authoringMap, cx, cz, definitionId),
-      );
+      return this.#commit(paintAuthoringStructure(this.authoringMap, cx, cz, definitionId, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId */
-  paintStructureCells(cells, definitionId) {
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} definitionId @param {string} [layerId] */
+  paintStructureCells(cells, definitionId, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(
-        paintAuthoringStructureCells(this.authoringMap, cells, definitionId),
-      );
+      return this.#commit(paintAuthoringStructureCells(this.authoringMap, cells, definitionId, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {number} cx @param {number} cz */
-  eraseStructure(cx, cz) {
+  /** @param {number} cx @param {number} cz @param {string} [layerId] */
+  eraseStructure(cx, cz, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(eraseAuthoringStructure(this.authoringMap, cx, cz));
+      return this.#commit(eraseAuthoringStructure(this.authoringMap, cx, cz, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {Array<{cx:number,cz:number}>} cells */
-  eraseStructureCells(cells) {
+  /** @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
+  eraseStructureCells(cells, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(eraseAuthoringStructureCells(this.authoringMap, cells));
+      return this.#commit(eraseAuthoringStructureCells(this.authoringMap, cells, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] */
-  canPlaceDefinition(definitionId, x, z, rotation = 0) {
-    return this.validateInstanceTransform(definitionId, { x, z, rotation }).valid;
+  /** @param {string} definitionId @param {number} x @param {number} z @param {number} [rotation] @param {string} [layerId] */
+  canPlaceDefinition(definitionId, x, z, rotation = 0, layerId = this.activeLayer.id) {
+    return this.validateInstanceTransform(definitionId, { x, z, rotation }, undefined, layerId).valid;
   }
 
   /**
    * @param {string} definitionId
    * @param {{x:number,z:number,rotation?:number}} transform
    * @param {string} [ignoreInstanceId]
+   * @param {string} [layerId]
    */
-  validateInstanceTransform(definitionId, transform, ignoreInstanceId) {
+  validateInstanceTransform(definitionId, transform, ignoreInstanceId, layerId = this.activeLayer.id) {
     return validateInstancePlacement(this.authoringMap, definitionId, transform, {
+      layerId,
       ...(ignoreInstanceId ? { ignoreInstanceId } : {}),
     });
   }
 
   /**
-   * @param {string} definitionId
-   * @param {number} x
-   * @param {number} z
-   * @param {{rotation?:number,properties?:Record<string,unknown>}} [options]
+   * @param {string} definitionId @param {number} x @param {number} z
+   * @param {{rotation?:number,properties?:Record<string,unknown>,layerId?:string}} [options]
    */
   placeInstance(definitionId, x, z, options = {}) {
     try {
-      const result = placeAuthoringInstance(
-        this.authoringMap,
-        definitionId,
-        x,
-        z,
-        options,
-      );
+      const result = placeAuthoringInstance(this.authoringMap, definitionId, x, z, {
+        ...options,
+        layerId: options.layerId ?? this.activeLayer.id,
+      });
       return this.#commit(result.document) ? result.instanceId : null;
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
@@ -269,42 +323,31 @@ export class ArenaScenario {
     }
   }
 
-  /** @param {string} authoringId */
-  removeInstance(authoringId) {
+  /** @param {string} authoringId @param {string} [layerId] */
+  removeInstance(authoringId, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(removeAuthoringInstance(this.authoringMap, authoringId));
+      return this.#commit(removeAuthoringInstance(this.authoringMap, authoringId, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /**
-   * @param {string} authoringId
-   * @param {{x?:number,z?:number,rotation?:number}} transform
-   */
-  updateInstanceTransform(authoringId, transform) {
+  /** @param {string} authoringId @param {{x?:number,z?:number,rotation?:number}} transform @param {string} [layerId] */
+  updateInstanceTransform(authoringId, transform, layerId = this.activeLayer.id) {
     try {
-      return this.#commit(
-        updateAuthoringInstanceTransform(this.authoringMap, authoringId, transform),
-      );
+      return this.#commit(updateAuthoringInstanceTransform(this.authoringMap, authoringId, transform, layerId));
     } catch (error) {
       this.lastMutationError = error instanceof Error ? error.message : String(error);
       return false;
     }
   }
 
-  /** @param {string} authoringId */
-  instanceById(authoringId) {
-    const instance = this.instances.find((candidate) => candidate.id === authoringId);
-    return instance
-      ? {
-        ...instance,
-        ...(instance.properties
-          ? { properties: JSON.parse(JSON.stringify(instance.properties)) }
-          : {}),
-      }
-      : null;
+  /** @param {string} authoringId @param {string} [layerId] */
+  instanceById(authoringId, layerId = this.activeLayer.id) {
+    const layer = this.authoringMap.layers.find((candidate) => candidate.id === layerId);
+    const instance = layer?.instances.find((candidate) => candidate.id === authoringId);
+    return instance ? cloneInstance(instance) : null;
   }
 
   /** @param {string} archetype @param {number} x @param {number} z */
@@ -324,9 +367,7 @@ export class ArenaScenario {
 
   /** @param {number} spawnId */
   removeRock(spawnId) {
-    const entity = this.entities.find(
-      (candidate) => candidate.kind === "rock" && candidate.spawnId === spawnId,
-    );
+    const entity = this.entities.find((candidate) => candidate.kind === "rock" && candidate.spawnId === spawnId);
     return Boolean(entity?.authoringId && this.removeInstance(entity.authoringId));
   }
 
@@ -345,10 +386,7 @@ export class ArenaScenario {
     for (let index = this.instances.length - 1; index >= 0; index -= 1) {
       const instance = this.instances[index];
       const definition = getPlaceableDefinition(instance.definitionId);
-      if (!definition) continue;
-      if (pointHitsInstanceExtent(definition, instance, x, z)) {
-        return { ...instance };
-      }
+      if (definition && pointHitsInstanceExtent(definition, instance, x, z)) return { ...instance };
     }
     return null;
   }
@@ -356,9 +394,7 @@ export class ArenaScenario {
   /** @param {number} cx @param {number} cz */
   obeliskAtCell(cx, cz) {
     return this.entities.find(
-      (entity) => entity.kind === "obelisk"
-        && Math.floor(entity.x) === cx
-        && Math.floor(entity.z) === cz,
+      (entity) => entity.kind === "obelisk" && Math.floor(entity.x) === cx && Math.floor(entity.z) === cz,
     ) ?? null;
   }
 

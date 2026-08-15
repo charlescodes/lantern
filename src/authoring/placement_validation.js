@@ -17,7 +17,7 @@ const CONTACT = { nx: 0, nz: 0, penetration: 0, px: 0, pz: 0, cx: 0, cz: 0 };
 
 /** @param {Record<string, any>} document @param {string|undefined} layerId */
 export function getAuthoringLayer(document, layerId) {
-  const requestedId = layerId ?? document.activeLayerId;
+  const requestedId = layerId ?? document.playerStart?.layerId;
   return document.layers?.find((layer) => layer.id === requestedId) ?? null;
 }
 
@@ -62,7 +62,7 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
     return invalid(
       "rotation",
       error instanceof Error ? error.message : String(error),
-      options.layerId ?? document.activeLayerId ?? "",
+      options.layerId ?? document.playerStart?.layerId ?? "",
       definitionId,
       transform,
       [],
@@ -70,7 +70,7 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
   }
   const transform = { x: numericX, z: numericZ, rotation };
   const layer = getAuthoringLayer(document, options.layerId);
-  const layerId = layer?.id ?? options.layerId ?? document.activeLayerId ?? "";
+  const layerId = layer?.id ?? options.layerId ?? document.playerStart?.layerId ?? "";
   if (!definition || definition.placementTarget !== "instance") {
     return invalid(
       "unknown_definition",
@@ -217,8 +217,8 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
     );
   }
 
-  if (definition.traits.blocksMovement) {
-    const spawn = layer.markers.playerSpawn;
+  if (definition.traits.blocksMovement && document.playerStart?.layerId === layer.id) {
+    const spawn = document.playerStart;
     const overlapsSpawn = candidateIsDynamicCircle
       ? Math.hypot(numericX - spawn.x, numericZ - spawn.z) < candidateRadius + PLAYER.radius
       : circleTouchesFootprint(spawn.x, spawn.z, PLAYER.radius, occupiedCells);

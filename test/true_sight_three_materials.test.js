@@ -331,6 +331,83 @@ test("Three renders the movable table from its fixed-orientation runtime transfo
   assert.equal(runtimeTable.rotation, 1);
 });
 
+test("Three defers growing paint-stroke overlay slots until their upload is submitted", () => {
+  const options = parsePresentationOptions("?renderer=3d&aa=1");
+  const flags = new PresentationFlags(options);
+  const snapshot = new Simulation({ particleBurstCount: 0 }).snapshot();
+  const sightFrame = new TrueSightSystem({ flags }).update(
+    snapshot,
+    0,
+    { mode: "edit", deltaMs: 0 },
+  );
+  const presentation = new ThreePresentation(
+    fakeCanvas(),
+    new Camera3D(),
+    options,
+    performance.now(),
+    flags,
+    sightFrame,
+  );
+  presentation.resize = () => {};
+  const submittedCounts = [];
+  presentation.webRenderer.render = () => {
+    submittedCounts.push(presentation.authoringOverlayMesh.count);
+  };
+  const editor = {
+    hoveredTarget: null,
+    selectedTarget: null,
+    referenceLayer: null,
+    showAuthoringExtents: false,
+    placementPreview: null,
+  };
+  const render = (cells) => {
+    editor.placementPreview = cells
+      ? {
+        kind: "paint",
+        channel: "surface",
+        definitionId: "surface.moss",
+        valid: true,
+        occupiedCells: cells,
+      }
+      : null;
+    presentation.render(snapshot, 0, {
+      mouseWorld: { x: 0, z: 0 },
+      mouseInside: true,
+      hover: null,
+      selected: null,
+      mode: "edit",
+      editorTool: "surface.moss",
+      placementValid: true,
+      authoringEditor: editor,
+      developerToolsOpen: true,
+      sightFrame,
+    });
+  };
+
+  const firstStroke = Array.from({ length: 10 }, (_, index) => ({
+    cx: 2 + index,
+    cz: 3,
+  }));
+  render(firstStroke);
+  assert.equal(submittedCounts.at(-1), 0, "new slots stay hidden during their upload frame");
+  assert.equal(presentation.authoringOverlayMesh.count, 10);
+  render(firstStroke);
+  assert.equal(submittedCounts.at(-1), 10);
+
+  render(null);
+  assert.equal(submittedCounts.at(-1), 0);
+  render([{ cx: 20, cz: 20 }]);
+  assert.equal(submittedCounts.at(-1), 0);
+  assert.equal(presentation.authoringOverlayMesh.count, 1);
+  render([{ cx: 20, cz: 20 }, { cx: 21, cz: 20 }]);
+  assert.equal(
+    submittedCounts.at(-1),
+    1,
+    "the next slot cannot replay a prior-stroke or origin matrix",
+  );
+  assert.equal(presentation.authoringOverlayMesh.count, 2);
+});
+
 test("Three renders a movable torch as a two-meter pole and glowing lamp without shadow maps", () => {
   const options = parsePresentationOptions("?renderer=3d&aa=1&lights=16");
   const flags = new PresentationFlags(options);

@@ -5,7 +5,7 @@ import { firstSolidContact } from "../sim/collision.js";
 import { GridMap } from "../sim/grid_map.js";
 import {
   AuthoringMapValidationError,
-  validateAuthoringMap,
+  validateAuthoringMapWithDiagnostics,
 } from "./authoring_map.js";
 import {
   getPlaceableDefinition,
@@ -15,9 +15,15 @@ import {
 import { getOccupiedCells, getRuntimeBodyTransform } from "./footprint.js";
 import { validateInstancePlacement } from "./placement_validation.js";
 
-/** @param {string} path @param {string} code @param {string} message */
-function fail(path, code, message) {
-  throw new AuthoringMapValidationError([{ path, code, message }]);
+/** @param {string} path @param {string} code @param {string} message @param {string} [layerId] */
+function fail(path, code, message, layerId) {
+  throw new AuthoringMapValidationError([{
+    severity: "error",
+    path,
+    code,
+    message,
+    ...(layerId ? { layerId } : {}),
+  }]);
 }
 
 /** @param {string} value */
@@ -34,9 +40,7 @@ function stableUint32(value) {
 function stableSpawnIds(ids) {
   const result = new Map();
   const used = new Set();
-  for (const id of [...ids].sort((left, right) => (
-    left < right ? -1 : left > right ? 1 : 0
-  ))) {
+  for (const id of [...ids].sort((left, right) => left.localeCompare(right))) {
     let candidate = stableUint32(id);
     while (used.has(candidate)) candidate = (candidate + 1) >>> 0 || 1;
     used.add(candidate);
@@ -50,15 +54,8 @@ function cloneProperties(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-/**
- * Deterministically derives the runtime grid and spawn descriptors from
- * friendly authoring source. The returned typed arrays never alias the source.
- * @param {unknown} input
- */
-export function compileAuthoringMap(input) {
-  const document = validateAuthoringMap(input);
-  const layerIndex = document.layers.findIndex((layer) => layer.id === document.activeLayerId);
-  const layer = document.layers[layerIndex];
+/** @param {Record<string,any>} document @param {Record<string,any>} layer @param {number} layerIndex */
+function compileLayer(document, layer, layerIndex) {
   const layerPath = `layers[${layerIndex}]`;
   const cellCount = layer.width * layer.height;
   const solidCells = new Uint8Array(cellCount);
@@ -73,8 +70,9 @@ export function compileAuthoringMap(input) {
   if (authoredDynamicBodyCount > ROCK.capacity) {
     fail(
       `${layerPath}.instances`,
-      "rock_capacity",
-      `contains more than the ${ROCK.capacity}-rock limit shared with dynamic authored props`,
+      "dynamic-body-capacity",
+      `Layer contains more than the ${ROCK.capacity}-body limit shared by dynamic authored props.`,
+      layer.id,
     );
   }
 
@@ -83,7 +81,7 @@ export function compileAuthoringMap(input) {
     if (!definitionId) continue;
     const definition = getPlaceableDefinition(definitionId);
     if (!definition) {
-      fail(`${layerPath}.structure.cells[${index}]`, "unknown_definition", `Unknown definition "${definitionId}"`);
+      fail(`${layerPath}.structure.cells[${index}]`, "unknown-definition", `Unknown definition "${definitionId}".`, layer.id);
     }
     if (definition.traits.blocksMovement) {
       solidCells[index] = 1;
@@ -98,15 +96,13 @@ export function compileAuthoringMap(input) {
     const instancePath = `${layerPath}.instances[${index}]`;
     const definition = getPlaceableDefinition(instance.definitionId);
     if (!definition) {
-      fail(`${instancePath}.definitionId`, "unknown_definition", `Unknown definition "${instance.definitionId}"`);
+      fail(`${instancePath}.definitionId`, "unknown-definition", `Unknown definition "${instance.definitionId}".`, layer.id);
     }
     const placement = validateInstancePlacement(document, instance.definitionId, instance, {
       layerId: layer.id,
       ignoreInstanceId: instance.id,
     });
-    if (!placement.valid) {
-      fail(instancePath, placement.code, placement.message);
-    }
+    if (!placement.valid) fail(instancePath, placement.code, placement.message, layer.id);
     const footprintCells = getOccupiedCells(definition, instance);
     if (isDynamicBodyDefinition(definition)) continue;
     collisionCellsByInstance.set(instance.id, footprintCells);
@@ -119,22 +115,27 @@ export function compileAuthoringMap(input) {
     }
   }
 
-  const playerSpawn = layer.markers.playerSpawn;
+  const playerSpawn = { x: document.playerStart.x, z: document.playerStart.z };
   const map = new GridMap(layer.width, layer.height, solidCells, playerSpawn);
-  const contact = { nx: 0, nz: 0, penetration: 0, px: 0, pz: 0, cx: 0, cz: 0 };
-  if (firstSolidContact(map, playerSpawn.x, playerSpawn.z, PLAYER.radius, contact)) {
-    fail(`${layerPath}.markers.playerSpawn`, "solid_overlap", "Player spawn is inside solid geometry");
+  if (layer.id === document.playerStart.layerId) {
+    const contact = { nx: 0, nz: 0, penetration: 0, px: 0, pz: 0, cx: 0, cz: 0 };
+    if (firstSolidContact(map, playerSpawn.x, playerSpawn.z, PLAYER.radius, contact)) {
+      fail(
+        "playerStart",
+        "player-start-solid-overlap",
+        `Player start is inside solid geometry on layer "${layer.id}".`,
+        layer.id,
+      );
+    }
   }
 
   if (layer.markers.obelisk) {
     const obelisk = layer.markers.obelisk;
     if (
-      !Number.isFinite(obelisk.x)
-      || !Number.isFinite(obelisk.z)
-      || obelisk.x !== Math.floor(obelisk.x) + 0.5
+      obelisk.x !== Math.floor(obelisk.x) + 0.5
       || obelisk.z !== Math.floor(obelisk.z) + 0.5
     ) {
-      fail(`${layerPath}.markers.obelisk`, "cell_center", "Obelisk position must be cell-centered");
+      fail(`${layerPath}.markers.obelisk`, "cell-center", "Obelisk position must be cell-centered.", layer.id);
     }
     const cx = Math.floor(obelisk.x);
     const cz = Math.floor(obelisk.z);
@@ -145,13 +146,12 @@ export function compileAuthoringMap(input) {
       || cz >= layer.height
       || structureSolidCells[cz * layer.width + cx] !== 1
     ) {
-      fail(`${layerPath}.markers.obelisk`, "solid_cell", "Obelisk must occupy a solid structure cell");
+      fail(`${layerPath}.markers.obelisk`, "solid-cell", "Obelisk must occupy a solid structure cell.", layer.id);
     }
   }
 
   const dynamicInstances = [];
-  for (let index = 0; index < layer.instances.length; index += 1) {
-    const instance = layer.instances[index];
+  for (const instance of layer.instances) {
     const definition = getPlaceableDefinition(instance.definitionId);
     if (!isDynamicBodyDefinition(definition)) continue;
     const runtimeTransform = getRuntimeBodyTransform(definition, instance);
@@ -174,10 +174,11 @@ export function compileAuthoringMap(input) {
       massKg: Number(definition.traits.massKg),
     });
   }
-  const spawnIds = stableSpawnIds([
-    ...layer.instances.map((instance) => instance.id),
-    ...(layer.markers.obelisk ? ["marker.obelisk"] : []),
-  ]);
+  const spawnKeys = [
+    ...layer.instances.map((instance) => `${layer.id}:instance:${instance.id}`),
+    ...(layer.markers.obelisk ? [`${layer.id}:marker:obelisk`] : []),
+  ];
+  const spawnIds = stableSpawnIds(spawnKeys);
   const entities = dynamicInstances.map((instance) => ({
     kind: instance.runtimeKind === "rock"
       ? /** @type {const} */ ("rock")
@@ -193,16 +194,18 @@ export function compileAuthoringMap(input) {
     halfDepth: instance.halfDepth,
     fixedRotation: instance.fixedRotation,
     massKg: instance.massKg,
-    spawnId: spawnIds.get(instance.id),
+    spawnId: spawnIds.get(`${layer.id}:instance:${instance.id}`),
     authoringId: instance.id,
+    layerId: layer.id,
   }));
   if (layer.markers.obelisk) {
     entities.push({
       kind: /** @type {const} */ ("obelisk"),
       x: layer.markers.obelisk.x,
       z: layer.markers.obelisk.z,
-      spawnId: spawnIds.get("marker.obelisk"),
+      spawnId: spawnIds.get(`${layer.id}:marker:obelisk`),
       authoringId: "marker.obelisk",
+      layerId: layer.id,
     });
   }
 
@@ -211,16 +214,41 @@ export function compileAuthoringMap(input) {
     return {
       authoringId: instance.id,
       definitionId: instance.definitionId,
+      layerId: layer.id,
       runtimeKind: definition?.traits.runtimeKind ?? "unknown",
       runtimeSpawnId: isDynamicBodyDefinition(definition)
-        ? spawnIds.get(instance.id)
+        ? spawnIds.get(`${layer.id}:instance:${instance.id}`)
         : null,
       collisionCells: (collisionCellsByInstance.get(instance.id) ?? []).map((cell) => ({ ...cell })),
     };
   });
 
   return {
-    document,
+    id: layer.id,
+    name: layer.name,
+    baseY: layer.baseY,
+    width: layer.width,
+    height: layer.height,
+    map,
+    surface: { legend: [...layer.surface.legend], cells: surfaceCodes },
+    structure: { legend: [...layer.structure.legend], cells: structureCodes },
+    solidMask: new Uint8Array(solidCells),
+    occluderMask: new Uint8Array(occluderCells),
+    instances: layer.instances.map((instance) => ({
+      ...instance,
+      ...(instance.properties ? { properties: cloneProperties(instance.properties) } : {}),
+    })),
+    markers: {
+      ...(layer.markers.obelisk ? { obelisk: { ...layer.markers.obelisk } } : {}),
+    },
+    entities,
+    runtimeMappings,
+  };
+}
+
+/** @param {ReturnType<typeof compileLayer>} layer */
+function compatibilityProjection(layer) {
+  return {
     activeLayer: {
       id: layer.id,
       name: layer.name,
@@ -228,22 +256,42 @@ export function compileAuthoringMap(input) {
       width: layer.width,
       height: layer.height,
     },
-    map,
-    surface: {
-      legend: [...layer.surface.legend],
-      cells: surfaceCodes,
-    },
-    structure: {
-      legend: [...layer.structure.legend],
-      cells: structureCodes,
-    },
-    solidMask: new Uint8Array(solidCells),
-    occluderMask: new Uint8Array(occluderCells),
-    instances: layer.instances.map((instance) => ({
-      ...instance,
-      ...(instance.properties ? { properties: cloneProperties(instance.properties) } : {}),
-    })),
-    entities,
-    runtimeMappings,
+    map: layer.map,
+    surface: layer.surface,
+    structure: layer.structure,
+    solidMask: layer.solidMask,
+    occluderMask: layer.occluderMask,
+    instances: layer.instances,
+    entities: layer.entities,
+    runtimeMappings: layer.runtimeMappings,
   };
+}
+
+/**
+ * Deterministically derives independent runtime recipes for every authored
+ * layer. The compatibility projection points at the player-start layer.
+ * @param {unknown} input
+ */
+export function compileAuthoringMap(input) {
+  const validated = validateAuthoringMapWithDiagnostics(input);
+  const document = validated.document;
+  const layers = document.layers.map((layer, index) => compileLayer(document, layer, index));
+  const startLayer = layers.find((layer) => layer.id === document.playerStart.layerId);
+  if (!startLayer) {
+    fail("playerStart.layerId", "invalid-player-start-layer", "Player start layer could not be compiled.");
+  }
+  return {
+    document,
+    playerStart: { ...document.playerStart },
+    startLayerId: document.playerStart.layerId,
+    layerIds: layers.map((layer) => layer.id),
+    layers,
+    diagnostics: validated.diagnostics.map((entry) => ({ ...entry })),
+    ...compatibilityProjection(startLayer),
+  };
+}
+
+/** @param {ReturnType<typeof compileAuthoringMap>} compiled @param {string} layerId */
+export function getCompiledLayer(compiled, layerId) {
+  return compiled.layers.find((layer) => layer.id === layerId) ?? null;
 }

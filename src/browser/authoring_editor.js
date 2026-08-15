@@ -32,12 +32,53 @@ function cloneTransform(instance) {
   return { x: instance.x, z: instance.z, rotation: instance.rotation };
 }
 
+/** @param {Record<string, any>|null} layer */
+function cloneLayerSnapshot(layer) {
+  if (!layer) return null;
+  return {
+    ...layer,
+    surface: layer.surface
+      ? { legend: [...layer.surface.legend], cells: [...layer.surface.cells] }
+      : null,
+    structure: layer.structure
+      ? { legend: [...layer.structure.legend], cells: [...layer.structure.cells] }
+      : null,
+    solidCells: [...(layer.solidCells ?? [])],
+    occluderCells: [...(layer.occluderCells ?? [])],
+    markers: layer.markers ? structuredClone(layer.markers) : {},
+    instances: (layer.instances ?? []).map((instance) => ({
+      ...structuredClone(instance),
+      occupiedCells: (instance.occupiedCells ?? []).map((cell) => ({ ...cell })),
+    })),
+  };
+}
+
+const LAYER_SCOPED_ACTIONS = new Set([
+  "setTile",
+  "paintSurface",
+  "paintSurfaceStroke",
+  "eraseSurface",
+  "eraseSurfaceStroke",
+  "paintStructure",
+  "paintStructureStroke",
+  "eraseStructure",
+  "eraseStructureStroke",
+  "placeRock",
+  "placeInstance",
+  "removeInstance",
+  "updateInstanceTransform",
+  "updateInstanceProperties",
+]);
+
 export class AuthoringEditorController {
   /**
    * @param {{
    * snapshot:Record<string,any>,
-   * validatePlacement:(definitionId:string,x:number,z:number,rotation:number,ignoreId?:string|null)=>Record<string,any>,
+   * validatePlacement:(definitionId:string,x:number,z:number,rotation:number,ignoreId?:string|null,layerId?:string)=>Record<string,any>,
    * commit:(action:Record<string,unknown>)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
+   * activateLayer?:(layerId:string)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
+   * layerSnapshot?:(layerId:string)=>Record<string,any>|null,
+   * validateMap?:()=>Record<string,any>,
    * historySnapshot?:()=>Record<string,any>,
    * undo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
    * redo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
@@ -48,6 +89,9 @@ export class AuthoringEditorController {
     this.currentSnapshot = options.snapshot;
     this.validatePlacement = options.validatePlacement;
     this.commitAction = options.commit;
+    this.activateLayerRuntime = options.activateLayer ?? (() => ({ ok: false, error: "Layer activation is unavailable" }));
+    this.getLayerSnapshot = options.layerSnapshot ?? (() => null);
+    this.validateMapDocument = options.validateMap ?? (() => ({ diagnostics: [], errorCount: 0, warningCount: 0 }));
     this.getHistorySnapshot = options.historySnapshot ?? (() => ({}));
     this.undoHistory = options.undo ?? (() => ({ ok: false, error: "Undo is unavailable" }));
     this.redoHistory = options.redo ?? (() => ({ ok: false, error: "Redo is unavailable" }));
@@ -57,6 +101,10 @@ export class AuthoringEditorController {
     this.gesture = null;
     this.lastMessage = "";
     this.lastMessageValid = true;
+    this.activeLayerId = this.currentSnapshot.authoring.activeLayer.id;
+    this.referenceLayerId = null;
+    this.referenceLayer = null;
+    this.referenceRevision = null;
     this.state.reconcile(this.currentSnapshot.authoring);
   }
 
@@ -64,6 +112,25 @@ export class AuthoringEditorController {
   sync(snapshot, pointer) {
     this.currentSnapshot = snapshot;
     if (pointer) this.pointer = { ...pointer };
+    this.#reconcileLayers();
+    this.state.reconcile(snapshot.authoring);
+    this.#refreshHoverAndPreview();
+    return this.snapshot();
+  }
+
+  /** Clears document-relative UI identity after an atomic load/import replacement. */
+  replaceDocument(snapshot) {
+    this.currentSnapshot = snapshot;
+    this.cancel();
+    this.referenceLayerId = null;
+    this.referenceLayer = null;
+    this.referenceRevision = null;
+    this.state.setHoveredTarget(null);
+    this.state.setSelectedTarget(null);
+    this.pointer.inside = false;
+    this.activeLayerId = snapshot.authoring.playerStartLayerId
+      ?? snapshot.authoring.activeLayer.id;
+    this.#reconcileLayers();
     this.state.reconcile(snapshot.authoring);
     this.#refreshHoverAndPreview();
     return this.snapshot();
@@ -107,6 +174,98 @@ export class AuthoringEditorController {
   setShowAuthoringExtents(value) {
     this.state.setShowAuthoringExtents(value);
     return this.state.showAuthoringExtents;
+  }
+
+  /** @param {string} layerId */
+  activateLayer(layerId) {
+    const target = this.currentSnapshot.authoring.layers?.find((layer) => layer.id === layerId);
+    if (!target) return false;
+    this.cancel();
+    const result = this.activateLayerRuntime(layerId);
+    if (result.snapshot) this.currentSnapshot = result.snapshot;
+    if (!result.ok) {
+      this.#message(result.error ?? `Could not activate ${target.name}`, false);
+      return false;
+    }
+    this.activeLayerId = layerId;
+    if (this.referenceLayerId === layerId) this.setReferenceLayer(null);
+    this.state.setHoveredTarget(null);
+    this.state.setSelectedTarget(null);
+    this.pointer.inside = false;
+    this.#reconcileLayers();
+    this.#refreshHoverAndPreview();
+    this.#message(`Editing ${target.name}`, true);
+    return true;
+  }
+
+  /** @param {string|null} layerId */
+  setReferenceLayer(layerId) {
+    if (layerId === null || layerId === "") {
+      this.referenceLayerId = null;
+      this.referenceLayer = null;
+      this.referenceRevision = null;
+      return true;
+    }
+    if (layerId === this.activeLayerId) return false;
+    if (!this.currentSnapshot.authoring.layers?.some((layer) => layer.id === layerId)) return false;
+    const snapshot = this.getLayerSnapshot(layerId);
+    if (!snapshot) return false;
+    this.referenceLayerId = layerId;
+    this.referenceLayer = snapshot;
+    this.referenceRevision = this.currentSnapshot.authoring.revision;
+    return true;
+  }
+
+  /** @param {"above"|"below"} direction */
+  createLayer(direction) {
+    const before = new Set(this.currentSnapshot.authoring.layers.map((layer) => layer.id));
+    if (!this.#commit({
+      type: "createLayer",
+      layerId: this.activeLayerId,
+      relativeLayerId: this.activeLayerId,
+      direction,
+    })) return null;
+    const created = this.currentSnapshot.authoring.layers.find((layer) => !before.has(layer.id));
+    if (!created) return null;
+    this.activateLayer(created.id);
+    return created.id;
+  }
+
+  /** @param {string} layerId @param {string} name */
+  renameLayer(layerId, name) {
+    const ok = this.#commit({ type: "renameLayer", layerId, name });
+    if (ok) this.#message(`Renamed layer to ${name}`, true);
+    return ok;
+  }
+
+  /** @param {string} layerId @param {number} baseY */
+  setLayerBaseY(layerId, baseY) {
+    const ok = this.#commit({ type: "setLayerBaseY", layerId, baseY });
+    if (ok) this.#message(`Set layer height to ${baseY} m`, true);
+    return ok;
+  }
+
+  /** @param {string} layerId */
+  deleteLayer(layerId) {
+    const ok = this.#commit({ type: "deleteLayer", layerId });
+    if (ok) this.#message(`Deleted layer ${layerId}`, true);
+    return ok;
+  }
+
+  /** @param {string} layerId */
+  setPlayerStartLayer(layerId) {
+    const ok = this.#commit({ type: "setPlayerStartLayer", layerId });
+    if (ok) this.#message(`Player now starts on ${layerId}`, true);
+    return ok;
+  }
+
+  validateMap() {
+    const result = this.validateMapDocument();
+    this.#message(
+      `${result.errorCount ?? 0} map errors · ${result.warningCount ?? 0} warnings`,
+      Number(result.errorCount ?? 0) === 0,
+    );
+    return result;
   }
 
   /** @param {number} x @param {number} z @param {boolean} [inside] */
@@ -294,6 +453,7 @@ export class AuthoringEditorController {
       Number(transform.z),
       Number(transform.rotation),
       instanceId,
+      this.activeLayerId,
     );
     if (!validation.valid) {
       this.#message(validation.message, false);
@@ -379,6 +539,19 @@ export class AuthoringEditorController {
     };
     return {
       ...this.state.snapshot(),
+      activeLayerId: this.activeLayerId,
+      referenceLayerId: this.referenceLayerId,
+      referenceLayer: cloneLayerSnapshot(this.referenceLayer),
+      layers: this.currentSnapshot.authoring.layers.map((layer) => ({ ...layer })),
+      playerStartLayerId: this.currentSnapshot.authoring.playerStartLayerId,
+      runtimeLayerId: this.currentSnapshot.authoring.runtimeLayerId,
+      layerCapacity: this.currentSnapshot.authoring.layerCapacity,
+      validation: {
+        diagnostics: (this.currentSnapshot.authoring.validation?.diagnostics ?? [])
+          .map((entry) => ({ ...entry })),
+        errorCount: this.currentSnapshot.authoring.validation?.errorCount ?? 0,
+        warningCount: this.currentSnapshot.authoring.validation?.warningCount ?? 0,
+      },
       hoveredIdentity: hoveredInstance
         ? {
           authoringId: hoveredInstance.id,
@@ -441,6 +614,7 @@ export class AuthoringEditorController {
         snapped.z,
         this.state.previewRotation,
         null,
+        this.activeLayerId,
       );
       this.state.setPlacementPreview({
         kind: "place",
@@ -498,6 +672,7 @@ export class AuthoringEditorController {
       this.gesture.candidate.z,
       this.gesture.candidate.rotation,
       this.gesture.instanceId,
+      this.activeLayerId,
     );
   }
 
@@ -571,8 +746,13 @@ export class AuthoringEditorController {
 
   /** @param {Record<string,unknown>} action */
   #commit(action) {
-    const result = this.commitAction(action);
+    const scopedAction = LAYER_SCOPED_ACTIONS.has(String(action.type))
+      && typeof action.layerId !== "string"
+      ? { ...action, layerId: this.activeLayerId }
+      : action;
+    const result = this.commitAction(scopedAction);
     if (result.snapshot) this.currentSnapshot = result.snapshot;
+    this.#reconcileLayers();
     this.state.reconcile(this.currentSnapshot.authoring);
     if (!result.ok) this.#message(result.error ?? "Authoring action was rejected", false);
     return result.ok;
@@ -588,6 +768,7 @@ export class AuthoringEditorController {
     }
     const result = operation === "undo" ? this.undoHistory() : this.redoHistory();
     if (result.snapshot) this.currentSnapshot = result.snapshot;
+    this.#reconcileLayers();
     this.state.reconcile(this.currentSnapshot.authoring);
     this.#refreshHoverAndPreview();
     if (!result.ok) {
@@ -606,6 +787,36 @@ export class AuthoringEditorController {
     return this.currentSnapshot.authoring.instances.find(
       (instance) => instance.id === instanceId,
     ) ?? null;
+  }
+
+  #reconcileLayers() {
+    const authoring = this.currentSnapshot.authoring;
+    const layerIds = new Set((authoring.layers ?? []).map((layer) => layer.id));
+    const activeLayerId = authoring.activeEditorLayerId ?? authoring.activeLayer?.id;
+    if (typeof activeLayerId === "string" && layerIds.has(activeLayerId)) {
+      this.activeLayerId = activeLayerId;
+    }
+    if (
+      !this.referenceLayerId
+      || this.referenceLayerId === this.activeLayerId
+      || !layerIds.has(this.referenceLayerId)
+    ) {
+      this.referenceLayerId = null;
+      this.referenceLayer = null;
+      this.referenceRevision = null;
+      return;
+    }
+    if (this.referenceRevision !== authoring.revision) {
+      const referenceLayer = this.getLayerSnapshot(this.referenceLayerId);
+      if (!referenceLayer) {
+        this.referenceLayerId = null;
+        this.referenceLayer = null;
+        this.referenceRevision = null;
+        return;
+      }
+      this.referenceLayer = referenceLayer;
+      this.referenceRevision = authoring.revision;
+    }
   }
 
   /** @param {Record<string,any>} instance */

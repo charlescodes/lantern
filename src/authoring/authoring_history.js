@@ -1,6 +1,8 @@
 // @ts-check
 
 import {
+  createLayer,
+  deleteLayer,
   eraseSurface,
   eraseSurfaceCells,
   eraseStructure,
@@ -10,7 +12,10 @@ import {
   paintSurface,
   paintSurfaceCells,
   placeInstance,
+  renameLayer,
   removeInstance,
+  setLayerBaseY,
+  setPlayerStartLayer,
   updateInstanceProperties,
   updateInstanceTransform,
 } from "./authoring_commands.js";
@@ -61,10 +66,18 @@ function cloneInstance(instance) {
 /** @param {unknown} input @param {string} path */
 function finiteInteger(input, path) {
   const value = Number(input);
-  if (!Number.isInteger(value) || value < 0) {
+  if (!Number.isSafeInteger(value) || value < 0) {
     throw new TypeError(`${path} must be a non-negative integer`);
   }
   return value;
+}
+
+/** @param {unknown} input @param {string} path */
+function finiteNumber(input, path) {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    throw new TypeError(`${path} must be a finite number`);
+  }
+  return input;
 }
 
 /** @param {unknown} input @param {string} path */
@@ -96,6 +109,32 @@ function instanceSnapshot(input, instanceId, path) {
   return snapshot;
 }
 
+/** @param {unknown} input @param {string} layerId @param {string} path */
+function layerSnapshot(input, layerId, path) {
+  if (input === null) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError(`${path} must be a layer snapshot or null`);
+  }
+  const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+  if (snapshot.id !== layerId) {
+    throw new TypeError(`${path}.id must equal patch layerId "${layerId}"`);
+  }
+  return snapshot;
+}
+
+/** @param {unknown} input @param {string} path */
+function playerStartSnapshot(input, path) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError(`${path} must be a player-start snapshot`);
+  }
+  const source = /** @type {Record<string,any>} */ (input);
+  return {
+    layerId: nonEmptyString(source.layerId, `${path}.layerId`),
+    x: finiteNumber(source.x, `${path}.x`),
+    z: finiteNumber(source.z, `${path}.z`),
+  };
+}
+
 /**
  * Validates and detaches a command record. This is also the command-log
  * canonicalization boundary: functions, DOM objects, and runtime references
@@ -119,10 +158,43 @@ export function cloneAuthoringCommand(input) {
     }
     const patch = /** @type {Record<string,any>} */ (value);
     const kind = String(patch.kind);
-    const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
     let normalized;
     let key;
-    if (kind === "cell") {
+    if (kind === "map") {
+      const field = String(patch.field);
+      if (field === "nextLayerOrdinal") {
+        const before = finiteInteger(patch.before, `${path}.before`);
+        const after = finiteInteger(patch.after, `${path}.after`);
+        if (before < 1 || after < 1) throw new TypeError(`${path} ordinals must be positive integers`);
+        normalized = { kind, field, before, after };
+      } else if (field === "playerStart") {
+        normalized = {
+          kind,
+          field,
+          before: playerStartSnapshot(patch.before, `${path}.before`),
+          after: playerStartSnapshot(patch.after, `${path}.after`),
+        };
+      } else {
+        throw new TypeError(`${path}.field must be nextLayerOrdinal or playerStart`);
+      }
+      key = `${kind}:${field}`;
+    } else if (kind === "layer-record") {
+      const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
+      const before = layerSnapshot(patch.before, layerId, `${path}.before`);
+      const after = layerSnapshot(patch.after, layerId, `${path}.after`);
+      const beforeIndex = patch.beforeIndex === null
+        ? null
+        : finiteInteger(patch.beforeIndex, `${path}.beforeIndex`);
+      const afterIndex = patch.afterIndex === null
+        ? null
+        : finiteInteger(patch.afterIndex, `${path}.afterIndex`);
+      if ((before === null) !== (beforeIndex === null) || (after === null) !== (afterIndex === null)) {
+        throw new TypeError(`${path} snapshot and ordering index must both be null or both be present`);
+      }
+      normalized = { kind, layerId, before, after, beforeIndex, afterIndex };
+      key = `${kind}:${layerId}`;
+    } else if (kind === "cell") {
+      const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
       const channel = patch.channel;
       if (channel !== "surface" && channel !== "structure") {
         throw new TypeError(`${path}.channel must be surface or structure`);
@@ -142,6 +214,7 @@ export function cloneAuthoringCommand(input) {
       };
       key = `${kind}:${layerId}:${channel}:${cellIndex}`;
     } else if (kind === "legend") {
+      const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
       const channel = patch.channel;
       if (channel !== "surface" && channel !== "structure") {
         throw new TypeError(`${path}.channel must be surface or structure`);
@@ -158,6 +231,7 @@ export function cloneAuthoringCommand(input) {
       };
       key = `${kind}:${layerId}:${channel}`;
     } else if (kind === "instance") {
+      const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
       const instanceId = nonEmptyString(patch.instanceId, `${path}.instanceId`);
       const before = instanceSnapshot(patch.before, instanceId, `${path}.before`);
       const after = instanceSnapshot(patch.after, instanceId, `${path}.after`);
@@ -181,18 +255,31 @@ export function cloneAuthoringCommand(input) {
       };
       key = `${kind}:${layerId}:${instanceId}`;
     } else if (kind === "layer") {
-      if (patch.field !== "nextInstanceOrdinal") {
-        throw new TypeError(`${path}.field must be nextInstanceOrdinal`);
-      }
-      normalized = {
-        kind,
-        layerId,
-        field: "nextInstanceOrdinal",
-        before: finiteInteger(patch.before, `${path}.before`),
-        after: finiteInteger(patch.after, `${path}.after`),
-      };
-      if (normalized.before < 1 || normalized.after < 1) {
-        throw new TypeError(`${path} ordinals must be positive integers`);
+      const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
+      const field = String(patch.field);
+      if (field === "nextInstanceOrdinal") {
+        const before = finiteInteger(patch.before, `${path}.before`);
+        const after = finiteInteger(patch.after, `${path}.after`);
+        if (before < 1 || after < 1) throw new TypeError(`${path} ordinals must be positive integers`);
+        normalized = { kind, layerId, field, before, after };
+      } else if (field === "name") {
+        normalized = {
+          kind,
+          layerId,
+          field,
+          before: nonEmptyString(patch.before, `${path}.before`),
+          after: nonEmptyString(patch.after, `${path}.after`),
+        };
+      } else if (field === "baseY") {
+        normalized = {
+          kind,
+          layerId,
+          field,
+          before: finiteNumber(patch.before, `${path}.before`),
+          after: finiteNumber(patch.after, `${path}.after`),
+        };
+      } else {
+        throw new TypeError(`${path}.field must be name, baseY, or nextInstanceOrdinal`);
       }
       key = `${kind}:${layerId}:${normalized.field}`;
     } else {
@@ -220,45 +307,92 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
     format: before.format,
     version: before.version,
     metadata: before.metadata,
-    activeLayerId: before.activeLayerId,
   };
   const afterEnvelope = {
     format: after.format,
     version: after.version,
     metadata: after.metadata,
-    activeLayerId: after.activeLayerId,
   };
-  if (!jsonEqual(beforeEnvelope, afterEnvelope) || before.layers.length !== after.layers.length) {
-    throw new RangeError("Authoring history cannot replace map metadata or layer topology");
+  if (!jsonEqual(beforeEnvelope, afterEnvelope)) {
+    throw new RangeError("Authoring history cannot replace map format or metadata");
   }
   const patches = [];
-  for (let layerIndex = 0; layerIndex < before.layers.length; layerIndex += 1) {
-    const beforeLayer = before.layers[layerIndex];
-    const afterLayer = after.layers[layerIndex];
+  if (before.nextLayerOrdinal !== after.nextLayerOrdinal) {
+    patches.push({
+      kind: "map",
+      field: "nextLayerOrdinal",
+      before: before.nextLayerOrdinal,
+      after: after.nextLayerOrdinal,
+    });
+  }
+  if (!jsonEqual(before.playerStart, after.playerStart)) {
+    patches.push({
+      kind: "map",
+      field: "playerStart",
+      before: { ...before.playerStart },
+      after: { ...after.playerStart },
+    });
+  }
+
+  const beforeLayers = new Map(
+    before.layers.map((layer, index) => [layer.id, { layer, index }]),
+  );
+  const afterLayers = new Map(
+    after.layers.map((layer, index) => [layer.id, { layer, index }]),
+  );
+  const commonBefore = before.layers.filter((layer) => afterLayers.has(layer.id)).map((layer) => layer.id);
+  const commonAfter = after.layers.filter((layer) => beforeLayers.has(layer.id)).map((layer) => layer.id);
+  if (!jsonEqual(commonBefore, commonAfter)) {
+    throw new RangeError("Authoring history does not support layer reordering in this slice");
+  }
+  const layerIds = [...new Set([...beforeLayers.keys(), ...afterLayers.keys()])].sort();
+  for (const layerId of layerIds) {
+    const beforeEntry = beforeLayers.get(layerId) ?? null;
+    const afterEntry = afterLayers.get(layerId) ?? null;
+    if (!beforeEntry || !afterEntry) {
+      patches.push({
+        kind: "layer-record",
+        layerId,
+        before: beforeEntry ? cloneJson(beforeEntry.layer) : null,
+        after: afterEntry ? cloneJson(afterEntry.layer) : null,
+        beforeIndex: beforeEntry?.index ?? null,
+        afterIndex: afterEntry?.index ?? null,
+      });
+      continue;
+    }
+    const beforeLayer = beforeEntry.layer;
+    const afterLayer = afterEntry.layer;
     const immutableBefore = {
       id: beforeLayer.id,
-      name: beforeLayer.name,
-      baseY: beforeLayer.baseY,
       width: beforeLayer.width,
       height: beforeLayer.height,
       markers: beforeLayer.markers,
     };
     const immutableAfter = {
       id: afterLayer.id,
-      name: afterLayer.name,
-      baseY: afterLayer.baseY,
       width: afterLayer.width,
       height: afterLayer.height,
       markers: afterLayer.markers,
     };
     if (!jsonEqual(immutableBefore, immutableAfter)) {
-      throw new RangeError("Authoring history cannot replace layer topology or markers in this slice");
+      throw new RangeError("Authoring history cannot resize layers or replace layer markers in this slice");
+    }
+    for (const field of ["name", "baseY"]) {
+      if (beforeLayer[field] !== afterLayer[field]) {
+        patches.push({
+          kind: "layer",
+          layerId,
+          field,
+          before: beforeLayer[field],
+          after: afterLayer[field],
+        });
+      }
     }
     for (const channel of ["surface", "structure"]) {
       if (!jsonEqual(beforeLayer[channel].legend, afterLayer[channel].legend)) {
         patches.push({
           kind: "legend",
-          layerId: beforeLayer.id,
+          layerId,
           channel,
           before: [...beforeLayer[channel].legend],
           after: [...afterLayer[channel].legend],
@@ -270,7 +404,7 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
         if (beforeDefinition === afterDefinition) continue;
         patches.push({
           kind: "cell",
-          layerId: beforeLayer.id,
+          layerId,
           channel,
           cellIndex,
           before: beforeDefinition,
@@ -296,7 +430,7 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
       ) continue;
       patches.push({
         kind: "instance",
-        layerId: beforeLayer.id,
+        layerId,
         instanceId,
         before: beforeEntry ? cloneInstance(beforeEntry.instance) : null,
         after: afterEntry ? cloneInstance(afterEntry.instance) : null,
@@ -307,7 +441,7 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
     if (beforeLayer.nextInstanceOrdinal !== afterLayer.nextInstanceOrdinal) {
       patches.push({
         kind: "layer",
-        layerId: beforeLayer.id,
+        layerId,
         field: "nextInstanceOrdinal",
         before: beforeLayer.nextInstanceOrdinal,
         after: afterLayer.nextInstanceOrdinal,
@@ -340,6 +474,21 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
 
   // Check every precondition before touching the detached document.
   for (const patch of command.patches) {
+    if (patch.kind === "map") {
+      if (!jsonEqual(document[patch.field], patch[sourceSide])) {
+        throw new RangeError(`Map patch precondition failed for "${patch.field}"`);
+      }
+      continue;
+    }
+    if (patch.kind === "layer-record") {
+      const index = document.layers.findIndex((layer) => layer.id === patch.layerId);
+      const expectedIndex = patch[sourceIndexSide];
+      const current = index < 0 ? null : document.layers[index];
+      if (index !== (expectedIndex ?? -1) || !jsonEqual(current, patch[sourceSide])) {
+        throw new RangeError(`Layer patch precondition failed for "${patch.layerId}"`);
+      }
+      continue;
+    }
     const layer = layerFor(document, patch.layerId);
     if (patch.kind === "cell") {
       if (patch.cellIndex >= layer[patch.channel].cells.length) {
@@ -359,9 +508,32 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
       if (index !== (expectedIndex ?? -1) || !jsonEqual(current, patch[sourceSide])) {
         throw new RangeError(`Instance patch precondition failed for "${patch.instanceId}"`);
       }
-    } else if (layer.nextInstanceOrdinal !== patch[sourceSide]) {
-      throw new RangeError(`Layer ordinal patch precondition failed for "${layer.id}"`);
+    } else if (!jsonEqual(layer[patch.field], patch[sourceSide])) {
+      throw new RangeError(`Layer field patch precondition failed for "${layer.id}.${patch.field}"`);
     }
+  }
+
+  const layerRecordPatches = command.patches.filter((patch) => patch.kind === "layer-record");
+  if (layerRecordPatches.length > 0) {
+    const touchedIds = new Set(layerRecordPatches.map((patch) => patch.layerId));
+    document.layers = document.layers.filter((layer) => !touchedIds.has(layer.id));
+    const insertions = layerRecordPatches
+      .filter((patch) => patch[targetSide] !== null)
+      .sort((left, right) => (
+        left[targetIndexSide] - right[targetIndexSide]
+        || left.layerId.localeCompare(right.layerId)
+      ));
+    for (const patch of insertions) {
+      const targetIndex = patch[targetIndexSide];
+      if (targetIndex > document.layers.length) {
+        throw new RangeError(`Layer ordering for "${patch.layerId}" is outside the document`);
+      }
+      document.layers.splice(targetIndex, 0, cloneJson(patch[targetSide]));
+    }
+  }
+  for (const patch of command.patches) {
+    if (patch.kind !== "map") continue;
+    document[patch.field] = cloneJson(patch[targetSide]);
   }
 
   // Legends first so stable definition IDs can be resolved into target codes.
@@ -430,7 +602,7 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
   }
   for (const patch of command.patches) {
     if (patch.kind !== "layer") continue;
-    layerFor(document, patch.layerId).nextInstanceOrdinal = patch[targetSide];
+    layerFor(document, patch.layerId)[patch.field] = patch[targetSide];
   }
   return validateAuthoringMap(document);
 }
@@ -450,13 +622,14 @@ export function commandFromAuthoringAction(documentInput, action) {
   const before = validateAuthoringMap(documentInput);
   let after;
   let label;
-  const activeLayer = before.layers.find((layer) => layer.id === before.activeLayerId);
-  if (!activeLayer) throw new RangeError(`Unknown active layer "${before.activeLayerId}"`);
+  const layerId = String(action.layerId ?? before.playerStart.layerId);
+  const activeLayer = before.layers.find((layer) => layer.id === layerId);
+  if (!activeLayer) throw new RangeError(`Unknown authoring layer "${layerId}"`);
   switch (action.type) {
     case "setTile":
       after = Number(action.tile) === 1
-        ? paintStructure(before, Math.trunc(Number(action.cx)), Math.trunc(Number(action.cz)), "structure.wall")
-        : eraseStructure(before, Math.trunc(Number(action.cx)), Math.trunc(Number(action.cz)));
+        ? paintStructure(before, Math.trunc(Number(action.cx)), Math.trunc(Number(action.cz)), "structure.wall", layerId)
+        : eraseStructure(before, Math.trunc(Number(action.cx)), Math.trunc(Number(action.cz)), layerId);
       label = Number(action.tile) === 1 ? "Paint Wall" : "Erase Structure";
       break;
     case "paintSurface":
@@ -465,7 +638,7 @@ export function commandFromAuthoringAction(documentInput, action) {
       const cells = action.type === "paintSurface"
         ? [{ cx: Math.trunc(Number(action.cx)), cz: Math.trunc(Number(action.cz)) }]
         : action.cells;
-      after = paintSurfaceCells(before, cells, String(action.definitionId));
+      after = paintSurfaceCells(before, cells, String(action.definitionId), layerId);
       label = definitionLabel(definition, "Paint");
       break;
     }
@@ -474,7 +647,7 @@ export function commandFromAuthoringAction(documentInput, action) {
       const cells = action.type === "eraseSurface"
         ? [{ cx: Math.trunc(Number(action.cx)), cz: Math.trunc(Number(action.cz)) }]
         : action.cells;
-      after = eraseSurfaceCells(before, cells);
+      after = eraseSurfaceCells(before, cells, layerId);
       label = "Erase Surface";
       break;
     }
@@ -484,7 +657,7 @@ export function commandFromAuthoringAction(documentInput, action) {
       const cells = action.type === "paintStructure"
         ? [{ cx: Math.trunc(Number(action.cx)), cz: Math.trunc(Number(action.cz)) }]
         : action.cells;
-      after = paintStructureCells(before, cells, String(action.definitionId));
+      after = paintStructureCells(before, cells, String(action.definitionId), layerId);
       label = definitionLabel(definition, "Paint");
       break;
     }
@@ -493,7 +666,7 @@ export function commandFromAuthoringAction(documentInput, action) {
       const cells = action.type === "eraseStructure"
         ? [{ cx: Math.trunc(Number(action.cx)), cz: Math.trunc(Number(action.cz)) }]
         : action.cells;
-      after = eraseStructureCells(before, cells);
+      after = eraseStructureCells(before, cells, layerId);
       label = "Erase Structure";
       break;
     }
@@ -501,7 +674,7 @@ export function commandFromAuthoringAction(documentInput, action) {
       const definitionId = rockDefinitionId(String(action.archetype));
       if (!definitionId) throw new RangeError(`Unknown rock archetype "${String(action.archetype)}"`);
       const definition = getPlaceableDefinition(definitionId);
-      after = placeInstance(before, definitionId, Number(action.x), Number(action.z)).document;
+      after = placeInstance(before, definitionId, Number(action.x), Number(action.z), { layerId }).document;
       label = definitionLabel(definition, "Place");
       break;
     }
@@ -514,6 +687,7 @@ export function commandFromAuthoringAction(documentInput, action) {
         Number(action.z),
         {
           rotation: action.rotation ?? 0,
+          layerId,
           ...(action.properties === undefined ? {} : { properties: action.properties }),
         },
       );
@@ -524,7 +698,7 @@ export function commandFromAuthoringAction(documentInput, action) {
     case "removeInstance": {
       const instance = activeLayer.instances.find((candidate) => candidate.id === String(action.authoringId));
       if (!instance) throw new RangeError(`Unknown authoring instance "${String(action.authoringId)}"`);
-      after = removeInstance(before, instance.id);
+      after = removeInstance(before, instance.id, layerId);
       label = definitionLabel(getPlaceableDefinition(instance.definitionId), "Delete");
       break;
     }
@@ -536,7 +710,7 @@ export function commandFromAuthoringAction(documentInput, action) {
         z: Number(action.z),
         rotation: Number(action.rotation),
       };
-      after = updateInstanceTransform(before, instance.id, transform);
+      after = updateInstanceTransform(before, instance.id, transform, layerId);
       const moved = transform.x !== instance.x || transform.z !== instance.z;
       const rotated = transform.rotation !== instance.rotation;
       const verb = moved && rotated ? "Transform" : moved ? "Move" : rotated ? "Rotate" : "Transform";
@@ -546,8 +720,50 @@ export function commandFromAuthoringAction(documentInput, action) {
     case "updateInstanceProperties": {
       const instance = activeLayer.instances.find((candidate) => candidate.id === String(action.authoringId));
       if (!instance) throw new RangeError(`Unknown authoring instance "${String(action.authoringId)}"`);
-      after = updateInstanceProperties(before, instance.id, action.properties);
+      after = updateInstanceProperties(before, instance.id, action.properties, layerId);
       label = definitionLabel(getPlaceableDefinition(instance.definitionId), "Edit");
+      break;
+    }
+    case "createLayer": {
+      const result = createLayer(
+        before,
+        String(action.relativeLayerId ?? layerId),
+        action.direction === "below" ? "below" : "above",
+        {
+          ...(action.name === undefined ? {} : { name: String(action.name) }),
+          ...(action.baseY === undefined ? {} : { baseY: Number(action.baseY) }),
+        },
+      );
+      after = result.document;
+      label = `Create ${after.layers.find((layer) => layer.id === result.layerId)?.name ?? "Layer"}`;
+      break;
+    }
+    case "deleteLayer": {
+      const target = before.layers.find((layer) => layer.id === String(action.layerId));
+      if (!target) throw new RangeError(`Unknown authoring layer "${String(action.layerId)}"`);
+      after = deleteLayer(before, target.id);
+      label = `Delete ${target.name}`;
+      break;
+    }
+    case "renameLayer": {
+      const target = before.layers.find((layer) => layer.id === String(action.layerId));
+      if (!target) throw new RangeError(`Unknown authoring layer "${String(action.layerId)}"`);
+      after = renameLayer(before, target.id, String(action.name));
+      label = `Rename ${target.name}`;
+      break;
+    }
+    case "setLayerBaseY": {
+      const target = before.layers.find((layer) => layer.id === String(action.layerId));
+      if (!target) throw new RangeError(`Unknown authoring layer "${String(action.layerId)}"`);
+      after = setLayerBaseY(before, target.id, Number(action.baseY));
+      label = `Change ${target.name} Height`;
+      break;
+    }
+    case "setPlayerStartLayer": {
+      const target = before.layers.find((layer) => layer.id === String(action.layerId));
+      if (!target) throw new RangeError(`Unknown authoring layer "${String(action.layerId)}"`);
+      after = setPlayerStartLayer(before, target.id);
+      label = `Set Start Layer ${target.name}`;
       break;
     }
     default:

@@ -5,6 +5,7 @@ import { AiView } from "./browser/ai_view.js";
 import { DeveloperToolbox } from "./browser/developer_toolbox.js";
 import { AuthoringEditorController } from "./browser/authoring_editor.js";
 import { AuthoringInspector } from "./browser/authoring_inspector.js";
+import { LayerPanel } from "./browser/layer_panel.js";
 import { MapPalette } from "./browser/map_palette.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
@@ -81,12 +82,14 @@ const { camera, presentation } = presentationBundle;
 renderLab.attachPresentation(presentation);
 document.body.dataset.backend = presentation.diagnostics().activeBackend;
 let resumeAfterEdit = false;
+let editorLayerBeforePlay = initialSnapshot.authoring.playerStartLayerId;
 let pinned = /** @type {{kind:string,id:number|string}|null} */ (null);
 let input;
 let spellLab;
 let aiView;
 let performanceCapture;
 let mapPalette;
+let layerPanel;
 let authoringEditor;
 let authoringInspector;
 let authoringHistory;
@@ -136,13 +139,18 @@ const runtime = new FixedStepRuntime({
       : { entity: null, hidden: false };
     const selected = selection.entity;
     const pinnedHidden = selection.hidden;
-    const editorView = authoringEditor?.sync(snapshot, {
-      x: input.mouseWorld.x,
-      z: input.mouseWorld.z,
-      inside: input.mouseInside && developerToolsOpen && mode === "edit",
-    }) ?? null;
+    const editorView = authoringEditor
+      ? mode === "edit"
+        ? authoringEditor.sync(snapshot, {
+          x: input.mouseWorld.x,
+          z: input.mouseWorld.z,
+          inside: input.mouseInside && developerToolsOpen,
+        })
+        : authoringEditor.snapshot()
+      : null;
     if (editorView) {
       mapPalette?.sync(editorView);
+      layerPanel?.sync(editorView);
       authoringInspector?.update(snapshot, editorView);
     }
     presentation.render(snapshot, alpha, {
@@ -217,10 +225,32 @@ function applyHistoryCommand(command, direction) {
   });
 }
 
+const LAYER_SCOPED_AUTHORING_ACTIONS = new Set([
+  "setTile",
+  "paintSurface",
+  "paintSurfaceStroke",
+  "eraseSurface",
+  "eraseSurfaceStroke",
+  "paintStructure",
+  "paintStructureStroke",
+  "eraseStructure",
+  "eraseStructureStroke",
+  "placeRock",
+  "placeInstance",
+  "removeInstance",
+  "updateInstanceTransform",
+  "updateInstanceProperties",
+]);
+
 /** @param {Record<string,unknown>} action */
 function commitAuthoringAction(action) {
   try {
-    const command = commandFromAuthoringAction(simulation.authoringDocument(), action);
+    const scopedAction = LAYER_SCOPED_AUTHORING_ACTIONS.has(String(action.type))
+      && typeof action.layerId !== "string"
+      && authoringEditor
+      ? { ...action, layerId: authoringEditor.snapshot().activeLayerId }
+      : action;
+    const command = commandFromAuthoringAction(simulation.authoringDocument(), scopedAction);
     const result = authoringHistory.execute(command);
     return {
       ok: result.ok,
@@ -285,8 +315,23 @@ function toggleMode() {
     resumeAfterEdit = !runtime.paused;
     runtime.pause();
     mode = "edit";
+    if (editorLayerBeforePlay && editorLayerBeforePlay !== simulation.authoringSnapshot().runtimeLayerId) {
+      const result = applyImmediateMutation({ type: "activateLayer", layerId: editorLayerBeforePlay });
+      if (!result.ok) ui.showError(result.error ?? "Editor layer activation failed");
+    }
   } else {
     authoringEditor?.cancel();
+    editorLayerBeforePlay = authoringEditor?.snapshot().activeLayerId
+      ?? simulation.authoringSnapshot().playerStartLayerId;
+    authoringEditor?.setReferenceLayer(null);
+    const playerStartLayerId = simulation.authoringSnapshot().playerStartLayerId;
+    if (simulation.authoringSnapshot().runtimeLayerId !== playerStartLayerId) {
+      const result = applyImmediateMutation({ type: "activateLayer", layerId: playerStartLayerId });
+      if (!result.ok) {
+        ui.showError(result.error ?? "Player-start layer activation failed");
+        return;
+      }
+    }
     trueSight.requestSnap("reset");
     injectMutation({ type: "restoreScenario" });
     pinned = null;
@@ -295,11 +340,13 @@ function toggleMode() {
     resumeAfterEdit = false;
   }
   input.setMode(mode);
-  authoringEditor?.sync(simulation.snapshot(), {
-    x: input.mouseWorld.x,
-    z: input.mouseWorld.z,
-    inside: input.mouseInside && mode === "edit",
-  });
+  if (mode === "edit") {
+    authoringEditor?.sync(simulation.snapshot(), {
+      x: input.mouseWorld.x,
+      z: input.mouseWorld.z,
+      inside: input.mouseInside,
+    });
+  }
   if (syncPlayerCamera(
     camera,
     runtime.lastSnapshot.player,
@@ -355,10 +402,17 @@ authoringHistory = new AuthoringHistory({
 
 authoringEditor = new AuthoringEditorController({
   snapshot: initialSnapshot,
-  validatePlacement: (definitionId, x, z, rotation, ignoreId) => (
-    simulation.validateInstanceTransform(definitionId, x, z, rotation, ignoreId)
+  validatePlacement: (definitionId, x, z, rotation, ignoreId, layerId) => (
+    simulation.validateInstanceTransform(definitionId, x, z, rotation, ignoreId, layerId)
   ),
   commit: commitAuthoringAction,
+  activateLayer: (layerId) => {
+    trueSight.requestSnap("map");
+    pinned = null;
+    return applyImmediateMutation({ type: "activateLayer", layerId });
+  },
+  layerSnapshot: (layerId) => simulation.authoringLayerSnapshot(layerId),
+  validateMap: () => simulation.authoringValidation(),
   historySnapshot: () => authoringHistory.snapshot(),
   undo: () => authoringHistory.undo(),
   redo: () => authoringHistory.redo(),
@@ -425,6 +479,38 @@ mapPalette = new MapPalette({
 });
 mapPalette.sync(authoringEditor.snapshot());
 
+layerPanel = new LayerPanel({
+  onActivate: (layerId) => authoringEditor.activateLayer(layerId),
+  onReference: (layerId) => authoringEditor.setReferenceLayer(layerId),
+  onCreate: (direction) => {
+    const layerId = authoringEditor.createLayer(direction);
+    if (layerId) layerPanel.clearExternalDiagnostics();
+    return layerId;
+  },
+  onRename: (layerId, name) => {
+    const ok = authoringEditor.renameLayer(layerId, name);
+    if (ok) layerPanel.clearExternalDiagnostics();
+    return ok;
+  },
+  onBaseY: (layerId, baseY) => {
+    const ok = authoringEditor.setLayerBaseY(layerId, baseY);
+    if (ok) layerPanel.clearExternalDiagnostics();
+    return ok;
+  },
+  onDelete: (layerId) => {
+    const ok = authoringEditor.deleteLayer(layerId);
+    if (ok) layerPanel.clearExternalDiagnostics();
+    return ok;
+  },
+  onSetStart: (layerId) => {
+    const ok = authoringEditor.setPlayerStartLayer(layerId);
+    if (ok) layerPanel.clearExternalDiagnostics();
+    return ok;
+  },
+  onValidate: () => authoringEditor.validateMap(),
+});
+layerPanel.sync(authoringEditor.snapshot());
+
 authoringInspector = new AuthoringInspector({
   onUpdate: (instanceId, transform) => {
     const ok = authoringEditor.updateInstanceTransform(instanceId, transform);
@@ -484,12 +570,34 @@ function downloadJson(filename, data) {
   return true;
 }
 
+/** @param {unknown} error */
+function validationFromError(error) {
+  const issues = error && typeof error === "object" && Array.isArray(error.issues)
+    ? error.issues.map((entry) => ({ ...entry }))
+    : [{
+      severity: "error",
+      code: "load-or-save-failed",
+      path: "map",
+      message: error instanceof Error ? error.message : String(error),
+    }];
+  return {
+    diagnostics: issues,
+    errorCount: issues.filter((entry) => entry.severity !== "warning").length,
+    warningCount: issues.filter((entry) => entry.severity === "warning").length,
+  };
+}
+
 onButton("save-map-button", () => {
   try {
+    const validation = authoringEditor.validateMap();
+    layerPanel.setExternalDiagnostics(validation);
+    if (validation.errorCount > 0) throw new RangeError("Map validation errors block saving");
     downloadJson("lantern-scenario.json", simulation.saveScenario());
     authoringHistory.markSaved();
+    layerPanel.clearExternalDiagnostics();
     ui.announce("Scenario JSON exported; saved revision updated");
   } catch (error) {
+    layerPanel.setExternalDiagnostics(validationFromError(error));
     ui.showError(error);
   }
 });
@@ -508,15 +616,15 @@ onButton("load-map-button", () => mapFileInput.click());
 /** @param {string|unknown} json */
 function loadAuthoringJson(json) {
   const loadedScenario = ArenaScenario.fromJSON(json);
-  const result = applyImmediateMutation({ type: "loadScenario", json });
+  const result = applyImmediateMutation({
+    type: "loadScenario",
+    json: loadedScenario.toAuthoringJSON(),
+  });
   if (!result.ok) throw new RangeError(result.error ?? "Scenario load was rejected");
   authoringHistory.clear();
-  authoringEditor.cancel();
-  authoringEditor.sync(result.snapshot, {
-    x: input.mouseWorld.x,
-    z: input.mouseWorld.z,
-    inside: input.mouseInside && mode === "edit",
-  });
+  authoringEditor.replaceDocument(result.snapshot);
+  editorLayerBeforePlay = result.snapshot.authoring.playerStartLayerId;
+  layerPanel.clearExternalDiagnostics();
   return loadedScenario;
 }
 
@@ -531,6 +639,7 @@ mapFileInput.addEventListener("change", async () => {
     ui.clearError();
     ui.announce(`Loaded ${file.name}`);
   } catch (error) {
+    layerPanel.setExternalDiagnostics(validationFromError(error));
     ui.showError(error);
   } finally {
     mapFileInput.value = "";
@@ -638,6 +747,18 @@ const probe = Object.freeze({
       currentAuthoringRevisionId: history.currentRevisionId,
       savedAuthoringRevisionId: history.savedRevisionId,
       transactionActive: history.transactionActive,
+      activeEditorLayerId: editor.activeLayerId,
+      referenceLayerId: editor.referenceLayerId,
+      playerStartLayerId: editor.playerStartLayerId,
+      currentRuntimeLayerId: simulation.authoringSnapshot().runtimeLayerId,
+      compiledLayerIds: [...simulation.authoringSnapshot().compiledLayerIds],
+      layerCapacity: simulation.authoringSnapshot().layerCapacity,
+      layerSummaries: editor.layers.map((layer) => ({ ...layer })),
+      validation: {
+        diagnostics: editor.validation.diagnostics.map((entry) => ({ ...entry })),
+        errorCount: editor.validation.errorCount,
+        warningCount: editor.validation.warningCount,
+      },
     };
   },
   editor() {
@@ -668,6 +789,38 @@ const probe = Object.freeze({
   },
   setAuthoringExtents(value) {
     return mapPalette.setExtents(Boolean(value));
+  },
+  activateAuthoringLayer(layerId) {
+    return mode === "edit" && authoringEditor.activateLayer(String(layerId));
+  },
+  setReferenceLayer(layerId) {
+    if (mode !== "edit") return false;
+    return authoringEditor.setReferenceLayer(
+      layerId === null || layerId === "" ? null : String(layerId),
+    );
+  },
+  createAuthoringLayer(direction = "above") {
+    if (mode !== "edit" || (direction !== "above" && direction !== "below")) return null;
+    return authoringEditor.createLayer(direction);
+  },
+  renameAuthoringLayer(layerId, name) {
+    return mode === "edit" && authoringEditor.renameLayer(String(layerId), String(name));
+  },
+  setAuthoringLayerBaseY(layerId, baseY) {
+    return mode === "edit"
+      && authoringEditor.setLayerBaseY(String(layerId), Number(baseY));
+  },
+  deleteAuthoringLayer(layerId) {
+    return mode === "edit" && authoringEditor.deleteLayer(String(layerId));
+  },
+  setPlayerStartLayer(layerId) {
+    return mode === "edit" && authoringEditor.setPlayerStartLayer(String(layerId));
+  },
+  validateAuthoringMap() {
+    return authoringEditor.validateMap();
+  },
+  authoringLayer(layerId) {
+    return simulation.authoringLayerSnapshot(String(layerId));
   },
   selectAuthoringAt(x, z) {
     return authoringEditor.selectAt(Number(x), Number(z));
@@ -711,6 +864,7 @@ const probe = Object.freeze({
       focusWorldPoint(loadedScenario.map.playerSpawn.x, loadedScenario.map.playerSpawn.z);
       return true;
     } catch (error) {
+      layerPanel.setExternalDiagnostics(validationFromError(error));
       ui.showError(error);
       return false;
     }
@@ -802,22 +956,16 @@ const probe = Object.freeze({
       if (action.type === "loadMap" || action.type === "loadScenario") {
         return this.loadMap(action.json);
       }
-      if (new Set([
-        "setTile",
-        "paintSurface",
-        "paintSurfaceStroke",
-        "eraseSurface",
-        "eraseSurfaceStroke",
-        "paintStructure",
-        "paintStructureStroke",
-        "eraseStructure",
-        "eraseStructureStroke",
-        "placeRock",
-        "placeInstance",
-        "removeInstance",
-        "updateInstanceTransform",
-        "updateInstanceProperties",
-      ]).has(String(action.type))) {
+      if (
+        LAYER_SCOPED_AUTHORING_ACTIONS.has(String(action.type))
+        || new Set([
+          "createLayer",
+          "deleteLayer",
+          "renameLayer",
+          "setLayerBaseY",
+          "setPlayerStartLayer",
+        ]).has(String(action.type))
+      ) {
         return commitAuthoringAction(action).ok;
       }
     }

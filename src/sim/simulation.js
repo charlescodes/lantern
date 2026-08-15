@@ -43,6 +43,7 @@ import { normalizeSeed, SeededRng } from "../core/rng.js";
 import {
   AUTHORING_MAP_VERSION,
   cloneAuthoringMap,
+  MAX_AUTHORING_LAYERS,
 } from "../authoring/authoring_map.js";
 import { applyAuthoringCommand } from "../authoring/authoring_history.js";
 import {
@@ -215,6 +216,21 @@ const SPAWN_OFFSETS = Object.freeze([
   Object.freeze({ x: -1, z: 1, name: "southwest" }),
   Object.freeze({ x: -1, z: -1, name: "northwest" }),
 ]);
+const DIRECT_AUTHORING_ACTIONS = new Set([
+  "setTile",
+  "paintSurface",
+  "paintSurfaceStroke",
+  "eraseSurface",
+  "eraseSurfaceStroke",
+  "paintStructure",
+  "paintStructureStroke",
+  "eraseStructure",
+  "eraseStructureStroke",
+  "placeRock",
+  "placeInstance",
+  "removeInstance",
+  "updateInstanceTransform",
+]);
 
 const ROCK_NAME_BY_CODE = new Map(
   Object.entries(ROCK_ARCHETYPES).map(([name, definition]) => [definition.code, name]),
@@ -371,6 +387,7 @@ function canonicalAction(value) {
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
         tile: Number(action.tile) === 1 ? 1 : 0,
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "paintSurface":
       return {
@@ -378,23 +395,27 @@ function canonicalAction(value) {
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
         definitionId: String(action.definitionId),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "paintSurfaceStroke":
       return {
         type: "paintSurfaceStroke",
         cells: canonicalAuthoringCells(action.cells),
         definitionId: String(action.definitionId),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "eraseSurface":
       return {
         type: "eraseSurface",
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "eraseSurfaceStroke":
       return {
         type: "eraseSurfaceStroke",
         cells: canonicalAuthoringCells(action.cells),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "paintStructure":
       return {
@@ -402,23 +423,27 @@ function canonicalAction(value) {
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
         definitionId: String(action.definitionId),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "paintStructureStroke":
       return {
         type: "paintStructureStroke",
         cells: canonicalAuthoringCells(action.cells),
         definitionId: String(action.definitionId),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "eraseStructure":
       return {
         type: "eraseStructure",
         cx: Math.trunc(Number(action.cx)),
         cz: Math.trunc(Number(action.cz)),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "eraseStructureStroke":
       return {
         type: "eraseStructureStroke",
         cells: canonicalAuthoringCells(action.cells),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "loadMap":
     case "loadScenario":
@@ -432,6 +457,7 @@ function canonicalAction(value) {
         archetype: String(action.archetype),
         x: Number(action.x),
         z: Number(action.z),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "placeInstance":
       return {
@@ -441,11 +467,13 @@ function canonicalAction(value) {
         z: Number(action.z),
         rotation: action.rotation === undefined ? 0 : Number(action.rotation),
         properties: action.properties === undefined ? undefined : cloneUnknown(action.properties),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "removeInstance":
       return {
         type: "removeInstance",
         authoringId: String(action.authoringId),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
     case "updateInstanceTransform":
       return {
@@ -454,7 +482,10 @@ function canonicalAction(value) {
         x: Number(action.x),
         z: Number(action.z),
         rotation: Number(action.rotation),
+        ...(action.layerId === undefined ? {} : { layerId: String(action.layerId) }),
       };
+    case "activateLayer":
+      return { type: "activateLayer", layerId: String(action.layerId) };
     case "applyAuthoringCommand":
       return {
         type: "applyAuthoringCommand",
@@ -739,9 +770,12 @@ export class Simulation {
     if (!Number.isInteger(rockCapacity) || rockCapacity <= 0) {
       throw new RangeError("Rock capacity must be a positive integer");
     }
-    if (this.scenario.entities.filter(isDynamicRuntimeEntity).length > rockCapacity) {
+    if (this.scenario.compiledLayerIds.some((layerId) => (
+      this.scenario.compiledLayer(layerId)?.entities.filter(isDynamicRuntimeEntity).length
+      > rockCapacity
+    ))) {
       throw new RangeError(
-        "Scenario has more rocks than the configured rock pool; upright props share this capacity",
+        "A scenario layer has more rocks than the configured shared body pool can hold (including other dynamic props)",
       );
     }
     const defaultEnemyCapacity = usesPerceptionProfile(this.enemyAiProfile)
@@ -1196,6 +1230,64 @@ export class Simulation {
     this.commandLog.push({ tick: this.tickCount, command });
   }
 
+  /** @param {ArenaScenario} scenario */
+  #scenarioFitsDynamicCapacity(scenario) {
+    return scenario.compiledLayerIds.every((layerId) => (
+      (scenario.compiledLayer(layerId)?.entities.filter(isDynamicRuntimeEntity).length ?? 0)
+      <= this.rocks.capacity
+    ));
+  }
+
+  #clearLayerRuntimeEvents() {
+    this.impactEvents.clear();
+    this.combatEvents.clear();
+    this.combatEventDropped = 0;
+    this.perceptionEvents.clear();
+    this.perceptionEventDropped = 0;
+    this.#clearSoundEventHistory();
+  }
+
+  /** @param {ArenaScenario} candidate @param {string} requestedLayerId */
+  #adoptScenario(candidate, requestedLayerId) {
+    if (!this.#scenarioFitsDynamicCapacity(candidate)) {
+      throw new RangeError("A scenario layer exceeds the configured dynamic prop pool capacity");
+    }
+    const layerId = candidate.hasLayer(requestedLayerId)
+      ? requestedLayerId
+      : candidate.startLayerId;
+    if (!candidate.activateLayer(layerId)) {
+      throw new RangeError(candidate.lastMutationError ?? `Unknown authoring layer "${layerId}"`);
+    }
+    this.scenario = candidate;
+    this.map = candidate.map;
+    this.authoringRevision += 1;
+    this.#refreshPreparedAuthoringState();
+    this.mapRevision += 1;
+    this.#restoreAuthoredState();
+    this.#clearLayerRuntimeEvents();
+  }
+
+  /** Switches the disposable runtime recipe without changing authoring source. @param {string} layerId */
+  #activateScenarioLayer(layerId) {
+    const compiledLayer = this.scenario.compiledLayer(layerId);
+    if (!compiledLayer) {
+      throw new RangeError(`Unknown authoring layer "${layerId}"`);
+    }
+    if (compiledLayer.entities.filter(isDynamicRuntimeEntity).length > this.rocks.capacity) {
+      throw new RangeError("Layer exceeds the configured dynamic prop pool capacity");
+    }
+    if (!this.scenario.activateLayer(layerId)) {
+      throw new RangeError(this.scenario.lastMutationError ?? `Could not activate layer "${layerId}"`);
+    }
+    this.map = this.scenario.map;
+    this.authoringRevision += 1;
+    this.#refreshPreparedAuthoringState();
+    this.mapRevision += 1;
+    this.#restoreAuthoredState();
+    this.#clearLayerRuntimeEvents();
+    return true;
+  }
+
   /** @param {Array<Record<string, unknown>>} actions @param {boolean} [defeatedOnly] */
   #applyActions(actions, defeatedOnly = false) {
     for (const action of actions) {
@@ -1209,35 +1301,28 @@ export class Simulation {
         continue;
       }
       try {
+        if (
+          DIRECT_AUTHORING_ACTIONS.has(action.type)
+          && action.layerId !== undefined
+          && action.layerId !== this.scenario.activeLayer.id
+        ) {
+          throw new RangeError(
+            `Authoring action targets inactive layer "${action.layerId}"; activate it first`,
+          );
+        }
         if (action.type === "reset") {
           this.reset(action.seed);
         } else if (action.type === "applyAuthoringCommand") {
+          const requestedLayerId = this.scenario.activeLayer.id;
           const nextDocument = applyAuthoringCommand(
             this.scenario.toAuthoringJSON(),
             action.command,
             action.direction,
           );
           const candidate = new ArenaScenario(nextDocument);
-          if (
-            candidate.entities.filter(isDynamicRuntimeEntity).length
-            > this.rocks.capacity
-          ) {
-            throw new RangeError(
-              "Authoring command exceeds the configured dynamic prop pool capacity",
-            );
-          }
-          this.scenario = candidate;
-          this.map = candidate.map;
-          this.authoringRevision += 1;
-          this.#refreshPreparedAuthoringState();
-          this.mapRevision += 1;
-          this.#restoreAuthoredState();
-          this.impactEvents.clear();
-          this.combatEvents.clear();
-          this.combatEventDropped = 0;
-          this.perceptionEvents.clear();
-          this.perceptionEventDropped = 0;
-          this.#clearSoundEventHistory();
+          this.#adoptScenario(candidate, requestedLayerId);
+        } else if (action.type === "activateLayer") {
+          this.#activateScenarioLayer(action.layerId);
         } else if (action.type === "restoreScenario") {
           this.#restoreAuthoredState();
           this.impactEvents.clear();
@@ -1288,26 +1373,7 @@ export class Simulation {
           }
         } else if (action.type === "loadScenario") {
           const loadedScenario = ArenaScenario.fromJSON(action.json);
-          if (
-            loadedScenario.entities.filter(isDynamicRuntimeEntity).length
-            > this.rocks.capacity
-          ) {
-            throw new RangeError(
-              "Scenario has more rocks than the configured rock pool; upright props share this capacity",
-            );
-          }
-          this.scenario = loadedScenario;
-          this.map = loadedScenario.map;
-          this.authoringRevision += 1;
-          this.#refreshPreparedAuthoringState();
-          this.mapRevision += 1;
-          this.#restoreAuthoredState();
-          this.impactEvents.clear();
-          this.combatEvents.clear();
-          this.combatEventDropped = 0;
-          this.perceptionEvents.clear();
-          this.perceptionEventDropped = 0;
-          this.#clearSoundEventHistory();
+          this.#adoptScenario(loadedScenario, loadedScenario.startLayerId);
         } else if (action.type === "placeRock") {
           const definitionId = rockDefinitionId(action.archetype);
           if (!definitionId || !this.#placeDefinition(definitionId, action.x, action.z, 0)) {
@@ -7284,9 +7350,12 @@ export class Simulation {
       particleProfile: this.particleProfile,
       scenarioVersion: SCENARIO_VERSION,
       authoringMapVersion: AUTHORING_MAP_VERSION,
+      runtimeLayerId: this.scenario.activeLayer.id,
       authoring: this._preparedAuthoringState.authoring,
       map: {
         version: MAP_VERSION,
+        layerId: this.scenario.activeLayer.id,
+        baseY: this.scenario.activeLayer.baseY,
         width: this.map.width,
         height: this.map.height,
         cells: Array.from(this.map.cells),
@@ -7805,6 +7874,8 @@ export class Simulation {
 
   #refreshPreparedAuthoringState() {
     this.authoringRevision = stableAuthoringRevision(this.scenario.authoringMap);
+    const layerSummaries = this.scenario.layerSummaries();
+    const diagnostics = this.scenario.validationDiagnostics.map((entry) => ({ ...entry }));
     this._preparedAuthoringState = deepFreeze({
       authoring: {
         format: this.scenario.authoringMap.format,
@@ -7812,6 +7883,18 @@ export class Simulation {
         revision: this.authoringRevision,
         metadata: { ...this.scenario.authoringMap.metadata },
         activeLayer: { ...this.scenario.activeLayer },
+        activeEditorLayerId: this.scenario.activeLayer.id,
+        runtimeLayerId: this.scenario.activeLayer.id,
+        playerStartLayerId: this.scenario.startLayerId,
+        playerStart: { ...this.scenario.playerStart },
+        compiledLayerIds: [...this.scenario.compiledLayerIds],
+        layerCapacity: MAX_AUTHORING_LAYERS,
+        layers: layerSummaries,
+        validation: {
+          diagnostics,
+          errorCount: diagnostics.filter((entry) => entry.severity === "error").length,
+          warningCount: diagnostics.filter((entry) => entry.severity === "warning").length,
+        },
         defaultSurfaceDefinitionId: this.scenario.surface.legend[0],
         availableDefinitionIds: listPlaceableDefinitions().map((definition) => definition.id),
         instances: this.scenario.instances.map((instance) => {
@@ -7844,6 +7927,41 @@ export class Simulation {
     return cloneUnknown(this._preparedAuthoringState.authoring);
   }
 
+  /** Returns a detached editor/reference read model for one stable layer ID. @param {string} layerId */
+  authoringLayerSnapshot(layerId) {
+    const source = this.scenario.authoringMap.layers.find((layer) => layer.id === layerId);
+    const compiled = this.scenario.compiledLayer(layerId);
+    if (!source || !compiled) return null;
+    return cloneUnknown({
+      id: source.id,
+      name: source.name,
+      baseY: source.baseY,
+      width: source.width,
+      height: source.height,
+      defaultSurfaceDefinitionId: source.surface.legend[0],
+      playerStart: source.id === this.scenario.startLayerId,
+      surface: {
+        legend: [...compiled.surface.legend],
+        cells: Array.from(compiled.surface.cells),
+      },
+      structure: {
+        legend: [...compiled.structure.legend],
+        cells: Array.from(compiled.structure.cells),
+      },
+      solidCells: Array.from(compiled.solidMask),
+      occluderCells: Array.from(compiled.occluderMask),
+      markers: cloneUnknown(source.markers),
+      instances: source.instances.map((instance) => {
+        const definition = getPlaceableDefinition(instance.definitionId);
+        return {
+          ...cloneUnknown(instance),
+          layerId: source.id,
+          occupiedCells: definition ? getOccupiedCells(definition, instance) : [],
+        };
+      }),
+    });
+  }
+
   /** Returns a detached saved-source document for editor command reduction. */
   authoringDocument() {
     return this.scenario.toAuthoringJSON();
@@ -7851,10 +7969,17 @@ export class Simulation {
 
   /** @param {string} authoringId */
   getAuthoredInstance(authoringId) {
-    const instance = this._preparedAuthoringState.authoring.instances.find(
-      (candidate) => candidate.id === authoringId,
-    );
-    return instance ? cloneUnknown(instance) : null;
+    for (const layer of this.scenario.authoringMap.layers) {
+      const instance = layer.instances.find((candidate) => candidate.id === authoringId);
+      if (!instance) continue;
+      const definition = getPlaceableDefinition(instance.definitionId);
+      return cloneUnknown({
+        ...instance,
+        layerId: layer.id,
+        occupiedCells: definition ? getOccupiedCells(definition, instance) : [],
+      });
+    }
+    return null;
   }
 
   /** @param {number} runtimeId */
@@ -7895,14 +8020,24 @@ export class Simulation {
    * @param {number} z
    * @param {number} [rotation]
    * @param {string|null} [ignoreAuthoringId]
+   * @param {string} [layerId]
    */
-  validateInstanceTransform(definitionId, x, z, rotation = 0, ignoreAuthoringId = null) {
+  validateInstanceTransform(
+    definitionId,
+    x,
+    z,
+    rotation = 0,
+    ignoreAuthoringId = null,
+    layerId = this.scenario.activeLayer.id,
+  ) {
     const source = this.scenario.validateInstanceTransform(
       definitionId,
       { x, z, rotation },
       ignoreAuthoringId ?? undefined,
+      layerId,
     );
     if (!source.valid) return source;
+    if (layerId !== this.scenario.activeLayer.id) return source;
     const definition = getPlaceableDefinition(definitionId);
     if (!definition) return source;
     const reject = (code, message) => ({ ...source, valid: false, code, message });
@@ -8046,6 +8181,28 @@ export class Simulation {
     return this.scenario.instanceAt(x, z);
   }
 
+  /** Read-only current-document diagnostics; compilation has already succeeded. */
+  authoringValidation() {
+    const diagnostics = this.scenario.validationDiagnostics.map((entry) => ({ ...entry }));
+    return {
+      diagnostics,
+      errorCount: diagnostics.filter((entry) => entry.severity === "error").length,
+      warningCount: diagnostics.filter((entry) => entry.severity === "warning").length,
+    };
+  }
+
+  /** @param {string} layerId */
+  activateRuntimeLayer(layerId) {
+    try {
+      const result = this.#activateScenarioLayer(String(layerId));
+      this.lastError = null;
+      return result;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
+  }
+
   /** @param {string} archetype @param {number} x @param {number} z */
   canPlaceRock(archetype, x, z) {
     const definitionId = rockDefinitionId(archetype);
@@ -8053,7 +8210,8 @@ export class Simulation {
   }
 
   saveScenario() {
-    return JSON.stringify(this.scenario.toAuthoringJSON(), null, 2);
+    const candidate = new ArenaScenario(this.scenario.toAuthoringJSON());
+    return JSON.stringify(candidate.toAuthoringJSON(), null, 2);
   }
 
   saveMap() {

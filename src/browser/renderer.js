@@ -7,7 +7,7 @@ import {
   isDynamicCircleDefinition,
 } from "../authoring/definition_catalog.js";
 import { occupiedCellsForTarget } from "../authoring/editor_interaction.js";
-import { getOccupiedCells } from "../authoring/footprint.js";
+import { getFootprintBounds, getOccupiedCells } from "../authoring/footprint.js";
 import {
   colorHexCss,
   HEALTH_BAR,
@@ -449,6 +449,46 @@ export class DebugRenderer {
         context.strokeRect(cell.cx + line * 2, cell.cz + line * 2, 1 - line * 4, 1 - line * 4);
       }
     };
+
+    if (editor.referenceLayer) {
+      const reference = editor.referenceLayer;
+      const referenceCells = [];
+      for (let index = 0; index < reference.structure.cells.length; index += 1) {
+        const definitionId = reference.structure.legend[reference.structure.cells[index]];
+        if (!definitionId) continue;
+        referenceCells.push({
+          cx: index % reference.width,
+          cz: Math.floor(index / reference.width),
+        });
+      }
+      for (const instance of reference.instances) {
+        referenceCells.push(...(instance.occupiedCells ?? []));
+      }
+      context.save();
+      context.setLineDash([
+        this.camera.viewportLengthToWorld(5),
+        this.camera.viewportLengthToWorld(4),
+      ]);
+      drawCells(
+        referenceCells,
+        "rgba(103, 165, 197, 0.035)",
+        "rgba(120, 190, 224, 0.48)",
+      );
+      context.strokeStyle = "rgba(120, 190, 224, 0.58)";
+      context.lineWidth = line;
+      context.strokeRect(0, 0, reference.width, reference.height);
+      context.setLineDash([]);
+      context.fillStyle = "rgba(174, 217, 238, 0.84)";
+      context.font = `600 ${this.camera.viewportLengthToWorld(9)}px monospace`;
+      context.textAlign = "left";
+      context.textBaseline = "top";
+      context.fillText(
+        `REF ${reference.name} · ${reference.baseY} m`,
+        this.camera.viewportLengthToWorld(5),
+        this.camera.viewportLengthToWorld(5),
+      );
+      context.restore();
+    }
 
     if (editor.showAuthoringExtents) {
       context.save();

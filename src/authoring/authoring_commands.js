@@ -1,15 +1,120 @@
 // @ts-check
 
-import { cloneAuthoringMap } from "./authoring_map.js";
+import {
+  cloneAuthoringMap,
+  DEFAULT_LAYER_SPACING_METERS,
+  DEFAULT_SURFACE_DEFINITION_ID,
+  MAX_AUTHORING_LAYERS,
+} from "./authoring_map.js";
 import { getPlaceableDefinition } from "./definition_catalog.js";
 import { normalizeQuarterTurns } from "./footprint.js";
 
 /** @param {ReturnType<typeof cloneAuthoringMap>} document @param {string|undefined} layerId */
 function layerFor(document, layerId) {
-  const requestedId = layerId ?? document.activeLayerId;
+  const requestedId = layerId ?? document.playerStart?.layerId;
   const layer = document.layers.find((candidate) => candidate.id === requestedId);
   if (!layer) throw new RangeError(`Unknown authoring layer "${requestedId}"`);
   return layer;
+}
+
+/** @param {number} ordinal */
+function generatedLayerId(ordinal) {
+  return `layer-${String(ordinal).padStart(4, "0")}`;
+}
+
+/**
+ * Creates one blank shared-space layer relative to an existing stable layer ID.
+ * @param {unknown} input
+ * @param {string} relativeLayerId
+ * @param {"above"|"below"} direction
+ * @param {{name?:string,baseY?:number}} [options]
+ */
+export function createLayer(input, relativeLayerId, direction, options = {}) {
+  if (direction !== "above" && direction !== "below") {
+    throw new RangeError("Layer direction must be above or below");
+  }
+  const document = cloneAuthoringMap(input);
+  if (document.layers.length >= MAX_AUTHORING_LAYERS) {
+    throw new RangeError(`Authoring maps support at most ${MAX_AUTHORING_LAYERS} layers`);
+  }
+  const relativeIndex = document.layers.findIndex((layer) => layer.id === relativeLayerId);
+  if (relativeIndex < 0) throw new RangeError(`Unknown authoring layer "${relativeLayerId}"`);
+  const relative = document.layers[relativeIndex];
+  let ordinal = document.nextLayerOrdinal;
+  const usedIds = new Set(document.layers.map((layer) => layer.id));
+  let layerId = generatedLayerId(ordinal);
+  while (usedIds.has(layerId)) {
+    ordinal += 1;
+    layerId = generatedLayerId(ordinal);
+  }
+  const baseY = options.baseY === undefined
+    ? relative.baseY + (direction === "above" ? 1 : -1) * DEFAULT_LAYER_SPACING_METERS
+    : Number(options.baseY);
+  if (!Number.isFinite(baseY)) throw new RangeError("Layer base Y must be finite");
+  const name = options.name ?? `Layer ${ordinal}`;
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new RangeError("Layer name must be non-empty");
+  }
+  const cellCount = relative.width * relative.height;
+  const layer = {
+    id: layerId,
+    name,
+    baseY,
+    width: relative.width,
+    height: relative.height,
+    surface: {
+      legend: [relative.surface.legend[0] ?? DEFAULT_SURFACE_DEFINITION_ID],
+      cells: new Array(cellCount).fill(0),
+    },
+    structure: { legend: [null], cells: new Array(cellCount).fill(0) },
+    instances: [],
+    markers: {},
+    nextInstanceOrdinal: 1,
+  };
+  document.nextLayerOrdinal = ordinal + 1;
+  const insertionIndex = direction === "above" ? relativeIndex + 1 : relativeIndex;
+  document.layers.splice(insertionIndex, 0, layer);
+  return { document: cloneAuthoringMap(document), layerId };
+}
+
+/** @param {unknown} input @param {string} layerId */
+export function deleteLayer(input, layerId) {
+  const document = cloneAuthoringMap(input);
+  if (document.layers.length <= 1) throw new RangeError("The final authoring layer cannot be deleted");
+  if (document.playerStart.layerId === layerId) {
+    throw new RangeError("The player-start layer cannot be deleted until the start is reassigned");
+  }
+  const index = document.layers.findIndex((layer) => layer.id === layerId);
+  if (index < 0) throw new RangeError(`Unknown authoring layer "${layerId}"`);
+  document.layers.splice(index, 1);
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} input @param {string} layerId @param {string} name */
+export function renameLayer(input, layerId, name) {
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new RangeError("Layer name must be non-empty");
+  }
+  const document = cloneAuthoringMap(input);
+  layerFor(document, layerId).name = name;
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} input @param {string} layerId @param {number} baseY */
+export function setLayerBaseY(input, layerId, baseY) {
+  const value = Number(baseY);
+  if (!Number.isFinite(value)) throw new RangeError("Layer base Y must be finite");
+  const document = cloneAuthoringMap(input);
+  layerFor(document, layerId).baseY = value;
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} input @param {string} layerId */
+export function setPlayerStartLayer(input, layerId) {
+  const document = cloneAuthoringMap(input);
+  layerFor(document, layerId);
+  document.playerStart.layerId = layerId;
+  return cloneAuthoringMap(document);
 }
 
 /** @param {Record<string, any>} layer @param {number} cx @param {number} cz */

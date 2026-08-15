@@ -1,241 +1,436 @@
 // @ts-check
 
-import { MAP_VERSION, SCENARIO_VERSION } from "../config.js";
+import { MAP_VERSION, ROCK, SCENARIO_VERSION } from "../config.js";
 import {
   getPlaceableDefinition,
   rockDefinitionId,
 } from "./definition_catalog.js";
+import { validateInstancePlacement } from "./placement_validation.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 1;
+export const AUTHORING_MAP_VERSION = 2;
+export const LEGACY_AUTHORING_MAP_VERSION = 1;
+export const MAX_AUTHORING_LAYERS = 16;
+export const DEFAULT_LAYER_SPACING_METERS = 3;
 export const DEFAULT_LAYER_ID = "ground";
 export const DEFAULT_SURFACE_DEFINITION_ID = "surface.stone";
 export const DEFAULT_WALL_DEFINITION_ID = "structure.wall";
 
 export class AuthoringMapValidationError extends RangeError {
-  /** @param {Array<{path:string,code:string,message:string}>} issues */
+  /** @param {Array<{severity?:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} issues */
   constructor(issues) {
-    super(`Invalid authoring map: ${issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+    const normalized = issues.map((issue) => ({
+      severity: issue.severity === "warning" ? "warning" : "error",
+      path: String(issue.path),
+      code: String(issue.code),
+      message: String(issue.message),
+      ...(issue.layerId ? { layerId: String(issue.layerId) } : {}),
+    }));
+    super(`Invalid authoring map: ${normalized.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
     this.name = "AuthoringMapValidationError";
-    this.issues = issues.map((issue) => ({ ...issue }));
+    this.issues = normalized.map((issue) => ({ ...issue }));
   }
 }
 
 /** @param {string} path @param {string} code @param {string} message */
 function fail(path, code, message) {
-  throw new AuthoringMapValidationError([{ path, code, message }]);
+  throw new AuthoringMapValidationError([{ severity: "error", path, code, message }]);
 }
 
-/** @param {unknown} value @param {string} path */
-function recordAt(value, path) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    fail(path, "object", "must be an object");
-  }
-  return /** @type {Record<string, any>} */ (value);
-}
-
-/** @param {unknown} value @param {string} path */
-function nonEmptyString(value, path) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    fail(path, "non_empty_string", "must be a non-empty string");
-  }
-  if (value.length > 128) fail(path, "maximum_length", "must be at most 128 characters");
-  return value;
-}
-
-/** @param {unknown} value @param {string} path */
-function finiteNumber(value, path) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    fail(path, "finite_number", "must be a finite number");
-  }
-  return value;
-}
-
-/** @param {unknown} value @param {string} path */
-function dimension(value, path) {
-  if (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 256) {
-    fail(path, "dimension", "must be an integer from 1 to 256");
-  }
-  return Number(value);
-}
-
-/** @param {unknown} value @param {string} path */
-function cloneJsonValue(value, path = "value") {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) fail(path, "finite_number", "must contain only finite numbers");
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item, index) => cloneJsonValue(item, `${path}[${index}]`));
-  }
-  if (value && typeof value === "object") {
-    const clone = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (item === undefined || typeof item === "function" || typeof item === "symbol") {
-        fail(`${path}.${key}`, "json_value", "must be JSON-serializable");
-      }
-      clone[key] = cloneJsonValue(item, `${path}.${key}`);
-    }
-    return clone;
-  }
-  fail(path, "json_value", "must be JSON-serializable");
-}
-
-/** @param {unknown} value @param {string} path */
-function point(value, path) {
-  const source = recordAt(value, path);
-  return {
-    x: finiteNumber(source.x, `${path}.x`),
-    z: finiteNumber(source.z, `${path}.z`),
-  };
+/** @param {unknown} value */
+function isRecord(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 /**
- * Validates and returns a detached, normalized authoring document.
+ * Structural validation is intentionally deterministic and non-mutating. It
+ * returns every safe-to-diagnose issue in document order; compilation adds
+ * geometry-specific diagnostics such as a blocked player start.
  * @param {unknown} input
  */
-export function validateAuthoringMap(input) {
-  const source = recordAt(input, "map");
+function normalizeVersionTwo(input) {
+  /** @type {Array<{severity:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} */
+  const diagnostics = [];
+  const issue = (severity, path, code, message, layerId) => {
+    diagnostics.push({ severity, path, code, message, ...(layerId ? { layerId } : {}) });
+  };
+  if (!isRecord(input)) {
+    issue("error", "map", "object", "Map must be an object.");
+    return { document: null, diagnostics };
+  }
+  const source = /** @type {Record<string,any>} */ (input);
+  const rejectUnknownFields = (value, allowed, path, layerId) => {
+    for (const key of Object.keys(value)) {
+      if (allowed.has(key)) continue;
+      issue(
+        "error",
+        path ? `${path}.${key}` : key,
+        "unknown-field",
+        `Field "${key}" is not part of authoring-map v${AUTHORING_MAP_VERSION}.`,
+        layerId,
+      );
+    }
+  };
+  rejectUnknownFields(
+    source,
+    new Set(["format", "version", "metadata", "nextLayerOrdinal", "playerStart", "layers"]),
+    "",
+  );
   if (source.format !== AUTHORING_MAP_FORMAT) {
-    fail("format", "format", `must equal "${AUTHORING_MAP_FORMAT}"`);
+    issue("error", "format", "invalid-format", `Format must equal "${AUTHORING_MAP_FORMAT}".`);
   }
   if (source.version !== AUTHORING_MAP_VERSION) {
-    fail("version", "unsupported_version", `unsupported authoring-map version ${String(source.version)}`);
-  }
-  const metadataSource = recordAt(source.metadata, "metadata");
-  const metadata = /** @type {Record<string, any>} */ (
-    cloneJsonValue(metadataSource, "metadata")
-  );
-  metadata.id = nonEmptyString(metadataSource.id, "metadata.id");
-  metadata.name = nonEmptyString(metadataSource.name, "metadata.name");
-  const activeLayerId = nonEmptyString(source.activeLayerId, "activeLayerId");
-  if (!Array.isArray(source.layers) || source.layers.length === 0) {
-    fail("layers", "non_empty_array", "must contain at least one named simulation layer");
+    const future = Number.isInteger(source.version) && source.version > AUTHORING_MAP_VERSION;
+    issue(
+      "error",
+      "version",
+      future ? "unknown-future-schema" : "unsupported-schema-version",
+      `Unsupported authoring-map version ${String(source.version)}.`,
+    );
   }
 
+  const stringValue = (value, path, layerId) => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      issue("error", path, "non-empty-string", "Value must be a non-empty string.", layerId);
+      return "";
+    }
+    if (value.length > 128) {
+      issue("error", path, "maximum-length", "Value must be at most 128 characters.", layerId);
+    }
+    return value;
+  };
+  const finiteValue = (value, path, layerId) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      issue("error", path, "finite-number", "Value must be a finite number.", layerId);
+      return 0;
+    }
+    return value;
+  };
+  const dimensionValue = (value, path, layerId) => {
+    if (!Number.isInteger(value) || value < 1 || value > 256) {
+      issue("error", path, "dimension", "Dimension must be an integer from 1 to 256.", layerId);
+      return 1;
+    }
+    return Number(value);
+  };
+  const positiveInteger = (value, path, layerId) => {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      issue("error", path, "positive-integer", "Value must be a positive safe integer.", layerId);
+      return 1;
+    }
+    return Number(value);
+  };
+  const cloneJson = (value, path, seen = new WeakSet()) => {
+    if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        issue("error", path, "finite-number", "JSON numbers must be finite.");
+        return 0;
+      }
+      return value;
+    }
+    if (Array.isArray(value)) {
+      if (seen.has(value)) {
+        issue("error", path, "json-cycle", "Value must not contain circular references.");
+        return [];
+      }
+      seen.add(value);
+      const result = value.map((item, index) => cloneJson(item, `${path}[${index}]`, seen));
+      seen.delete(value);
+      return result;
+    }
+    if (isRecord(value)) {
+      if (seen.has(value)) {
+        issue("error", path, "json-cycle", "Value must not contain circular references.");
+        return {};
+      }
+      seen.add(value);
+      const result = {};
+      for (const [key, item] of Object.entries(value)) {
+        if (item === undefined || typeof item === "function" || typeof item === "symbol" || typeof item === "bigint") {
+          issue("error", `${path}.${key}`, "json-value", "Value must be JSON-serializable.");
+          continue;
+        }
+        Object.defineProperty(result, key, {
+          value: cloneJson(item, `${path}.${key}`, seen),
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+      }
+      seen.delete(value);
+      return result;
+    }
+    issue("error", path, "json-value", "Value must be JSON-serializable.");
+    return null;
+  };
+  const pointValue = (value, path, layerId) => {
+    if (!isRecord(value)) {
+      issue("error", path, "object", "Point must be an object.", layerId);
+      return { x: 0, z: 0 };
+    }
+    const point = /** @type {Record<string,any>} */ (value);
+    return {
+      x: finiteValue(point.x, `${path}.x`, layerId),
+      z: finiteValue(point.z, `${path}.z`, layerId),
+    };
+  };
+
+  let metadata = { id: "", name: "" };
+  if (!isRecord(source.metadata)) {
+    issue("error", "metadata", "object", "Metadata must be an object.");
+  } else {
+    metadata = /** @type {Record<string,any>} */ (cloneJson(source.metadata, "metadata"));
+    metadata.id = stringValue(source.metadata.id, "metadata.id");
+    metadata.name = stringValue(source.metadata.name, "metadata.name");
+  }
+  const nextLayerOrdinal = positiveInteger(source.nextLayerOrdinal, "nextLayerOrdinal");
+  let playerStart = { layerId: "", x: 0, z: 0 };
+  if (!isRecord(source.playerStart)) {
+    issue("error", "playerStart", "object", "Player start must be an object.");
+  } else {
+    rejectUnknownFields(source.playerStart, new Set(["layerId", "x", "z"]), "playerStart");
+    playerStart = {
+      layerId: stringValue(source.playerStart.layerId, "playerStart.layerId"),
+      ...pointValue(source.playerStart, "playerStart"),
+    };
+  }
+
+  if (!Array.isArray(source.layers) || source.layers.length === 0) {
+    issue("error", "layers", "non-empty-array", "Map must contain at least one named simulation layer.");
+  } else if (source.layers.length > MAX_AUTHORING_LAYERS) {
+    issue(
+      "error",
+      "layers",
+      "layer-capacity",
+      `Map contains ${source.layers.length} layers; the configured limit is ${MAX_AUTHORING_LAYERS}.`,
+    );
+  }
+  const layerValues = Array.isArray(source.layers) ? source.layers.slice(0, MAX_AUTHORING_LAYERS + 1) : [];
   const layerIds = new Set();
   const instanceIds = new Set();
-  const layers = source.layers.map((layerValue, layerIndex) => {
+  const baseHeights = new Map();
+  let sharedWidth = null;
+  let sharedHeight = null;
+  const layers = layerValues.map((layerValue, layerIndex) => {
     const path = `layers[${layerIndex}]`;
-    const layerSource = recordAt(layerValue, path);
-    const id = nonEmptyString(layerSource.id, `${path}.id`);
-    if (layerIds.has(id)) fail(`${path}.id`, "duplicate", `duplicates layer ID "${id}"`);
-    layerIds.add(id);
-    const name = nonEmptyString(layerSource.name, `${path}.name`);
-    const baseY = finiteNumber(layerSource.baseY, `${path}.baseY`);
-    const width = dimension(layerSource.width, `${path}.width`);
-    const height = dimension(layerSource.height, `${path}.height`);
+    if (!isRecord(layerValue)) {
+      issue("error", path, "object", "Layer must be an object.");
+    }
+    const layerSource = isRecord(layerValue) ? /** @type {Record<string,any>} */ (layerValue) : {};
+    const id = stringValue(layerSource.id, `${path}.id`);
+    rejectUnknownFields(
+      layerSource,
+      new Set([
+        "id",
+        "name",
+        "baseY",
+        "width",
+        "height",
+        "surface",
+        "structure",
+        "instances",
+        "markers",
+        "nextInstanceOrdinal",
+      ]),
+      path,
+      id,
+    );
+    if (id && layerIds.has(id)) {
+      issue("error", `${path}.id`, "duplicate-layer-id", `Layer ID "${id}" is already in use.`, id);
+    }
+    if (id) layerIds.add(id);
+    const name = stringValue(layerSource.name, `${path}.name`, id);
+    const baseY = finiteValue(layerSource.baseY, `${path}.baseY`, id);
+    if (Number.isFinite(layerSource.baseY)) {
+      const prior = baseHeights.get(baseY);
+      if (prior !== undefined) {
+        issue(
+          "warning",
+          `${path}.baseY`,
+          "duplicate-base-y",
+          `Layer shares base Y ${baseY} with layers[${prior}].`,
+          id,
+        );
+      } else {
+        baseHeights.set(baseY, layerIndex);
+      }
+    }
+    const width = dimensionValue(layerSource.width, `${path}.width`, id);
+    const height = dimensionValue(layerSource.height, `${path}.height`, id);
+    if (sharedWidth === null) {
+      sharedWidth = width;
+      sharedHeight = height;
+    } else if (width !== sharedWidth || height !== sharedHeight) {
+      issue(
+        "error",
+        path,
+        "incompatible-layer-dimensions",
+        `Layer dimensions ${width}x${height} do not match shared dimensions ${sharedWidth}x${sharedHeight}.`,
+        id,
+      );
+    }
     const cellCount = width * height;
 
-    const surfaceSource = recordAt(layerSource.surface, `${path}.surface`);
-    if (!Array.isArray(surfaceSource.legend) || surfaceSource.legend.length === 0) {
-      fail(`${path}.surface.legend`, "non_empty_array", "must contain at least one surface definition ID");
+    const surfaceSource = isRecord(layerSource.surface) ? layerSource.surface : {};
+    if (!isRecord(layerSource.surface)) {
+      issue("error", `${path}.surface`, "object", "Surface grid must be an object.", id);
     }
-    const surfaceLegend = surfaceSource.legend.map((value, index) => {
-      const definitionId = nonEmptyString(value, `${path}.surface.legend[${index}]`);
+    rejectUnknownFields(surfaceSource, new Set(["legend", "cells"]), `${path}.surface`, id);
+    const surfaceLegendValues = Array.isArray(surfaceSource.legend) ? surfaceSource.legend : [];
+    if (surfaceLegendValues.length === 0) {
+      issue("error", `${path}.surface.legend`, "non-empty-array", "Surface legend must not be empty.", id);
+    }
+    const surfaceLegend = surfaceLegendValues.map((value, index) => {
+      const definitionId = stringValue(value, `${path}.surface.legend[${index}]`, id);
       const definition = getPlaceableDefinition(definitionId);
       if (!definition) {
-        fail(`${path}.surface.legend[${index}]`, "unknown_definition", `Unknown definition "${definitionId}"`);
-      }
-      if (definition.placementTarget !== "surface") {
-        fail(`${path}.surface.legend[${index}]`, "definition_target", `definition "${definitionId}" is not a surface`);
+        issue("error", `${path}.surface.legend[${index}]`, "unknown-definition", `Unknown definition "${definitionId}".`, id);
+      } else if (definition.placementTarget !== "surface") {
+        issue("error", `${path}.surface.legend[${index}]`, "definition-target", `Definition "${definitionId}" is not a surface.`, id);
       }
       return definitionId;
     });
     if (new Set(surfaceLegend).size !== surfaceLegend.length) {
-      fail(`${path}.surface.legend`, "duplicate", "must not contain duplicate definition IDs");
+      issue("error", `${path}.surface.legend`, "duplicate-definition", "Surface legend contains duplicate definition IDs.", id);
     }
-    if (!Array.isArray(surfaceSource.cells) || surfaceSource.cells.length !== cellCount) {
-      fail(`${path}.surface.cells`, "cell_count", `must contain exactly ${cellCount} entries`);
+    const surfaceCellValues = Array.isArray(surfaceSource.cells) ? surfaceSource.cells : [];
+    if (surfaceCellValues.length !== cellCount) {
+      issue("error", `${path}.surface.cells`, "grid-length", `Surface grid must contain exactly ${cellCount} entries.`, id);
     }
-    const surfaceCells = surfaceSource.cells.map((value, index) => {
+    const surfaceCells = surfaceCellValues.map((value, index) => {
       if (!Number.isInteger(value) || value < 0 || value >= surfaceLegend.length) {
-        fail(`${path}.surface.cells[${index}]`, "legend_index", "must reference a surface legend entry");
+        issue("error", `${path}.surface.cells[${index}]`, "legend-index", "Cell must reference a surface legend entry.", id);
+        return 0;
       }
       return Number(value);
     });
 
-    const structureSource = recordAt(layerSource.structure, `${path}.structure`);
-    if (
-      !Array.isArray(structureSource.legend)
-      || structureSource.legend.length === 0
-      || structureSource.legend[0] !== null
-    ) {
-      fail(`${path}.structure.legend`, "empty_slot", "must begin with null for an empty structure cell");
+    const structureSource = isRecord(layerSource.structure) ? layerSource.structure : {};
+    if (!isRecord(layerSource.structure)) {
+      issue("error", `${path}.structure`, "object", "Structure grid must be an object.", id);
     }
-    const structureLegend = structureSource.legend.map((value, index) => {
+    rejectUnknownFields(structureSource, new Set(["legend", "cells"]), `${path}.structure`, id);
+    const structureLegendValues = Array.isArray(structureSource.legend) ? structureSource.legend : [];
+    if (structureLegendValues.length === 0 || structureLegendValues[0] !== null) {
+      issue("error", `${path}.structure.legend`, "empty-structure-slot", "Structure legend must begin with null.", id);
+    }
+    const structureLegend = structureLegendValues.map((value, index) => {
       if (index === 0) return null;
-      const definitionId = nonEmptyString(value, `${path}.structure.legend[${index}]`);
+      const definitionId = stringValue(value, `${path}.structure.legend[${index}]`, id);
       const definition = getPlaceableDefinition(definitionId);
       if (!definition) {
-        fail(`${path}.structure.legend[${index}]`, "unknown_definition", `Unknown definition "${definitionId}"`);
-      }
-      if (definition.placementTarget !== "structure") {
-        fail(`${path}.structure.legend[${index}]`, "definition_target", `definition "${definitionId}" is not a structure`);
+        issue("error", `${path}.structure.legend[${index}]`, "unknown-definition", `Unknown definition "${definitionId}".`, id);
+      } else if (definition.placementTarget !== "structure") {
+        issue("error", `${path}.structure.legend[${index}]`, "definition-target", `Definition "${definitionId}" is not a structure.`, id);
       }
       return definitionId;
     });
-    const populatedStructureIds = structureLegend.slice(1);
-    if (new Set(populatedStructureIds).size !== populatedStructureIds.length) {
-      fail(`${path}.structure.legend`, "duplicate", "must not contain duplicate definition IDs");
+    const populatedStructures = structureLegend.slice(1);
+    if (new Set(populatedStructures).size !== populatedStructures.length) {
+      issue("error", `${path}.structure.legend`, "duplicate-definition", "Structure legend contains duplicate definition IDs.", id);
     }
-    if (!Array.isArray(structureSource.cells) || structureSource.cells.length !== cellCount) {
-      fail(`${path}.structure.cells`, "cell_count", `must contain exactly ${cellCount} entries`);
+    const structureCellValues = Array.isArray(structureSource.cells) ? structureSource.cells : [];
+    if (structureCellValues.length !== cellCount) {
+      issue("error", `${path}.structure.cells`, "grid-length", `Structure grid must contain exactly ${cellCount} entries.`, id);
     }
-    const structureCells = structureSource.cells.map((value, index) => {
+    const structureCells = structureCellValues.map((value, index) => {
       if (!Number.isInteger(value) || value < 0 || value >= structureLegend.length) {
-        fail(`${path}.structure.cells[${index}]`, "legend_index", "must reference a structure legend entry");
+        issue("error", `${path}.structure.cells[${index}]`, "legend-index", "Cell must reference a structure legend entry.", id);
+        return 0;
       }
       return Number(value);
     });
 
     if (!Array.isArray(layerSource.instances)) {
-      fail(`${path}.instances`, "array", "must be an array");
+      issue("error", `${path}.instances`, "array", "Instances must be an array.", id);
     }
-    const instances = layerSource.instances.map((instanceValue, instanceIndex) => {
+    const instanceValues = Array.isArray(layerSource.instances) ? layerSource.instances : [];
+    const instances = instanceValues.map((instanceValue, instanceIndex) => {
       const instancePath = `${path}.instances[${instanceIndex}]`;
-      const instanceSource = recordAt(instanceValue, instancePath);
-      const instanceId = nonEmptyString(instanceSource.id, `${instancePath}.id`);
-      if (instanceIds.has(instanceId)) {
-        fail(`${instancePath}.id`, "duplicate", `duplicates authoring instance ID "${instanceId}"`);
+      if (!isRecord(instanceValue)) {
+        issue("error", instancePath, "object", "Instance must be an object.", id);
       }
-      instanceIds.add(instanceId);
-      const definitionId = nonEmptyString(instanceSource.definitionId, `${instancePath}.definitionId`);
+      const instanceSource = isRecord(instanceValue) ? /** @type {Record<string,any>} */ (instanceValue) : {};
+      const instanceId = stringValue(instanceSource.id, `${instancePath}.id`, id);
+      rejectUnknownFields(
+        instanceSource,
+        new Set(["id", "definitionId", "x", "z", "rotation", "properties"]),
+        instancePath,
+        id,
+      );
+      if (instanceId && instanceIds.has(instanceId)) {
+        issue("error", `${instancePath}.id`, "duplicate-instance-id", `Instance ID "${instanceId}" is already in use.`, id);
+      }
+      if (instanceId) instanceIds.add(instanceId);
+      const definitionId = stringValue(instanceSource.definitionId, `${instancePath}.definitionId`, id);
       const definition = getPlaceableDefinition(definitionId);
       if (!definition) {
-        fail(`${instancePath}.definitionId`, "unknown_definition", `Unknown definition "${definitionId}"`);
+        issue("error", `${instancePath}.definitionId`, "unknown-definition", `Unknown definition "${definitionId}".`, id);
+      } else if (definition.placementTarget !== "instance") {
+        issue("error", `${instancePath}.definitionId`, "definition-target", `Definition "${definitionId}" is not a sparse instance.`, id);
       }
-      if (definition.placementTarget !== "instance") {
-        fail(`${instancePath}.definitionId`, "definition_target", `definition "${definitionId}" is not a sparse instance`);
+      const x = finiteValue(instanceSource.x, `${instancePath}.x`, id);
+      const z = finiteValue(instanceSource.z, `${instancePath}.z`, id);
+      let rotation = Number(instanceSource.rotation);
+      if (!Number.isInteger(rotation) || rotation < 0 || rotation > 3) {
+        issue("error", `${instancePath}.rotation`, "canonical-rotation", "Rotation must be a quarter turn from 0 to 3.", id);
+        rotation = 0;
       }
-      if (!Number.isInteger(instanceSource.rotation) || instanceSource.rotation < 0 || instanceSource.rotation > 3) {
-        fail(`${instancePath}.rotation`, "quarter_turn", "must be a quarter turn from 0 to 3");
+      let properties;
+      if (instanceSource.properties !== undefined) {
+        if (!isRecord(instanceSource.properties)) {
+          issue("error", `${instancePath}.properties`, "object", "Properties must be a JSON object.", id);
+          properties = {};
+        } else {
+          properties = cloneJson(instanceSource.properties, `${instancePath}.properties`);
+        }
       }
-      const properties = instanceSource.properties === undefined
-        ? undefined
-        : cloneJsonValue(recordAt(instanceSource.properties, `${instancePath}.properties`), `${instancePath}.properties`);
       return {
         id: instanceId,
         definitionId,
-        x: finiteNumber(instanceSource.x, `${instancePath}.x`),
-        z: finiteNumber(instanceSource.z, `${instancePath}.z`),
-        rotation: Number(instanceSource.rotation),
+        x,
+        z,
+        rotation,
         ...(properties === undefined ? {} : { properties }),
       };
     });
-
-    const markersSource = recordAt(layerSource.markers, `${path}.markers`);
-    const markers = {
-      playerSpawn: point(markersSource.playerSpawn, `${path}.markers.playerSpawn`),
-      ...(markersSource.obelisk === undefined
-        ? {}
-        : { obelisk: point(markersSource.obelisk, `${path}.markers.obelisk`) }),
-    };
-    if (!Number.isInteger(layerSource.nextInstanceOrdinal) || layerSource.nextInstanceOrdinal < 1) {
-      fail(`${path}.nextInstanceOrdinal`, "positive_integer", "must be a positive integer");
+    const dynamicCount = instances.reduce((count, instance) => {
+      const definition = getPlaceableDefinition(instance.definitionId);
+      return count + (definition?.traits?.dynamic === true ? 1 : 0);
+    }, 0);
+    if (dynamicCount > ROCK.capacity) {
+      issue(
+        "error",
+        `${path}.instances`,
+        "dynamic-body-capacity",
+        `Layer contains more than the ${ROCK.capacity}-rock limit shared with dynamic authored props.`,
+        id,
+      );
     }
 
+    let markers = {};
+    if (!isRecord(layerSource.markers)) {
+      issue("error", `${path}.markers`, "object", "Markers must be an object.", id);
+    } else if (layerSource.markers.obelisk !== undefined) {
+      rejectUnknownFields(layerSource.markers, new Set(["obelisk"]), `${path}.markers`, id);
+      if (isRecord(layerSource.markers.obelisk)) {
+        rejectUnknownFields(
+          layerSource.markers.obelisk,
+          new Set(["x", "z"]),
+          `${path}.markers.obelisk`,
+          id,
+        );
+      }
+      markers = { obelisk: pointValue(layerSource.markers.obelisk, `${path}.markers.obelisk`, id) };
+    } else {
+      rejectUnknownFields(layerSource.markers, new Set(["obelisk"]), `${path}.markers`, id);
+    }
+    const nextInstanceOrdinal = positiveInteger(
+      layerSource.nextInstanceOrdinal,
+      `${path}.nextInstanceOrdinal`,
+      id,
+    );
     return {
       id,
       name,
@@ -246,29 +441,133 @@ export function validateAuthoringMap(input) {
       structure: { legend: structureLegend, cells: structureCells },
       instances,
       markers,
-      nextInstanceOrdinal: Number(layerSource.nextInstanceOrdinal),
+      nextInstanceOrdinal,
     };
   });
-  if (!layerIds.has(activeLayerId)) {
-    fail("activeLayerId", "unknown_layer", `does not match a layer ID: "${activeLayerId}"`);
+
+  if (playerStart.layerId && !layerIds.has(playerStart.layerId)) {
+    issue("error", "playerStart.layerId", "invalid-player-start-layer", `Player start references missing layer "${playerStart.layerId}".`);
   }
-  return {
+  const startLayer = layers.find((layer) => layer.id === playerStart.layerId);
+  if (startLayer && (
+    playerStart.x < 0
+    || playerStart.z < 0
+    || playerStart.x >= startLayer.width
+    || playerStart.z >= startLayer.height
+  )) {
+    issue(
+      "error",
+      "playerStart",
+      "player-start-out-of-bounds",
+      `Player start (${playerStart.x}, ${playerStart.z}) is outside layer "${startLayer.id}".`,
+      startLayer.id,
+    );
+  }
+
+  const document = {
     format: AUTHORING_MAP_FORMAT,
     version: AUTHORING_MAP_VERSION,
     metadata,
-    activeLayerId,
+    nextLayerOrdinal,
+    playerStart,
     layers,
+  };
+  if (!diagnostics.some((entry) => entry.severity === "error")) {
+    for (let layerIndex = 0; layerIndex < layers.length; layerIndex += 1) {
+      const layer = layers[layerIndex];
+      for (let instanceIndex = 0; instanceIndex < layer.instances.length; instanceIndex += 1) {
+        const instance = layer.instances[instanceIndex];
+        const placement = validateInstancePlacement(document, instance.definitionId, instance, {
+          layerId: layer.id,
+          ignoreInstanceId: instance.id,
+        });
+        if (!placement.valid) {
+          issue(
+            "error",
+            `layers[${layerIndex}].instances[${instanceIndex}]`,
+            placement.code,
+            placement.message,
+            layer.id,
+          );
+        }
+      }
+    }
+  }
+  return { document, diagnostics };
+}
+
+/** @param {unknown} input */
+export function authoringMapDiagnostics(input) {
+  return normalizeVersionTwo(input).diagnostics.map((entry) => ({ ...entry }));
+}
+
+/**
+ * Validates and returns a detached, normalized current-version document.
+ * @param {unknown} input
+ */
+export function validateAuthoringMap(input) {
+  const result = normalizeVersionTwo(input);
+  const errors = result.diagnostics.filter((entry) => entry.severity === "error");
+  if (errors.length > 0 || !result.document) throw new AuthoringMapValidationError(errors);
+  return result.document;
+}
+
+/** @param {unknown} input */
+export function validateAuthoringMapWithDiagnostics(input) {
+  const result = normalizeVersionTwo(input);
+  const errors = result.diagnostics.filter((entry) => entry.severity === "error");
+  if (errors.length > 0 || !result.document) throw new AuthoringMapValidationError(errors);
+  return {
+    document: result.document,
+    diagnostics: result.diagnostics.map((entry) => ({ ...entry })),
   };
 }
 
 /** @param {unknown} input */
 export function isAuthoringMapDocument(input) {
   return Boolean(
-    input
-    && typeof input === "object"
-    && !Array.isArray(input)
+    isRecord(input)
     && /** @type {Record<string, unknown>} */ (input).format === AUTHORING_MAP_FORMAT,
   );
+}
+
+/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into v2. @param {unknown} input */
+export function migrateAuthoringMapV1(input) {
+  if (!isRecord(input)) fail("map", "object", "Map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== LEGACY_AUTHORING_MAP_VERSION) {
+    fail("version", "unsupported-schema-version", `Expected authoring-map version ${LEGACY_AUTHORING_MAP_VERSION}.`);
+  }
+  if (!Array.isArray(source.layers) || source.layers.length === 0) {
+    fail("layers", "non-empty-array", "Version 1 map must contain at least one layer.");
+  }
+  const startLayerId = typeof source.activeLayerId === "string" ? source.activeLayerId : "";
+  const startLayer = source.layers.find((layer) => isRecord(layer) && layer.id === startLayerId);
+  if (!isRecord(startLayer) || !isRecord(startLayer.markers) || !isRecord(startLayer.markers.playerSpawn)) {
+    fail("activeLayerId", "invalid-player-start-layer", "Version 1 active layer must own a player spawn.");
+  }
+  const layers = source.layers.map((layerValue) => {
+    if (!isRecord(layerValue)) return layerValue;
+    const markers = isRecord(layerValue.markers) ? layerValue.markers : {};
+    return {
+      ...layerValue,
+      markers: {
+        ...(markers.obelisk === undefined ? {} : { obelisk: markers.obelisk }),
+      },
+    };
+  });
+  return validateAuthoringMap({
+    format: AUTHORING_MAP_FORMAT,
+    version: AUTHORING_MAP_VERSION,
+    metadata: source.metadata,
+    nextLayerOrdinal: source.layers.length + 1,
+    playerStart: {
+      layerId: startLayerId,
+      x: startLayer.markers.playerSpawn.x,
+      z: startLayer.markers.playerSpawn.z,
+    },
+    layers,
+  });
 }
 
 /**
@@ -277,32 +576,41 @@ export function isAuthoringMapDocument(input) {
  * @param {{id?:string,name?:string}} [metadata]
  */
 export function migrateLegacyMap(input, metadata = {}) {
-  const source = recordAt(input, "legacyMap");
-  const embeddedMetadata = source.authoringMetadata === undefined
-    ? null
-    : recordAt(source.authoringMetadata, "legacyMap.authoringMetadata");
+  if (!isRecord(input)) fail("legacyMap", "object", "Legacy map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  const embeddedMetadata = isRecord(source.authoringMetadata) ? source.authoringMetadata : null;
   const version = source.version;
   if (version !== MAP_VERSION && version !== 2 && version !== SCENARIO_VERSION) {
-    fail("legacyMap.version", "unsupported_version", `unsupported legacy map/scenario version ${String(source.version)}`);
+    fail("legacyMap.version", "unsupported-version", `unsupported legacy map/scenario version ${String(source.version)}.`);
   }
-  const width = dimension(source.width, "legacyMap.width");
-  const height = dimension(source.height, "legacyMap.height");
+  const legacyDimension = (value, path) => {
+    if (!Number.isInteger(value) || value < 1 || value > 256) fail(path, "dimension", "Must be an integer from 1 to 256.");
+    return Number(value);
+  };
+  const legacyPoint = (value, path) => {
+    if (!isRecord(value) || !Number.isFinite(value.x) || !Number.isFinite(value.z)) {
+      fail(path, "finite-point", "Must contain finite X/Z coordinates.");
+    }
+    return { x: Number(value.x), z: Number(value.z) };
+  };
+  const width = legacyDimension(source.width, "legacyMap.width");
+  const height = legacyDimension(source.height, "legacyMap.height");
   const cellCount = width * height;
   if (!Array.isArray(source.cells) || source.cells.length !== cellCount) {
-    fail("legacyMap.cells", "cell_count", `must contain exactly ${cellCount} entries`);
+    fail("legacyMap.cells", "grid-length", `Must contain exactly ${cellCount} entries.`);
   }
   const structureCells = source.cells.map((value, index) => {
     if (value !== 0 && value !== 1) {
-      fail(`legacyMap.cells[${index}]`, "legacy_tile", "must be 0 (floor) or 1 (wall)");
+      fail(`legacyMap.cells[${index}]`, "legacy-tile", "Must be 0 (floor) or 1 (wall).");
     }
     return value;
   });
-  const playerSpawn = point(source.playerSpawn, "legacyMap.playerSpawn");
+  const playerSpawn = legacyPoint(source.playerSpawn, "legacyMap.playerSpawn");
   if (version === MAP_VERSION && source.entities !== undefined) {
-    fail("legacyMap.entities", "unexpected", "map-v1 data cannot contain scenario entities");
+    fail("legacyMap.entities", "unexpected", "Map-v1 data cannot contain scenario entities.");
   }
   if (version !== MAP_VERSION && !Array.isArray(source.entities)) {
-    fail("legacyMap.entities", "array", "scenario data must contain an entity array");
+    fail("legacyMap.entities", "array", "Scenario data must contain an entity array.");
   }
 
   const entities = version === MAP_VERSION ? [] : source.entities;
@@ -310,46 +618,38 @@ export function migrateLegacyMap(input, metadata = {}) {
   let obelisk;
   let rockOrdinal = 1;
   for (let index = 0; index < entities.length; index += 1) {
-    const entityPath = `legacyMap.entities[${index}]`;
-    const entity = recordAt(entities[index], entityPath);
-    const x = finiteNumber(entity.x, `${entityPath}.x`);
-    const z = finiteNumber(entity.z, `${entityPath}.z`);
+    const path = `legacyMap.entities[${index}]`;
+    const entity = entities[index];
+    if (!isRecord(entity)) fail(path, "object", "Entity must be an object.");
+    const x = Number(entity.x);
+    const z = Number(entity.z);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) fail(path, "finite-point", "Entity X/Z must be finite.");
     if (entity.kind === "rock") {
       const definitionId = rockDefinitionId(String(entity.archetype));
-      if (!definitionId) fail(`${entityPath}.archetype`, "unknown_rock", `unknown rock archetype "${String(entity.archetype)}"`);
+      if (!definitionId) fail(`${path}.archetype`, "unknown-rock", `Unknown rock archetype "${String(entity.archetype)}".`);
       const authoringId = entity.authoringId === undefined
         ? `legacy-rock-${String(rockOrdinal).padStart(4, "0")}`
-        : nonEmptyString(entity.authoringId, `${entityPath}.authoringId`);
+        : String(entity.authoringId);
+      if (!authoringId) fail(`${path}.authoringId`, "non-empty-string", "Authoring ID must be non-empty.");
       rockOrdinal += 1;
-      instances.push({
-        id: authoringId,
-        definitionId,
-        x,
-        z,
-        rotation: 0,
-      });
-      continue;
-    }
-    if (version === SCENARIO_VERSION && entity.kind === "obelisk") {
-      if (obelisk) fail(entityPath, "multiple_obelisks", "scenario may contain at most one obelisk");
+      instances.push({ id: authoringId, definitionId, x, z, rotation: 0 });
+    } else if (version === SCENARIO_VERSION && entity.kind === "obelisk") {
+      if (obelisk) fail(path, "multiple-obelisks", "Scenario may contain at most one obelisk.");
       obelisk = { x, z };
-      continue;
+    } else {
+      fail(`${path}.kind`, "unknown-entity", `Unknown legacy scenario entity kind "${String(entity.kind)}".`);
     }
-    fail(`${entityPath}.kind`, "unknown_entity", `unknown legacy scenario entity kind "${String(entity.kind)}"`);
   }
 
   return validateAuthoringMap({
     format: AUTHORING_MAP_FORMAT,
     version: AUTHORING_MAP_VERSION,
     metadata: {
-      id: metadata.id
-        ?? embeddedMetadata?.id
-        ?? "legacy-map",
-      name: metadata.name
-        ?? embeddedMetadata?.name
-        ?? "Migrated legacy map",
+      id: metadata.id ?? embeddedMetadata?.id ?? "legacy-map",
+      name: metadata.name ?? embeddedMetadata?.name ?? "Migrated legacy map",
     },
-    activeLayerId: DEFAULT_LAYER_ID,
+    nextLayerOrdinal: 2,
+    playerStart: { layerId: DEFAULT_LAYER_ID, ...playerSpawn },
     layers: [{
       id: DEFAULT_LAYER_ID,
       name: "Ground",
@@ -365,10 +665,7 @@ export function migrateLegacyMap(input, metadata = {}) {
         cells: structureCells,
       },
       instances,
-      markers: {
-        playerSpawn,
-        ...(obelisk ? { obelisk } : {}),
-      },
+      markers: { ...(obelisk ? { obelisk } : {}) },
       nextInstanceOrdinal: instances.length + 1,
     }],
   });
@@ -381,14 +678,25 @@ export function loadAuthoringMap(input) {
     try {
       value = JSON.parse(input);
     } catch (error) {
-      throw new TypeError(
-        `Map JSON could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      throw new AuthoringMapValidationError([{
+        severity: "error",
+        path: "json",
+        code: "parse-error",
+        message: `Map JSON could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
+      }]);
     }
   }
-  return isAuthoringMapDocument(value)
-    ? validateAuthoringMap(value)
-    : migrateLegacyMap(value);
+  if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
+  const version = /** @type {Record<string,any>} */ (value).version;
+  if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
+  if (version === LEGACY_AUTHORING_MAP_VERSION) return migrateAuthoringMapV1(value);
+  const future = Number.isInteger(version) && version > AUTHORING_MAP_VERSION;
+  throw new AuthoringMapValidationError([{
+    severity: "error",
+    path: "version",
+    code: future ? "unknown-future-schema" : "unsupported-schema-version",
+    message: `Unsupported authoring-map version ${String(version)}.`,
+  }]);
 }
 
 /** @param {unknown} document */
