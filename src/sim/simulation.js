@@ -37,6 +37,7 @@ import {
   SCENARIO_VERSION,
   SIMULATION,
   TACTICAL_WIZARD,
+  VERTICAL_PHYSICS,
 } from "../config.js";
 import { RingBuffer } from "../core/ring_buffer.js";
 import { normalizeSeed, SeededRng } from "../core/rng.js";
@@ -99,7 +100,19 @@ import {
   InertDeadBodyRing,
 } from "./dead_body_pool.js";
 import { computeExplosionResponse } from "./explosion.js";
+import {
+  footprintCanFitSquareAperture,
+  footprintFitsSquareAperture,
+  sweptFootprintEntrySquareAperture,
+} from "./aperture_fit.js";
 import { DestinationFieldCache } from "./destination_field_cache.js";
+import {
+  ELEVATOR_MOTION,
+  ELEVATOR_MOTION_NAMES,
+  ELEVATOR_STOP,
+  ELEVATOR_STOP_NAMES,
+  ElevatorPool,
+} from "./elevator_pool.js";
 import { GridMap } from "./grid_map.js";
 import { GridReachability } from "./grid_reachability.js";
 import { MapCellBroadphase } from "./map_cell_broadphase.js";
@@ -154,6 +167,16 @@ import {
   predictSoftenedIntercept,
   strafeDecision,
 } from "./tactical_wizard.js";
+import {
+  DEFAULT_ACTOR_VERTICAL_CAPABILITIES,
+  DEFAULT_PROP_VERTICAL_CAPABILITIES,
+  hasVerticalCapability,
+  SUPPORT_KIND,
+  SUPPORT_KIND_NAMES,
+  VERTICAL_CAPABILITY,
+  VERTICAL_MODE,
+  VERTICAL_MODE_NAMES,
+} from "./vertical_body.js";
 
 const TAU = Math.PI * 2;
 const CONTACT_CAPACITY = 256;
@@ -248,6 +271,22 @@ function dynamicBodyKind(definition) {
   return "rock";
 }
 
+/** @param {Record<string, any>} traits */
+function catalogVerticalCapabilities(traits) {
+  let capabilities = VERTICAL_CAPABILITY.GRAVITY | VERTICAL_CAPABILITY.FLOOR_SUPPORT;
+  if (traits.airbornePassable === true) {
+    capabilities |= VERTICAL_CAPABILITY.AIRBORNE_LOW_PASS;
+  }
+  if (traits.canRideElevator === true) {
+    capabilities |= VERTICAL_CAPABILITY.ELEVATOR_SUPPORT
+      | VERTICAL_CAPABILITY.CAN_RIDE_ELEVATOR;
+  }
+  if (traits.canActivateElevator === true) {
+    capabilities |= VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR;
+  }
+  return capabilities;
+}
+
 /** @param {Record<string, any>} entity */
 function dynamicBodyParameters(entity) {
   const catalogDefinition = getPlaceableDefinition(entity.definitionId);
@@ -265,6 +304,8 @@ function dynamicBodyParameters(entity) {
       halfWidth: isBox ? Number(catalogDefinition.traits.halfWidth) : 0,
       halfDepth: isBox ? Number(catalogDefinition.traits.halfDepth) : 0,
       massKg: Number(catalogDefinition.traits.massKg),
+      airbornePassable: catalogDefinition.traits.airbornePassable === true,
+      verticalCapabilities: catalogVerticalCapabilities(catalogDefinition.traits),
     };
   }
   if (entity.kind !== "rock") return null;
@@ -279,6 +320,8 @@ function dynamicBodyParameters(entity) {
       halfWidth: 0,
       halfDepth: 0,
       massKg: rockArchetype.massKg,
+      airbornePassable: true,
+      verticalCapabilities: DEFAULT_PROP_VERTICAL_CAPABILITIES,
     }
     : null;
 }
@@ -486,6 +529,19 @@ function canonicalAction(value) {
       };
     case "activateLayer":
       return { type: "activateLayer", layerId: String(action.layerId) };
+    case "cycleElevator":
+      return {
+        type: "cycleElevator",
+        connectorId: String(action.connectorId ?? ""),
+        runtimeId: Number(action.runtimeId ?? 0),
+      };
+    case "summonElevator":
+      return {
+        type: "summonElevator",
+        connectorId: String(action.connectorId ?? ""),
+        runtimeId: Number(action.runtimeId ?? 0),
+        stop: action.stop === "upper" ? "upper" : "lower",
+      };
     case "applyAuthoringCommand":
       return {
         type: "applyAuthoringCommand",
@@ -708,6 +764,16 @@ export class Simulation {
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
     this.map = this.scenario.map;
+    this.layerIds = [...this.scenario.compiledLayerIds];
+    this.layerIdToIndex = new Map(
+      this.layerIds.map((layerId, index) => [layerId, index]),
+    );
+    this.layerMaps = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).map);
+    this.layerMaps[this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0] = this.map;
+    this.layerBaseY = Float32Array.from(
+      this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
+    );
+    this.layerHoles = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).holes ?? []);
     this.authoringRevision = 1;
     this._preparedAuthoringState = null;
     this.#refreshPreparedAuthoringState();
@@ -770,12 +836,9 @@ export class Simulation {
     if (!Number.isInteger(rockCapacity) || rockCapacity <= 0) {
       throw new RangeError("Rock capacity must be a positive integer");
     }
-    if (this.scenario.compiledLayerIds.some((layerId) => (
-      this.scenario.compiledLayer(layerId)?.entities.filter(isDynamicRuntimeEntity).length
-      > rockCapacity
-    ))) {
+    if (this.scenario.allRuntimeEntities().filter(isDynamicRuntimeEntity).length > rockCapacity) {
       throw new RangeError(
-        "A scenario layer has more rocks than the configured shared body pool can hold (including other dynamic props)",
+        "The authored map has more rocks than the shared runtime body pool can hold (including other dynamic props)",
       );
     }
     const defaultEnemyCapacity = usesPerceptionProfile(this.enemyAiProfile)
@@ -822,6 +885,7 @@ export class Simulation {
       );
     }
     this.rocks = new RockPool(rockCapacity);
+    this.elevators = new ElevatorPool(VERTICAL_PHYSICS.elevatorCapacity);
     this.enemies = new EnemyWizardPool(enemyCapacity);
     this.dynamicDeadBodies = new DynamicDeadBodyPool(dynamicDeadBodyCapacity);
     this.inertDeadBodies = new InertDeadBodyRing(inertDeadBodyCapacity);
@@ -948,6 +1012,16 @@ export class Simulation {
       z: this.map.playerSpawn.z,
       previousX: this.map.playerSpawn.x,
       previousZ: this.map.playerSpawn.z,
+      worldY: this.scenario.activeLayer.baseY,
+      previousWorldY: this.scenario.activeLayer.baseY,
+      verticalVelocityY: 0,
+      verticalMode: VERTICAL_MODE.SUPPORTED,
+      supportKind: SUPPORT_KIND.FLOOR,
+      supportId: 0,
+      layerIndex: this.layerIdToIndex.get(this.scenario.startLayerId) ?? 0,
+      transitConnectorId: 0,
+      verticalCapabilities: DEFAULT_ACTOR_VERTICAL_CAPABILITIES,
+      latestApertureFit: 0,
       vx: 0,
       vz: 0,
       desiredVx: 0,
@@ -1018,6 +1092,32 @@ export class Simulation {
     this._particleSweepHit = { x: 0, z: 0, time: 0, nx: 0, nz: 0, cx: 0, cz: 0 };
     this._particleSpawnPoint = { x: 0, z: 0, cx: 0, cz: 0, passes: 0 };
     this._sampleColor = { r: 0, g: 0, b: 0 };
+    this._aperture = { x: 0, z: 0, width: 0 };
+    this._apertureExtents = { halfX: 0, halfZ: 0 };
+    this._apertureFootprint = {
+      type: "circle",
+      x: 0,
+      z: 0,
+      radius: 0,
+      halfWidth: 0,
+      halfDepth: 0,
+      rotation: 0,
+    };
+    this._holeSweep = { t: 0, x: 0, z: 0 };
+    this._holeBestSweep = { t: 0, x: 0, z: 0 };
+    this._holeCandidate = null;
+    this._rimAttraction = { x: 0, z: 0 };
+    this.holeEvents = new RingBuffer(128);
+    this.holeEventDropped = 0;
+    this.holeMetrics = {
+      rimAttractionApplied: 0,
+      captured: 0,
+      floorPlanePassed: 0,
+      intermediateLanding: 0,
+      bottomLanding: 0,
+      voidRescue: 0,
+      ambiguousCandidate: 0,
+    };
     this.lastError = null;
     this.lastSpellResult = null;
     this.reset(this.seed);
@@ -1074,6 +1174,7 @@ export class Simulation {
     this.projectiles.reset();
     this.particles.reset();
     this.rocks.reset();
+    this.elevators.reset();
     this.enemies.reset();
     this.dynamicDeadBodies.reset();
     this.inertDeadBodies.reset();
@@ -1087,10 +1188,19 @@ export class Simulation {
     this.nextEffectId = 1;
     this.latestSpellSamples.clear();
     Object.assign(this.player, {
-      x: this.map.playerSpawn.x,
-      z: this.map.playerSpawn.z,
-      previousX: this.map.playerSpawn.x,
-      previousZ: this.map.playerSpawn.z,
+      x: this.scenario.playerStart.x,
+      z: this.scenario.playerStart.z,
+      previousX: this.scenario.playerStart.x,
+      previousZ: this.scenario.playerStart.z,
+      worldY: this.layerBaseY[this.layerIdToIndex.get(this.scenario.startLayerId) ?? 0],
+      previousWorldY: this.layerBaseY[this.layerIdToIndex.get(this.scenario.startLayerId) ?? 0],
+      verticalVelocityY: 0,
+      verticalMode: VERTICAL_MODE.SUPPORTED,
+      supportKind: SUPPORT_KIND.FLOOR,
+      supportId: 0,
+      layerIndex: this.layerIdToIndex.get(this.scenario.startLayerId) ?? 0,
+      transitConnectorId: 0,
+      latestApertureFit: 0,
       vx: 0,
       vz: 0,
       desiredVx: 0,
@@ -1125,7 +1235,7 @@ export class Simulation {
           || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
           || this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
         )
-        && Boolean(this.scenario.obelisk),
+        && Boolean(this.scenario.encounterObelisk),
       nextSpawnTick: this.tickCount + 1,
       spawnCursor: 0,
       attempts: 0,
@@ -1134,22 +1244,25 @@ export class Simulation {
       skippedCapped: 0,
       nextSpawnSequence: 1,
     });
-    for (const entity of this.scenario.entities) {
-      if (!isDynamicRuntimeEntity(entity)) continue;
-      const definition = dynamicBodyParameters(entity);
-      if (!definition) continue;
-      this.rocks.spawn({
-        spawnId: entity.spawnId,
-        definitionId: definition.definitionId,
-        archetype: definition.archetype,
-        collider: definition.collider,
-        rotation: definition.rotation,
-        x: entity.x,
-        z: entity.z,
-        radius: definition.radius,
-        halfWidth: definition.halfWidth,
-        halfDepth: definition.halfDepth,
-        massKg: definition.massKg,
+    for (const entity of this.scenario.allRuntimeEntities()) {
+      if (isDynamicRuntimeEntity(entity)) this.#spawnRuntimeDynamicEntity(entity);
+    }
+    for (const connector of this.scenario.connectors) {
+      this.elevators.spawn({
+        id: connector.runtimeId,
+        authoringId: connector.id,
+        lowerLayerIndex: connector.lowerLayerIndex,
+        upperLayerIndex: connector.upperLayerIndex,
+        x: connector.x,
+        z: connector.z,
+        platformWidth: connector.platformWidth,
+        apertureWidth: connector.apertureWidth,
+        lowerY: connector.lowerY,
+        upperY: connector.upperY,
+        travelSpeed: connector.travelSpeed,
+        dwellTicks: connector.dwellTicks,
+        initialStop: connector.initialStop,
+        activationPolicy: connector.activationPolicy === "occupancy" ? 1 : 0,
       });
     }
   }
@@ -1189,7 +1302,10 @@ export class Simulation {
     if (usesPerceptionProfile(this.enemyAiProfile)) {
       this.#facingSystem(simulationTick);
     }
+    this.#elevatorSupportAndMotionSystem(SIMULATION.dt);
+    this.#holeRimAttractionSystem(SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
+    this.#verticalResolutionSystem(SIMULATION.dt);
     this.#movementSoundSystem(simulationTick);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
@@ -1230,12 +1346,36 @@ export class Simulation {
     this.commandLog.push({ tick: this.tickCount, command });
   }
 
+  /** @param {string} kind @param {number} bodyKind @param {number} index @param {Record<string, any>} [details] */
+  #recordHoleEvent(kind, bodyKind, index, details = {}) {
+    if (this.holeEvents.length === this.holeEvents.capacity) this.holeEventDropped += 1;
+    this.holeEvents.push({
+      tick: this.tickCount,
+      kind,
+      bodyKind,
+      index,
+      layerId: this.layerIds[this.#bodyValue(bodyKind, index, "layerIndex")] ?? null,
+      ...details,
+    });
+  }
+
   /** @param {ArenaScenario} scenario */
   #scenarioFitsDynamicCapacity(scenario) {
-    return scenario.compiledLayerIds.every((layerId) => (
-      (scenario.compiledLayer(layerId)?.entities.filter(isDynamicRuntimeEntity).length ?? 0)
-      <= this.rocks.capacity
-    ));
+    return scenario.allRuntimeEntities().filter(isDynamicRuntimeEntity).length
+      <= this.rocks.capacity;
+  }
+
+  #rebuildCompiledLayerRuntime() {
+    this.layerIds = [...this.scenario.compiledLayerIds];
+    this.layerIdToIndex = new Map(
+      this.layerIds.map((layerId, index) => [layerId, index]),
+    );
+    this.layerMaps = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).map);
+    this.layerMaps[this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0] = this.scenario.map;
+    this.layerBaseY = Float32Array.from(
+      this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
+    );
+    this.layerHoles = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).holes ?? []);
   }
 
   #clearLayerRuntimeEvents() {
@@ -1245,12 +1385,180 @@ export class Simulation {
     this.perceptionEvents.clear();
     this.perceptionEventDropped = 0;
     this.#clearSoundEventHistory();
+    this.holeEvents.clear();
+    this.holeEventDropped = 0;
+    for (const key of Object.keys(this.holeMetrics)) this.holeMetrics[key] = 0;
+  }
+
+  /** Spawn one authored dynamic recipe at its authored starting pose. */
+  #spawnRuntimeDynamicEntity(entity) {
+    const definition = dynamicBodyParameters(entity);
+    if (!definition) return 0;
+    const layerIndex = this.layerIdToIndex.get(entity.layerId);
+    if (layerIndex === undefined) return 0;
+    return this.rocks.spawn({
+      spawnId: entity.spawnId,
+      definitionId: definition.definitionId,
+      archetype: definition.archetype,
+      collider: definition.collider,
+      rotation: definition.rotation,
+      x: entity.x,
+      z: entity.z,
+      radius: definition.radius,
+      halfWidth: definition.halfWidth,
+      halfDepth: definition.halfDepth,
+      massKg: definition.massKg,
+      airbornePassable: definition.airbornePassable,
+      verticalCapabilities: definition.verticalCapabilities,
+      worldY: this.layerBaseY[layerIndex],
+      layerIndex,
+      supportKind: SUPPORT_KIND.FLOOR,
+      verticalMode: VERTICAL_MODE.SUPPORTED,
+    });
+  }
+
+  /**
+   * Reconcile authored clutter recipes without treating an editor change as a
+   * gameplay reset.  Existing matching recipes retain their disposable live
+   * state; an explicitly changed recipe receives its new authored start pose.
+   */
+  #reconcileDynamicAuthoringRuntime(previousScenario) {
+    const previous = new Map();
+    for (const entity of previousScenario.allRuntimeEntities()) {
+      if (isDynamicRuntimeEntity(entity)) previous.set(entity.authoringId, entity);
+    }
+    const next = new Map();
+    for (const entity of this.scenario.allRuntimeEntities()) {
+      if (isDynamicRuntimeEntity(entity)) next.set(entity.authoringId, entity);
+    }
+
+    // Swap-and-pop means removal must walk backwards.
+    for (let index = this.rocks.activeCount - 1; index >= 0; index -= 1) {
+      const authoringId = previousScenario.authoringIdForSpawnId(this.rocks.spawnId[index]);
+      if (!authoringId || next.has(authoringId)) continue;
+      this.rocks.removeSwap(index);
+    }
+
+    for (const [authoringId, entity] of next) {
+      const before = previous.get(authoringId);
+      const existing = this.rocks.findIndexBySpawnId(entity.spawnId);
+      const changed = !before
+        || before.definitionId !== entity.definitionId
+        || before.layerId !== entity.layerId
+        || before.x !== entity.x
+        || before.z !== entity.z
+        || before.rotation !== entity.rotation;
+      if (existing < 0) {
+        this.#spawnRuntimeDynamicEntity(entity);
+        continue;
+      }
+      if (!changed) continue;
+      const definition = dynamicBodyParameters(entity);
+      const layerIndex = this.layerIdToIndex.get(entity.layerId);
+      if (!definition || layerIndex === undefined) continue;
+      this.rocks.definitionId[existing] = definition.definitionId;
+      this.rocks.archetype[existing] = definition.archetype;
+      this.rocks.collider[existing] = definition.collider;
+      this.rocks.rotation[existing] = definition.rotation;
+      this.rocks.x[existing] = entity.x;
+      this.rocks.z[existing] = entity.z;
+      this.rocks.previousX[existing] = entity.x;
+      this.rocks.previousZ[existing] = entity.z;
+      this.rocks.vx[existing] = 0;
+      this.rocks.vz[existing] = 0;
+      this.rocks.radius[existing] = definition.radius;
+      this.rocks.halfWidth[existing] = definition.halfWidth;
+      this.rocks.halfDepth[existing] = definition.halfDepth;
+      this.rocks.massKg[existing] = definition.massKg;
+      this.rocks.inverseMass[existing] = 1 / definition.massKg;
+      this.rocks.airbornePassable[existing] = definition.airbornePassable ? 1 : 0;
+      this.rocks.verticalCapabilities[existing] = definition.verticalCapabilities;
+      this.rocks.worldY[existing] = this.layerBaseY[layerIndex];
+      this.rocks.previousWorldY[existing] = this.layerBaseY[layerIndex];
+      this.rocks.verticalVelocityY[existing] = 0;
+      this.rocks.verticalMode[existing] = VERTICAL_MODE.SUPPORTED;
+      this.rocks.supportKind[existing] = SUPPORT_KIND.FLOOR;
+      this.rocks.supportId[existing] = 0;
+      this.rocks.layerIndex[existing] = layerIndex;
+      this.rocks.transitConnectorId[existing] = 0;
+    }
+  }
+
+  /** Keep live bodies attached to stable layer IDs when authoring layer order changes. */
+  #remapLiveLayerIndices(previousLayerIds) {
+    const remap = (value) => {
+      const previousId = previousLayerIds[value] ?? this.scenario.startLayerId;
+      return this.layerIdToIndex.get(previousId)
+        ?? this.layerIdToIndex.get(this.scenario.startLayerId)
+        ?? 0;
+    };
+    this.player.layerIndex = remap(this.player.layerIndex);
+    const pools = [
+      this.enemies,
+      this.rocks,
+      this.projectiles,
+      this.particles,
+      this.dynamicDeadBodies,
+      this.inertDeadBodies,
+    ];
+    for (const pool of pools) {
+      if (!pool?.layerIndex) continue;
+      for (let index = 0; index < pool.activeCount; index += 1) {
+        pool.layerIndex[index] = remap(pool.layerIndex[index]);
+      }
+    }
+    for (let index = 0; index < this.elevators.activeCount; index += 1) {
+      const connector = this.scenario.connectors.find(
+        (candidate) => candidate.id === this.elevators.authoringId[index],
+      );
+      if (!connector) continue;
+      this.elevators.lowerLayerIndex[index] = connector.lowerLayerIndex;
+      this.elevators.upperLayerIndex[index] = connector.upperLayerIndex;
+      this.elevators.lowerY[index] = connector.lowerY;
+      this.elevators.upperY[index] = connector.upperY;
+    }
+  }
+
+  /** Reject a newly authored solid that would be born around a live body. */
+  #candidateOverlapsLiveSolid(candidate) {
+    const intersects = (layerIndex, x, z, radius) => {
+      const layerId = this.layerIds[layerIndex];
+      const map = layerId ? candidate.compiledLayer(layerId)?.map : null;
+      return Boolean(map && firstSolidContact(map, x, z, radius, this._gridContact));
+    };
+    if (intersects(this.player.layerIndex, this.player.x, this.player.z, this.player.radius)) {
+      return "Authored solid geometry would overlap the live player";
+    }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (intersects(
+        this.enemies.layerIndex[index],
+        this.enemies.x[index],
+        this.enemies.z[index],
+        this.enemies.radius[index],
+      )) return "Authored solid geometry would overlap a live enemy";
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      const radius = this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+        ? Math.max(this.rocks.halfWidth[index], this.rocks.halfDepth[index])
+        : this.rocks.radius[index];
+      if (intersects(
+        this.rocks.layerIndex[index],
+        this.rocks.x[index],
+        this.rocks.z[index],
+        radius,
+      )) return "Authored solid geometry would overlap live dynamic clutter";
+    }
+    return null;
   }
 
   /** @param {ArenaScenario} candidate @param {string} requestedLayerId */
-  #adoptScenario(candidate, requestedLayerId) {
+  #adoptScenario(candidate, requestedLayerId, options = {}) {
     if (!this.#scenarioFitsDynamicCapacity(candidate)) {
       throw new RangeError("A scenario layer exceeds the configured dynamic prop pool capacity");
+    }
+    if (options.restore !== true) {
+      const overlap = this.#candidateOverlapsLiveSolid(candidate);
+      if (overlap) throw new RangeError(overlap);
     }
     const layerId = candidate.hasLayer(requestedLayerId)
       ? requestedLayerId
@@ -1258,33 +1566,44 @@ export class Simulation {
     if (!candidate.activateLayer(layerId)) {
       throw new RangeError(candidate.lastMutationError ?? `Unknown authoring layer "${layerId}"`);
     }
+    const previousScenario = this.scenario;
+    const previousLayerIds = [...this.layerIds];
     this.scenario = candidate;
+    this.#rebuildCompiledLayerRuntime();
+    if (options.restore !== true) this.#remapLiveLayerIndices(previousLayerIds);
     this.map = candidate.map;
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     this.mapRevision += 1;
-    this.#restoreAuthoredState();
-    this.#clearLayerRuntimeEvents();
+    if (options.restore === true) {
+      this.#restoreAuthoredState();
+      this.#clearLayerRuntimeEvents();
+    } else {
+      this.#reconcileDynamicAuthoringRuntime(previousScenario);
+      this.navigationField.reset(this.map);
+      this.destinationFields.reset(this.map);
+      this.reachability.reset(this.map);
+      this.broadphase.reset(this.map);
+    }
   }
 
-  /** Switches the disposable runtime recipe without changing authoring source. @param {string} layerId */
+  /** Switches the editor/view recipe without changing authored or live body state. @param {string} layerId */
   #activateScenarioLayer(layerId) {
     const compiledLayer = this.scenario.compiledLayer(layerId);
     if (!compiledLayer) {
       throw new RangeError(`Unknown authoring layer "${layerId}"`);
     }
-    if (compiledLayer.entities.filter(isDynamicRuntimeEntity).length > this.rocks.capacity) {
-      throw new RangeError("Layer exceeds the configured dynamic prop pool capacity");
-    }
     if (!this.scenario.activateLayer(layerId)) {
       throw new RangeError(this.scenario.lastMutationError ?? `Could not activate layer "${layerId}"`);
     }
     this.map = this.scenario.map;
-    this.authoringRevision += 1;
+    this.layerMaps[this.layerIdToIndex.get(layerId) ?? 0] = this.map;
     this.#refreshPreparedAuthoringState();
     this.mapRevision += 1;
-    this.#restoreAuthoredState();
-    this.#clearLayerRuntimeEvents();
+    this.navigationField.reset(this.map);
+    this.destinationFields.reset(this.map);
+    this.reachability.reset(this.map);
+    this.broadphase.reset(this.map);
     return true;
   }
 
@@ -1323,6 +1642,16 @@ export class Simulation {
           this.#adoptScenario(candidate, requestedLayerId);
         } else if (action.type === "activateLayer") {
           this.#activateScenarioLayer(action.layerId);
+        } else if (action.type === "cycleElevator" || action.type === "summonElevator") {
+          const elevatorIndex = action.connectorId
+            ? this.elevators.findIndexByAuthoringId(action.connectorId)
+            : this.elevators.findIndexById(action.runtimeId);
+          if (elevatorIndex < 0) throw new RangeError("Unknown elevator connector");
+          if (action.type === "cycleElevator") this.elevators.cycle(elevatorIndex);
+          else this.elevators.request(
+            elevatorIndex,
+            action.stop === "upper" ? ELEVATOR_STOP.UPPER : ELEVATOR_STOP.LOWER,
+          );
         } else if (action.type === "restoreScenario") {
           this.#restoreAuthoredState();
           this.impactEvents.clear();
@@ -1373,7 +1702,7 @@ export class Simulation {
           }
         } else if (action.type === "loadScenario") {
           const loadedScenario = ArenaScenario.fromJSON(action.json);
-          this.#adoptScenario(loadedScenario, loadedScenario.startLayerId);
+          this.#adoptScenario(loadedScenario, loadedScenario.startLayerId, { restore: true });
         } else if (action.type === "placeRock") {
           const definitionId = rockDefinitionId(action.archetype);
           if (!definitionId || !this.#placeDefinition(definitionId, action.x, action.z, 0)) {
@@ -1623,7 +1952,10 @@ export class Simulation {
 
   /** @param {GridMap} candidateMap */
   #activeBodiesFitMap(candidateMap) {
+    const activeLayerIndex = this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0;
     if (
+      this.player.layerIndex === activeLayerIndex
+      &&
       firstSolidContact(
         candidateMap,
         this.player.x,
@@ -1633,11 +1965,13 @@ export class Simulation {
       )
     ) return false;
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      if (this.rocks.layerIndex[index] !== activeLayerIndex) continue;
       if (
         this.#dynamicBodyGridContact(candidateMap, index, this._gridContact)
       ) return false;
     }
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (this.enemies.layerIndex[index] !== activeLayerIndex) continue;
       if (
         firstSolidContact(
           candidateMap,
@@ -1649,6 +1983,7 @@ export class Simulation {
       ) return false;
     }
     for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      if (this.dynamicDeadBodies.layerIndex[index] !== activeLayerIndex) continue;
       if (
         firstSolidContact(
           candidateMap,
@@ -1757,6 +2092,12 @@ export class Simulation {
           halfWidth: body.halfWidth,
           halfDepth: body.halfDepth,
           massKg: body.massKg,
+          airbornePassable: body.airbornePassable,
+          verticalCapabilities: body.verticalCapabilities,
+          worldY: this.scenario.activeLayer.baseY,
+          layerIndex: this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0,
+          supportKind: SUPPORT_KIND.FLOOR,
+          verticalMode: VERTICAL_MODE.SUPPORTED,
         })
         : 0;
       if (id === 0) {
@@ -2291,6 +2632,12 @@ export class Simulation {
   #perceptionSystem(simulationTick) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      if (pool.layerIndex[index] !== this.player.layerIndex) {
+        pool.currentVisibility[index] = 0;
+        pool.lineOfSight[index] = 0;
+        pool.visibilitySampleTick[index] = simulationTick;
+        continue;
+      }
       let state = pool.perceptionState[index];
       if (
         state === PERCEPTION_STATE.unaware
@@ -2447,6 +2794,7 @@ export class Simulation {
   /** @param {number} index */
   #selectVisibleHostileProjectile(index) {
     const pool = this.enemies;
+    const map = this.layerMaps[pool.layerIndex[index]] ?? this.map;
     const range = PERCEPTIVE_WIZARD.visualRangeMeters;
     const candidateCount = this.broadphase.queryProjectiles(
       pool.x[index] - range,
@@ -2458,6 +2806,7 @@ export class Simulation {
     let selectedDistanceSquared = Infinity;
     for (let candidate = 0; candidate < candidateCount; candidate += 1) {
       const projectileIndex = this.broadphase.projectileCandidates[candidate];
+      if (this.projectiles.layerIndex[projectileIndex] !== pool.layerIndex[index]) continue;
       if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player) continue;
       const spellCode = this.projectiles.spellCode[projectileIndex];
       if (
@@ -2467,7 +2816,7 @@ export class Simulation {
         continue;
       }
       const sight = visualCheck(
-        this.map,
+        map,
         pool.x[index],
         pool.z[index],
         pool.facingX[index],
@@ -2515,7 +2864,10 @@ export class Simulation {
       vz: this.projectiles.vz[projectileIndex],
       age: this.projectiles.age[projectileIndex],
     };
-    const inferredOrigin = inferProjectileOrigin(this.map, projectile);
+    const inferredOrigin = inferProjectileOrigin(
+      this.layerMaps[this.enemies.layerIndex[index]] ?? this.map,
+      projectile,
+    );
     const effectId = this.projectiles.effectId[projectileIndex];
     const projectileId = this.projectiles.id[projectileIndex];
     this.investigationEventMetrics.projectileObservations += 1;
@@ -2551,6 +2903,16 @@ export class Simulation {
   #investigativePerceptionSystem(simulationTick) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      // Floors share X/Z coordinates but not direct perception. A later
+      // connector-aware AI can make this transition deliberately; for now a
+      // different layer is a hard awareness boundary.
+      if (pool.layerIndex[index] !== this.player.layerIndex) {
+        pool.currentVisibility[index] = 0;
+        pool.lineOfSight[index] = 0;
+        pool.visibilitySampleTick[index] = simulationTick;
+        this.#clearCandidate(index);
+        continue;
+      }
       let state = pool.perceptionState[index];
       if (
         state === PERCEPTION_STATE.unaware
@@ -2719,8 +3081,10 @@ export class Simulation {
 
   /** @param {number} simulationTick */
   #attemptEnemySpawn(simulationTick) {
-    const obelisk = this.scenario.obelisk;
+    const obelisk = this.scenario.encounterObelisk;
     if (!obelisk) return;
+    const layerIndex = this.layerIdToIndex.get(obelisk.layerId);
+    if (layerIndex === undefined) return;
     const slot = this.encounter.spawnCursor;
     const offset = SPAWN_OFFSETS[slot];
     this.encounter.spawnCursor = (slot + 1) % SPAWN_OFFSETS.length;
@@ -2742,18 +3106,19 @@ export class Simulation {
       this.#recordCombatEvent(event);
       return;
     }
-    if (!this.#enemySpawnIsSafe(x, z)) {
+    if (!this.#enemySpawnIsSafe(x, z, layerIndex)) {
       this.encounter.skippedBlocked += 1;
       this.#recordCombatEvent(event);
       return;
     }
     const spawnSequence = this.encounter.nextSpawnSequence;
-    const isDefaultArena = this.map.width === 24
-      && this.map.height === 24
+    const spawnMap = this.layerMaps[layerIndex];
+    const isDefaultArena = spawnMap.width === 24
+      && spawnMap.height === 24
       && obelisk.x === 20.5
       && obelisk.z === 18.5
-      && this.map.playerSpawn.x === 3.5
-      && this.map.playerSpawn.z === 18.5;
+      && spawnMap.playerSpawn.x === 3.5
+      && spawnMap.playerSpawn.z === 18.5;
     let heading = deterministicGuardHeading(this.seed, spawnSequence);
     if (isDefaultArena) {
       const outwardX = x - obelisk.x;
@@ -2784,6 +3149,12 @@ export class Simulation {
       guardBaseFacingZ: heading.z,
       perceptionLane: spawnSequence % PERCEPTIVE_WIZARD.perceptionLanes,
       guardSweepPhase: deterministicGuardSweepPhase(this.seed, spawnSequence),
+      worldY: this.layerBaseY[layerIndex],
+      layerIndex,
+      verticalCapabilities: DEFAULT_ACTOR_VERTICAL_CAPABILITIES,
+      supportKind: SUPPORT_KIND.FLOOR,
+      supportId: 0,
+      verticalMode: VERTICAL_MODE.SUPPORTED,
     });
     if (id === 0) {
       this.encounter.skippedCapped += 1;
@@ -2798,18 +3169,22 @@ export class Simulation {
     this.#recordCombatEvent(event);
   }
 
-  /** @param {number} x @param {number} z */
-  #enemySpawnIsSafe(x, z) {
-    if (firstSolidContact(this.map, x, z, ENEMY_WIZARD.radius, this._gridContact)) {
+  /** @param {number} x @param {number} z @param {number} layerIndex */
+  #enemySpawnIsSafe(x, z, layerIndex) {
+    const map = this.layerMaps[layerIndex];
+    if (!map || firstSolidContact(map, x, z, ENEMY_WIZARD.radius, this._gridContact)) {
       return false;
     }
     if (
+      this.player.layerIndex === layerIndex
+      &&
       Math.hypot(x - this.player.x, z - this.player.z)
       < ENEMY_WIZARD.radius + this.player.radius
     ) {
       return false;
     }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      if (this.rocks.layerIndex[index] !== layerIndex) continue;
       if (this.#circleDynamicBodyContact(
         x,
         z,
@@ -2821,6 +3196,7 @@ export class Simulation {
       }
     }
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (this.enemies.layerIndex[index] !== layerIndex) continue;
       if (
         Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index])
         < ENEMY_WIZARD.radius + this.enemies.radius[index]
@@ -2829,6 +3205,7 @@ export class Simulation {
       }
     }
     for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      if (this.dynamicDeadBodies.layerIndex[index] !== layerIndex) continue;
       if (
         Math.hypot(
           x - this.dynamicDeadBodies.x[index],
@@ -3122,6 +3499,12 @@ export class Simulation {
   /** @param {number} index @param {number} dt @param {number} simulationTick */
   #prepareTacticalEnemyMovement(index, dt, simulationTick) {
     const pool = this.enemies;
+    if (pool.layerIndex[index] !== this.player.layerIndex) {
+      pool.aiState[index] = ENEMY_AI_HOLD;
+      this.#clearEnemyMovementGoal(index);
+      this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+      return;
+    }
     this.#advanceEnemyStrafeDecision(index, simulationTick);
     if (!pool.retreating[index] && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
       pool.retreating[index] = 1;
@@ -3315,6 +3698,12 @@ export class Simulation {
   /** @param {number} index @param {number} dt @param {number} simulationTick */
   #preparePerceptiveEnemyMovement(index, dt, simulationTick) {
     const pool = this.enemies;
+    if (pool.layerIndex[index] !== this.player.layerIndex) {
+      pool.aiState[index] = ENEMY_AI_HOLD;
+      this.#clearEnemyMovementGoal(index);
+      this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+      return;
+    }
     this.#advanceEnemyStrafeDecision(index, simulationTick);
     if (!pool.retreating[index] && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
       pool.retreating[index] = 1;
@@ -3515,6 +3904,15 @@ export class Simulation {
   #prepareBasicEnemyMovement(dt) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      if (pool.layerIndex[index] !== this.player.layerIndex) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        pool.desiredVx[index] = 0;
+        pool.desiredVz[index] = 0;
+        pool.locomotionVx[index] = 0;
+        pool.locomotionVz[index] = 0;
+        this.#clearEnemyMovementGoal(index);
+        continue;
+      }
       const dx = this.player.x - pool.x[index];
       const dz = this.player.z - pool.z[index];
       const distance = Math.hypot(dx, dz);
@@ -3599,6 +3997,10 @@ export class Simulation {
   #facingSystem(simulationTick) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      if (pool.layerIndex[index] !== this.player.layerIndex) {
+        pool.lineOfSight[index] = 0;
+        continue;
+      }
       let targetX = 0;
       let targetZ = 0;
       if (pool.currentVisibility[index]) {
@@ -3657,6 +4059,10 @@ export class Simulation {
     if (!definition) throw new Error("Current Fireball definition is unavailable");
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      if (pool.layerIndex[index] !== this.player.layerIndex) {
+        pool.lineOfSight[index] = 0;
+        continue;
+      }
       let aimX = this.player.x;
       let aimZ = this.player.z;
       let interceptTime = 0;
@@ -3772,6 +4178,7 @@ export class Simulation {
         definitionRevision: spell.currentRevision,
         effectId,
         effectSeed,
+        layerIndex: pool.layerIndex[index],
       });
       if (projectileId === 0) continue;
       pool.cooldown[index] = Number(definition.cast.cooldown);
@@ -3843,6 +4250,8 @@ export class Simulation {
       facingZ: pool.facingZ[index],
       radius: pool.radius[index],
       massKg: pool.massKg[index],
+      worldY: pool.worldY[index],
+      layerIndex: pool.layerIndex[index],
       settleReason: reason,
     });
     if (reason === DEAD_BODY_SETTLE_REASON.quiet) pool.quietSettles += 1;
@@ -3880,6 +4289,13 @@ export class Simulation {
             facingZ: facingLength > 1e-9 ? this.enemies.facingZ[index] : 0,
             radius: this.enemies.radius[index],
             massKg: this.enemies.massKg[index],
+            worldY: this.enemies.worldY[index],
+            layerIndex: this.enemies.layerIndex[index],
+            verticalVelocityY: this.enemies.verticalVelocityY[index],
+            verticalCapabilities: DEFAULT_PROP_VERTICAL_CAPABILITIES,
+            supportKind: this.enemies.supportKind[index],
+            supportId: this.enemies.supportId[index],
+            verticalMode: this.enemies.verticalMode[index],
           });
           if (bodyIndex < 0) {
             throw new Error("Dynamic dead-body capacity invariant violated");
@@ -3944,7 +4360,9 @@ export class Simulation {
         if (this.movementSoundProfile !== MOVEMENT_SOUND_PROFILE_V1) {
           movementMode = PLAYER_MOVEMENT_RUNNING;
         }
-        const desiredSpeed = movementMode === PLAYER_MOVEMENT_WALKING
+        const desiredSpeed = player.verticalMode === VERTICAL_MODE.FALLING
+          ? VERTICAL_PHYSICS.playerFallingMaximumSpeedMetersPerSecond
+          : movementMode === PLAYER_MOVEMENT_WALKING
           ? MOVEMENT_SOUND.walkSpeedMetersPerSecond
           : PLAYER.desiredSpeed;
         desiredVx = directionX * desiredSpeed;
@@ -3976,7 +4394,9 @@ export class Simulation {
     const deltaVx = desiredVx - player.locomotionVx;
     const deltaVz = desiredVz - player.locomotionVz;
     const deltaLength = Math.hypot(deltaVx, deltaVz);
-    const rate = target ? PLAYER.acceleration : PLAYER.braking;
+    const rate = player.verticalMode === VERTICAL_MODE.FALLING
+      ? VERTICAL_PHYSICS.playerFallingAccelerationMetersPerSecondSquared
+      : target ? PLAYER.acceleration : PLAYER.braking;
     const maximumDelta = rate * dt;
     if (deltaLength <= maximumDelta || deltaLength <= 1e-9) {
       player.locomotionVx = desiredVx;
@@ -4033,13 +4453,14 @@ export class Simulation {
       sourceKind: PROJECTILE_OWNER_KIND.player,
       sourceId: player.id,
       sourceTeam: ACTOR_TEAM.player,
+      layerIndex: player.layerIndex,
       x: player.x,
       z: player.z,
       radius: MOVEMENT_SOUND.footstepHearingMeters,
     });
   }
 
-  /** @param {{tick:number,kind:number,reason:number,sourceKind:number,sourceId:number,sourceTeam:number,x:number,z:number,radius:number,effectId?:number,projectileId?:number}} value */
+  /** @param {{tick:number,kind:number,reason:number,sourceKind:number,sourceId:number,sourceTeam:number,layerIndex?:number,x:number,z:number,radius:number,effectId?:number,projectileId?:number}} value */
   #queueSoundEvent(value) {
     const id = this.soundEvents.push(value);
     if (id === 0) return 0;
@@ -4069,12 +4490,809 @@ export class Simulation {
         id: pool.sourceId[index],
         team: teamName(pool.sourceTeam[index]),
       },
+      layerIndex: pool.layerIndex[index],
+      layerId: this.layerIds[pool.layerIndex[index]] ?? null,
       x: pool.x[index],
       z: pool.z[index],
       radius: pool.radius[index],
       effectId: pool.effectId[index] || null,
       projectileId: pool.projectileId[index] || null,
     };
+  }
+
+  /** @param {number} kind */
+  #verticalPool(kind) {
+    if (kind === BODY_ENEMY_WIZARD) return this.enemies;
+    if (kind === BODY_ROCK) return this.rocks;
+    if (kind === BODY_ENEMY_WIZARD_BODY) return this.dynamicDeadBodies;
+    return null;
+  }
+
+  /** @param {number} kind @param {number} index @param {string} field */
+  #bodyValue(kind, index, field) {
+    if (kind === BODY_PLAYER) return this.player[field];
+    return this.#verticalPool(kind)?.[field][index] ?? 0;
+  }
+
+  /** @param {number} kind @param {number} index @param {string} field @param {number} value */
+  #setBodyValue(kind, index, field, value) {
+    if (kind === BODY_PLAYER) this.player[field] = value;
+    else this.#verticalPool(kind)[field][index] = value;
+  }
+
+  /** @param {number} kind @param {number} index */
+  #bodyLowAirbornePassable(kind, index) {
+    return hasVerticalCapability(
+      this.#bodyValue(kind, index, "verticalCapabilities"),
+      VERTICAL_CAPABILITY.AIRBORNE_LOW_PASS,
+    );
+  }
+
+  /** @param {number} leftKind @param {number} leftIndex @param {number} rightKind @param {number} rightIndex */
+  #verticalBodiesCollide(leftKind, leftIndex, rightKind, rightIndex) {
+    const leftSupportKind = this.#bodyValue(leftKind, leftIndex, "supportKind");
+    const rightSupportKind = this.#bodyValue(rightKind, rightIndex, "supportKind");
+    const leftSupportId = this.#bodyValue(leftKind, leftIndex, "supportId");
+    const rightSupportId = this.#bodyValue(rightKind, rightIndex, "supportId");
+    if (
+      leftSupportKind === SUPPORT_KIND.ELEVATOR
+      && rightSupportKind === SUPPORT_KIND.ELEVATOR
+      && leftSupportId !== 0
+      && leftSupportId === rightSupportId
+    ) return true;
+    if (
+      this.#bodyValue(leftKind, leftIndex, "layerIndex")
+      !== this.#bodyValue(rightKind, rightIndex, "layerIndex")
+    ) return false;
+    if (
+      Math.abs(
+        this.#bodyValue(leftKind, leftIndex, "worldY")
+        - this.#bodyValue(rightKind, rightIndex, "worldY"),
+      ) > VERTICAL_PHYSICS.supportReleaseToleranceMeters
+    ) return false;
+    const leftFalling = this.#bodyValue(leftKind, leftIndex, "verticalMode")
+      === VERTICAL_MODE.FALLING;
+    const rightFalling = this.#bodyValue(rightKind, rightIndex, "verticalMode")
+      === VERTICAL_MODE.FALLING;
+    if (leftFalling && this.#bodyLowAirbornePassable(rightKind, rightIndex)) return false;
+    if (rightFalling && this.#bodyLowAirbornePassable(leftKind, leftIndex)) return false;
+    return true;
+  }
+
+  /** @param {number} kind @param {number} index @param {number} elevatorIndex */
+  #bodyOverElevator(kind, index, elevatorIndex) {
+    const half = this.elevators.platformWidth[elevatorIndex] / 2;
+    return Math.abs(this.#bodyValue(kind, index, "x") - this.elevators.x[elevatorIndex]) <= half
+      && Math.abs(this.#bodyValue(kind, index, "z") - this.elevators.z[elevatorIndex]) <= half;
+  }
+
+  /** Writes the authoritative collision footprint into reusable scratch. */
+  #writeBodyApertureFootprint(kind, index, x, z) {
+    const footprint = this._apertureFootprint;
+    footprint.x = x;
+    footprint.z = z;
+    if (kind === BODY_ROCK && this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX) {
+      footprint.type = "rectangle";
+      footprint.halfWidth = this.rocks.halfWidth[index];
+      footprint.halfDepth = this.rocks.halfDepth[index];
+      footprint.rotation = this.rocks.rotation[index];
+      footprint.radius = 0;
+    } else {
+      footprint.type = "circle";
+      footprint.radius = this.#bodyValue(kind, index, "radius");
+      footprint.halfWidth = 0;
+      footprint.halfDepth = 0;
+      footprint.rotation = 0;
+    }
+    return footprint;
+  }
+
+  /** @param {number} kind @param {number} index @param {number} elevatorIndex */
+  #bodyFitsElevatorAperture(kind, index, elevatorIndex) {
+    const footprint = this.#writeBodyApertureFootprint(
+      kind,
+      index,
+      this.#bodyValue(kind, index, "x"),
+      this.#bodyValue(kind, index, "z"),
+    );
+    this._aperture.x = this.elevators.x[elevatorIndex];
+    this._aperture.z = this.elevators.z[elevatorIndex];
+    this._aperture.width = this.elevators.apertureWidth[elevatorIndex];
+    return footprintFitsSquareAperture(
+      footprint,
+      this._aperture,
+      VERTICAL_PHYSICS.apertureClearanceMeters,
+      this._apertureExtents,
+    );
+  }
+
+  /** @param {number} kind @param {number} index @param {number} elevatorIndex */
+  #tryAcquireElevatorSupport(kind, index, elevatorIndex) {
+    if (!hasVerticalCapability(
+      this.#bodyValue(kind, index, "verticalCapabilities"),
+      VERTICAL_CAPABILITY.ELEVATOR_SUPPORT | VERTICAL_CAPABILITY.CAN_RIDE_ELEVATOR,
+    )) return false;
+    if (this.#bodyValue(kind, index, "supportKind") === SUPPORT_KIND.ELEVATOR) return false;
+    if (!this.#bodyOverElevator(kind, index, elevatorIndex)) return false;
+    const bodyY = this.#bodyValue(kind, index, "worldY");
+    const platformY = this.elevators.worldY[elevatorIndex];
+    if (Math.abs(bodyY - platformY) > VERTICAL_PHYSICS.supportContactToleranceMeters) {
+      return false;
+    }
+    if (
+      this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.UPPER
+      && this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+      && !this.#bodyFitsElevatorAperture(kind, index, elevatorIndex)
+    ) {
+      this.#setBodyValue(kind, index, "latestApertureFit", -1);
+      return false;
+    }
+    this.#setBodyValue(kind, index, "worldY", platformY);
+    this.#setBodyValue(kind, index, "verticalVelocityY", this.elevators.velocityY[elevatorIndex]);
+    this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.SUPPORTED);
+    this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.ELEVATOR);
+    this.#setBodyValue(kind, index, "supportId", this.elevators.id[elevatorIndex]);
+    this.#setBodyValue(kind, index, "transitConnectorId", this.elevators.id[elevatorIndex]);
+    return true;
+  }
+
+  /** @param {number} kind @param {number} index */
+  #acquireElevatorSupportForBody(kind, index) {
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      if (this.#tryAcquireElevatorSupport(kind, index, elevatorIndex)) return;
+    }
+  }
+
+  /** @param {number} kind @param {number} index */
+  #carryElevatorSupportedBody(kind, index) {
+    if (this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.ELEVATOR) return;
+    const elevatorIndex = this.elevators.findIndexById(
+      this.#bodyValue(kind, index, "supportId"),
+    );
+    if (elevatorIndex < 0) {
+      this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.NONE);
+      this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
+      return;
+    }
+    const deltaY = this.elevators.worldY[elevatorIndex]
+      - this.elevators.previousWorldY[elevatorIndex];
+    this.#setBodyValue(
+      kind,
+      index,
+      "worldY",
+      this.#bodyValue(kind, index, "worldY") + deltaY,
+    );
+    this.#setBodyValue(kind, index, "verticalVelocityY", this.elevators.velocityY[elevatorIndex]);
+    this.elevators.supportedBodyCount[elevatorIndex] += 1;
+  }
+
+  #elevatorSupportAndMotionSystem(dt) {
+    this.player.previousWorldY = this.player.worldY;
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.enemies.previousWorldY[index] = this.enemies.worldY[index];
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.rocks.previousWorldY[index] = this.rocks.worldY[index];
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.dynamicDeadBodies.previousWorldY[index] = this.dynamicDeadBodies.worldY[index];
+    }
+    for (let index = 0; index < this.elevators.activeCount; index += 1) {
+      this.elevators.activatorCount[index] = 0;
+      this.elevators.supportedBodyCount[index] = 0;
+    }
+    this.#acquireElevatorSupportForBody(BODY_PLAYER, 0);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#acquireElevatorSupportForBody(BODY_ENEMY_WIZARD, index);
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.#acquireElevatorSupportForBody(BODY_ROCK, index);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#acquireElevatorSupportForBody(BODY_ENEMY_WIZARD_BODY, index);
+    }
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      if (this.elevators.activationPolicy[elevatorIndex] !== 1) continue;
+      const supportId = this.elevators.id[elevatorIndex];
+      if (
+        this.player.supportKind === SUPPORT_KIND.ELEVATOR
+        && this.player.supportId === supportId
+        && hasVerticalCapability(
+          this.player.verticalCapabilities,
+          VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR,
+        )
+      ) this.elevators.activatorCount[elevatorIndex] += 1;
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        if (
+          this.enemies.supportKind[index] === SUPPORT_KIND.ELEVATOR
+          && this.enemies.supportId[index] === supportId
+          && hasVerticalCapability(
+            this.enemies.verticalCapabilities[index],
+            VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR,
+          )
+        ) this.elevators.activatorCount[elevatorIndex] += 1;
+      }
+      if (this.elevators.activatorCount[elevatorIndex] > 0) {
+        this.elevators.request(
+          elevatorIndex,
+          this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.LOWER
+            ? ELEVATOR_STOP.UPPER
+            : ELEVATOR_STOP.LOWER,
+        );
+      }
+    }
+    this.elevators.step(dt);
+    this.#carryElevatorSupportedBody(BODY_PLAYER, 0);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#carryElevatorSupportedBody(BODY_ENEMY_WIZARD, index);
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.#carryElevatorSupportedBody(BODY_ROCK, index);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#carryElevatorSupportedBody(BODY_ENEMY_WIZARD_BODY, index);
+    }
+  }
+
+  /** @param {number} kind @param {number} index @param {GridMap} map @param {number} x @param {number} z */
+  #bodyBlockedAt(kind, index, map, x, z) {
+    if (kind === BODY_ROCK && this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX) {
+      return firstSolidBoxContact(
+        map,
+        x,
+        z,
+        this.#dynamicBodyHalfX(index),
+        this.#dynamicBodyHalfZ(index),
+        this._gridContact,
+      );
+    }
+    return firstSolidContact(
+      map,
+      x,
+      z,
+      this.#bodyValue(kind, index, "radius"),
+      this._gridContact,
+    );
+  }
+
+  /** @param {number} kind @param {number} index @param {number} elevatorIndex */
+  #ejectOversizedBody(kind, index, elevatorIndex) {
+    const upperLayerIndex = this.elevators.upperLayerIndex[elevatorIndex];
+    const map = this.layerMaps[upperLayerIndex];
+    const bodyX = this.#bodyValue(kind, index, "x");
+    const bodyZ = this.#bodyValue(kind, index, "z");
+    const dx = bodyX - this.elevators.x[elevatorIndex];
+    const dz = bodyZ - this.elevators.z[elevatorIndex];
+    let firstDirection = 0;
+    if (Math.abs(dz) > Math.abs(dx)) firstDirection = dz >= 0 ? 2 : 3;
+    else firstDirection = dx >= 0 ? 0 : 1;
+    let placed = false;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const direction = (firstDirection + attempt) & 3;
+      const extent = kind === BODY_ROCK
+        ? (direction < 2 ? this.#dynamicBodyHalfX(index) : this.#dynamicBodyHalfZ(index))
+        : this.#bodyValue(kind, index, "radius");
+      const distance = this.elevators.apertureWidth[elevatorIndex] / 2
+        + extent
+        + VERTICAL_PHYSICS.apertureClearanceMeters
+        + VERTICAL_PHYSICS.ejectionStepMeters;
+      const candidateX = this.elevators.x[elevatorIndex]
+        + (direction === 0 ? distance : direction === 1 ? -distance : 0);
+      const candidateZ = this.elevators.z[elevatorIndex]
+        + (direction === 2 ? distance : direction === 3 ? -distance : 0);
+      if (this.#bodyBlockedAt(kind, index, map, candidateX, candidateZ)) continue;
+      this.#setBodyValue(kind, index, "x", candidateX);
+      this.#setBodyValue(kind, index, "z", candidateZ);
+      placed = true;
+      break;
+    }
+    if (!placed) {
+      this.elevators.failedEjectionCount[elevatorIndex] += 1;
+      const extent = kind === BODY_ROCK
+        ? this.#dynamicBodyHalfX(index)
+        : this.#bodyValue(kind, index, "radius");
+      this.#setBodyValue(
+        kind,
+        index,
+        "x",
+        this.elevators.x[elevatorIndex]
+          + this.elevators.apertureWidth[elevatorIndex] / 2
+          + extent
+          + VERTICAL_PHYSICS.apertureClearanceMeters,
+      );
+    }
+    this.elevators.rejectedLoadCount[elevatorIndex] += 1;
+    this.#setBodyValue(kind, index, "worldY", Math.min(
+      this.#bodyValue(kind, index, "worldY"),
+      this.elevators.upperY[elevatorIndex]
+        - VERTICAL_PHYSICS.landingSeparationEpsilonMeters,
+    ));
+    this.#setBodyValue(kind, index, "verticalVelocityY", this.elevators.velocityY[elevatorIndex]);
+    this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
+    this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.NONE);
+    this.#setBodyValue(kind, index, "supportId", 0);
+    this.#setBodyValue(kind, index, "latestApertureFit", -1);
+  }
+
+  /** @param {number} kind @param {number} index */
+  #resolveElevatorRiderAfterHorizontal(kind, index) {
+    if (this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.ELEVATOR) return;
+    const elevatorIndex = this.elevators.findIndexById(
+      this.#bodyValue(kind, index, "supportId"),
+    );
+    if (elevatorIndex < 0) return;
+    if (!this.#bodyOverElevator(kind, index, elevatorIndex)) {
+      const stop = this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+        ? this.elevators.currentStop[elevatorIndex]
+        : -1;
+      const stopLayerIndex = stop === ELEVATOR_STOP.LOWER
+        ? this.elevators.lowerLayerIndex[elevatorIndex]
+        : stop === ELEVATOR_STOP.UPPER
+          ? this.elevators.upperLayerIndex[elevatorIndex]
+          : -1;
+      if (stopLayerIndex === this.#bodyValue(kind, index, "layerIndex")) {
+        this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.FLOOR);
+        this.#setBodyValue(kind, index, "supportId", 0);
+        this.#setBodyValue(kind, index, "verticalVelocityY", 0);
+        this.#setBodyValue(kind, index, "transitConnectorId", 0);
+      } else {
+        this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.NONE);
+        this.#setBodyValue(kind, index, "supportId", 0);
+        this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
+      }
+      return;
+    }
+    if (this.elevators.motion[elevatorIndex] !== ELEVATOR_MOTION.DWELLING) return;
+    const stop = this.elevators.currentStop[elevatorIndex];
+    if (stop === ELEVATOR_STOP.UPPER) {
+      const fits = this.#bodyFitsElevatorAperture(kind, index, elevatorIndex);
+      this.#setBodyValue(kind, index, "latestApertureFit", fits ? 1 : -1);
+      if (!fits) {
+        this.#ejectOversizedBody(kind, index, elevatorIndex);
+        return;
+      }
+      this.#setBodyValue(kind, index, "layerIndex", this.elevators.upperLayerIndex[elevatorIndex]);
+    } else {
+      this.#setBodyValue(kind, index, "layerIndex", this.elevators.lowerLayerIndex[elevatorIndex]);
+      this.#setBodyValue(kind, index, "latestApertureFit", 1);
+    }
+  }
+
+  /** @param {number} layerIndex @param {number} x @param {number} z */
+  #floorHasElevatorAperture(layerIndex, x, z) {
+    for (let index = 0; index < this.elevators.activeCount; index += 1) {
+      if (this.elevators.upperLayerIndex[index] !== layerIndex) continue;
+      const half = this.elevators.apertureWidth[index] / 2;
+      if (
+        Math.abs(x - this.elevators.x[index]) < half
+        && Math.abs(z - this.elevators.z[index]) < half
+      ) return true;
+    }
+    return false;
+  }
+
+  /** @param {number} worldY */
+  #nextFloorPlaneBelow(worldY) {
+    let result = -Infinity;
+    for (let index = 0; index < this.layerBaseY.length; index += 1) {
+      const height = this.layerBaseY[index];
+      if (height < worldY - VERTICAL_PHYSICS.landingSeparationEpsilonMeters && height > result) result = height;
+    }
+    return Number.isFinite(result) ? result : null;
+  }
+
+  /** @param {number} kind @param {number} index @param {number} layerIndex @param {number} x @param {number} z */
+  #bodyFitsHoleAt(kind, index, layerIndex, x, z) {
+    const holes = this.layerHoles[layerIndex] ?? [];
+    const footprint = this.#writeBodyApertureFootprint(kind, index, x, z);
+    for (let holeIndex = 0; holeIndex < holes.length; holeIndex += 1) {
+      const hole = holes[holeIndex];
+      if (footprintFitsSquareAperture(footprint, hole, hole.clearance, this._apertureExtents)) {
+        this._holeCandidate = hole;
+        return hole;
+      }
+    }
+    this._holeCandidate = null;
+    return null;
+  }
+
+  /** Deterministic first hole entered by this tick's center sweep. */
+  #sweptHoleCapture(kind, index, layerIndex, fromX, fromZ, toX, toZ) {
+    const holes = this.layerHoles[layerIndex] ?? [];
+    let best = null;
+    let bestT = Infinity;
+    for (let holeIndex = 0; holeIndex < holes.length; holeIndex += 1) {
+      const hole = holes[holeIndex];
+      const footprint = this.#writeBodyApertureFootprint(kind, index, fromX, fromZ);
+      const result = sweptFootprintEntrySquareAperture(
+        footprint,
+        fromX,
+        fromZ,
+        toX,
+        toZ,
+        hole,
+        hole.clearance,
+        this._apertureExtents,
+        this._holeSweep,
+      );
+      if (!result) continue;
+      if (
+        result.t < bestT - 1e-9
+        || (Math.abs(result.t - bestT) <= 1e-9 && best && hole.id.localeCompare(best.id) < 0)
+      ) {
+        best = hole;
+        bestT = result.t;
+        // Preserve the result before the next candidate reuses the scratch.
+        this._holeBestSweep.t = result.t;
+        this._holeBestSweep.x = result.x;
+        this._holeBestSweep.z = result.z;
+      }
+    }
+    return best;
+  }
+
+  /** @param {number} kind @param {number} index @param {number} dt */
+  #applyHoleRimAttraction(kind, index, dt) {
+    if (
+      this.#bodyValue(kind, index, "verticalMode") !== VERTICAL_MODE.SUPPORTED
+      || this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.FLOOR
+    ) return;
+    const layerIndex = this.#bodyValue(kind, index, "layerIndex");
+    const holes = this.layerHoles[layerIndex] ?? [];
+    if (holes.length === 0) return;
+    const x = this.#bodyValue(kind, index, "x");
+    const z = this.#bodyValue(kind, index, "z");
+    const footprint = this.#writeBodyApertureFootprint(kind, index, x, z);
+    let ax = 0;
+    let az = 0;
+    for (let holeIndex = 0; holeIndex < holes.length; holeIndex += 1) {
+      const hole = holes[holeIndex];
+      if (!footprintCanFitSquareAperture(footprint, hole, hole.clearance, this._apertureExtents)) continue;
+      const dx = hole.x - x;
+      const dz = hole.z - z;
+      const distance = Math.hypot(dx, dz);
+      const outer = hole.width / 2 + VERTICAL_PHYSICS.holeRimAttractionBandMeters;
+      if (distance <= 1e-9 || distance >= outer) continue;
+      const strength = (1 - distance / outer)
+        * VERTICAL_PHYSICS.holeRimAttractionAccelerationMetersPerSecondSquared;
+      ax += (dx / distance) * strength;
+      az += (dz / distance) * strength;
+    }
+    const magnitude = Math.hypot(ax, az);
+    const maximum = VERTICAL_PHYSICS.holeMaximumCombinedAttractionMetersPerSecondSquared;
+    if (magnitude > maximum) {
+      ax = (ax / magnitude) * maximum;
+      az = (az / magnitude) * maximum;
+    }
+    if (Math.abs(ax) <= 1e-9 && Math.abs(az) <= 1e-9) return;
+    this._rimAttraction.x = ax;
+    this._rimAttraction.z = az;
+    if (kind === BODY_PLAYER) {
+      this.player.externalVx += ax * dt;
+      this.player.externalVz += az * dt;
+    } else if (kind === BODY_ENEMY_WIZARD) {
+      this.enemies.externalVx[index] += ax * dt;
+      this.enemies.externalVz[index] += az * dt;
+    } else if (kind === BODY_ROCK) {
+      this.rocks.vx[index] += ax * dt;
+      this.rocks.vz[index] += az * dt;
+    } else {
+      this.dynamicDeadBodies.vx[index] += ax * dt;
+      this.dynamicDeadBodies.vz[index] += az * dt;
+    }
+    this.holeMetrics.rimAttractionApplied += 1;
+  }
+
+  #holeRimAttractionSystem(dt) {
+    this._rimAttraction.x = 0;
+    this._rimAttraction.z = 0;
+    this.#applyHoleRimAttraction(BODY_PLAYER, 0, dt);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#applyHoleRimAttraction(BODY_ENEMY_WIZARD, index, dt);
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.#applyHoleRimAttraction(BODY_ROCK, index, dt);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#applyHoleRimAttraction(BODY_ENEMY_WIZARD_BODY, index, dt);
+    }
+  }
+
+  /** @param {number} kind @param {number} index @param {number} layerIndex */
+  #bodyRejectedByUpperAperture(kind, index, layerIndex) {
+    if (this.#bodyValue(kind, index, "latestApertureFit") >= 0) return false;
+    const connectorId = this.#bodyValue(kind, index, "transitConnectorId");
+    if (!connectorId) return false;
+    const elevatorIndex = this.elevators.findIndexById(connectorId);
+    return elevatorIndex >= 0
+      && this.elevators.upperLayerIndex[elevatorIndex] === layerIndex;
+  }
+
+  /** @param {number} kind @param {number} index */
+  #captureFloorHoleForBody(kind, index) {
+    if (
+      this.#bodyValue(kind, index, "verticalMode") !== VERTICAL_MODE.SUPPORTED
+      || this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.FLOOR
+    ) return;
+    const layerIndex = this.#bodyValue(kind, index, "layerIndex");
+    const hole = this.#sweptHoleCapture(
+      kind,
+      index,
+      layerIndex,
+      this.#bodyValue(kind, index, "previousX"),
+      this.#bodyValue(kind, index, "previousZ"),
+      this.#bodyValue(kind, index, "x"),
+      this.#bodyValue(kind, index, "z"),
+    );
+    if (!hole) return;
+    // Prefer the resolved endpoint when it is fully contained (ordinary
+    // deliberate walking). A fast sweep that exits again still captures at
+    // its deterministic first entry. In either case, its X/Z history becomes
+    // the capture point so the source floor is not immediately re-tested at
+    // the old, outside position by this tick's vertical sweep.
+    const endX = this.#bodyValue(kind, index, "x");
+    const endZ = this.#bodyValue(kind, index, "z");
+    const endpointFits = footprintFitsSquareAperture(
+      this.#writeBodyApertureFootprint(kind, index, endX, endZ),
+      hole,
+      hole.clearance,
+      this._apertureExtents,
+    );
+    const captureX = endpointFits ? endX : this._holeBestSweep.x;
+    const captureZ = endpointFits ? endZ : this._holeBestSweep.z;
+    this.#setBodyValue(kind, index, "x", captureX);
+    this.#setBodyValue(kind, index, "z", captureZ);
+    this.#setBodyValue(kind, index, "previousX", captureX);
+    this.#setBodyValue(kind, index, "previousZ", captureZ);
+    this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.NONE);
+    this.#setBodyValue(kind, index, "supportId", 0);
+    this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
+    this.#setBodyValue(kind, index, "verticalVelocityY", 0);
+    this.#setBodyValue(kind, index, "latestApertureFit", 1);
+    this.holeMetrics.captured += 1;
+    this.#recordHoleEvent("HOLE_CAPTURED", kind, index, { holeId: hole.id, entryFraction: this._holeBestSweep.t });
+  }
+
+  /** @param {number} kind @param {number} index @param {number} dt */
+  #integrateVerticalBody(kind, index, dt) {
+    if (this.#bodyValue(kind, index, "verticalMode") !== VERTICAL_MODE.FALLING) return;
+    if (!hasVerticalCapability(this.#bodyValue(kind, index, "verticalCapabilities"), VERTICAL_CAPABILITY.GRAVITY)) return;
+    const previousY = this.#bodyValue(kind, index, "worldY");
+    const velocityY = Math.max(
+      VERTICAL_PHYSICS.terminalVelocityMetersPerSecond,
+      this.#bodyValue(kind, index, "verticalVelocityY") + VERTICAL_PHYSICS.gravityMetersPerSecondSquared * dt,
+    );
+    const nextY = previousY + velocityY * dt;
+    const fromX = this.#bodyValue(kind, index, "previousX");
+    const fromZ = this.#bodyValue(kind, index, "previousZ");
+    const toX = this.#bodyValue(kind, index, "x");
+    const toZ = this.#bodyValue(kind, index, "z");
+    const capabilities = this.#bodyValue(kind, index, "verticalCapabilities");
+    let ceiling = Infinity;
+    let passed = 0;
+    for (let pass = 0; pass < VERTICAL_PHYSICS.maximumFloorPlanesPerStep; pass += 1) {
+      let floorLayer = -1;
+      let floorY = -Infinity;
+      if (hasVerticalCapability(capabilities, VERTICAL_CAPABILITY.FLOOR_SUPPORT)) {
+        for (let layerIndex = 0; layerIndex < this.layerBaseY.length; layerIndex += 1) {
+          const candidateY = this.layerBaseY[layerIndex];
+          if (
+            candidateY > previousY + VERTICAL_PHYSICS.landingSeparationEpsilonMeters
+            || candidateY < nextY - VERTICAL_PHYSICS.supportContactToleranceMeters
+            || candidateY >= ceiling - 1e-7
+            || candidateY < floorY
+          ) continue;
+          floorY = candidateY;
+          floorLayer = layerIndex;
+        }
+      }
+      let elevatorIndex = -1;
+      let elevatorY = -Infinity;
+      if (hasVerticalCapability(capabilities, VERTICAL_CAPABILITY.ELEVATOR_SUPPORT | VERTICAL_CAPABILITY.CAN_RIDE_ELEVATOR)) {
+        for (let candidate = 0; candidate < this.elevators.activeCount; candidate += 1) {
+          const candidateY = this.elevators.worldY[candidate];
+          if (
+            candidateY > previousY + VERTICAL_PHYSICS.landingSeparationEpsilonMeters
+            || candidateY < nextY - VERTICAL_PHYSICS.supportContactToleranceMeters
+            || candidateY >= ceiling - 1e-7
+            || candidateY < elevatorY
+          ) continue;
+          elevatorY = candidateY;
+          elevatorIndex = candidate;
+        }
+      }
+      if (floorLayer < 0 && elevatorIndex < 0) break;
+      const useElevator = elevatorIndex >= 0 && (floorLayer < 0 || elevatorY > floorY + 1e-7);
+      const planeY = useElevator ? elevatorY : floorY;
+      const denominator = previousY - nextY;
+      const fraction = denominator <= 1e-9 ? 0 : Math.max(0, Math.min(1, (previousY - planeY) / denominator));
+      const x = fromX + (toX - fromX) * fraction;
+      const z = fromZ + (toZ - fromZ) * fraction;
+      if (useElevator) {
+        const half = this.elevators.platformWidth[elevatorIndex] / 2;
+        // Leaving a moving platform must not reacquire it from the start-of-
+        // tick interpolation point. The resolved X/Z endpoint owns contact.
+        if (this.#bodyOverElevator(kind, index, elevatorIndex)) {
+          this.#setBodyValue(kind, index, "x", x);
+          this.#setBodyValue(kind, index, "z", z);
+          this.#setBodyValue(kind, index, "worldY", planeY);
+          this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.SUPPORTED);
+          this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.ELEVATOR);
+          this.#setBodyValue(kind, index, "supportId", this.elevators.id[elevatorIndex]);
+          this.#setBodyValue(kind, index, "verticalVelocityY", this.elevators.velocityY[elevatorIndex]);
+          return;
+        }
+        ceiling = planeY;
+        continue;
+      }
+      const map = this.layerMaps[floorLayer];
+      const inBounds = x >= 0 && z >= 0 && x < map.width && z < map.height;
+      const hole = inBounds ? this.#bodyFitsHoleAt(kind, index, floorLayer, x, z) : null;
+      const rejectedByFrame = this.#bodyRejectedByUpperAperture(kind, index, floorLayer);
+      if (hole || (!rejectedByFrame && this.#floorHasElevatorAperture(floorLayer, x, z))) {
+        this.#setBodyValue(kind, index, "layerIndex", floorLayer);
+        this.#setBodyValue(kind, index, "latestApertureFit", hole ? 1 : 0);
+        passed += 1;
+        this.holeMetrics.floorPlanePassed += 1;
+        this.#recordHoleEvent("FLOOR_PLANE_PASSED", kind, index, {
+          holeId: hole?.id ?? null,
+          crossingFraction: fraction,
+        });
+        ceiling = planeY;
+        continue;
+      }
+      // A load rejected by an upper elevator frame is deliberately below that
+      // frame and retains its source-layer association. It must not be caught
+      // by the same upper floor on the following swept support check.
+      if (rejectedByFrame) {
+        ceiling = planeY;
+        continue;
+      }
+      if (!inBounds) {
+        ceiling = planeY;
+        continue;
+      }
+      this.#setBodyValue(kind, index, "x", x);
+      this.#setBodyValue(kind, index, "z", z);
+      this.#setBodyValue(kind, index, "worldY", planeY);
+      this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.SUPPORTED);
+      this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.FLOOR);
+      this.#setBodyValue(kind, index, "supportId", 0);
+      this.#setBodyValue(kind, index, "verticalVelocityY", 0);
+      this.#setBodyValue(kind, index, "layerIndex", floorLayer);
+      this.#setBodyValue(kind, index, "transitConnectorId", 0);
+      this.#setBodyValue(kind, index, "latestApertureFit", hole ? 1 : 0);
+      if (kind === BODY_PLAYER) this.#resolvePlayerGrid(false);
+      else if (kind === BODY_ENEMY_WIZARD) this.#resolveEnemyGrid(index, false);
+      else if (kind === BODY_ROCK) this.#resolveRockGrid(index, false);
+      else this.#resolveDeadBodyGrid(index, false);
+      this.#resolveLandingOverlap(kind, index);
+      if (floorLayer === 0 || this.layerBaseY.every((height) => height >= planeY)) this.holeMetrics.bottomLanding += 1;
+      else this.holeMetrics.intermediateLanding += 1;
+      this.#recordHoleEvent("FLOOR_LANDED", kind, index, { crossingFraction: fraction, floorsPassed: passed });
+      return;
+    }
+    this.#setBodyValue(kind, index, "worldY", nextY);
+    this.#setBodyValue(kind, index, "verticalVelocityY", velocityY);
+    let lowest = Infinity;
+    for (let layerIndex = 0; layerIndex < this.layerBaseY.length; layerIndex += 1) lowest = Math.min(lowest, this.layerBaseY[layerIndex]);
+    if (nextY < lowest - VERTICAL_PHYSICS.voidRescueDepthMeters) {
+      this.#setBodyValue(kind, index, "worldY", lowest);
+      this.#setBodyValue(kind, index, "verticalVelocityY", 0);
+      this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.SUPPORTED);
+      this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.FLOOR);
+      this.#setBodyValue(kind, index, "supportId", 0);
+      this.holeMetrics.voidRescue += 1;
+      this.#recordHoleEvent("VOID_RESCUE", kind, index);
+    }
+  }
+
+  /** Re-enables low-body contacts immediately after a floor landing. */
+  #resolveLandingOverlap(kind, index) {
+    for (let pass = 0; pass < DYNAMIC_PHYSICS.solverIterations; pass += 1) {
+      this.#resolveLandingOverlapPass(kind, index);
+    }
+  }
+
+  /** @param {number} kind @param {number} index */
+  #resolveLandingOverlapPass(kind, index) {
+    if (kind === BODY_PLAYER) {
+      for (let rock = 0; rock < this.rocks.activeCount; rock += 1) {
+        this.#resolvePlayerRock(rock, false);
+      }
+      for (let enemy = 0; enemy < this.enemies.activeCount; enemy += 1) {
+        this.#resolvePlayerEnemy(enemy, false);
+      }
+      for (let body = 0; body < this.dynamicDeadBodies.activeCount; body += 1) {
+        this.#resolvePlayerDeadBody(body, false);
+      }
+      return;
+    }
+    if (kind === BODY_ENEMY_WIZARD) {
+      this.#resolvePlayerEnemy(index, false);
+      for (let rock = 0; rock < this.rocks.activeCount; rock += 1) {
+        this.#resolveEnemyRock(index, rock, false);
+      }
+      for (let other = 0; other < this.enemies.activeCount; other += 1) {
+        if (other !== index) this.#resolveEnemyEnemy(Math.min(index, other), Math.max(index, other), false);
+      }
+      for (let body = 0; body < this.dynamicDeadBodies.activeCount; body += 1) {
+        this.#resolveEnemyDeadBody(index, body, false);
+      }
+      return;
+    }
+    if (kind === BODY_ROCK) {
+      this.#resolvePlayerRock(index, false);
+      for (let enemy = 0; enemy < this.enemies.activeCount; enemy += 1) {
+        this.#resolveEnemyRock(enemy, index, false);
+      }
+      for (let other = 0; other < this.rocks.activeCount; other += 1) {
+        if (other !== index) this.#resolveRockRock(Math.min(index, other), Math.max(index, other), false);
+      }
+      for (let body = 0; body < this.dynamicDeadBodies.activeCount; body += 1) {
+        this.#resolveRockDeadBody(index, body, false);
+      }
+      return;
+    }
+    this.#resolvePlayerDeadBody(index, false);
+    for (let enemy = 0; enemy < this.enemies.activeCount; enemy += 1) {
+      this.#resolveEnemyDeadBody(enemy, index, false);
+    }
+    for (let rock = 0; rock < this.rocks.activeCount; rock += 1) {
+      this.#resolveRockDeadBody(rock, index, false);
+    }
+    for (let other = 0; other < this.dynamicDeadBodies.activeCount; other += 1) {
+      if (other !== index) {
+        this.#resolveDeadBodyDeadBody(Math.min(index, other), Math.max(index, other), false);
+      }
+    }
+  }
+
+  #syncRuntimeViewToPlayerLayer() {
+    const layerId = this.layerIds[this.player.layerIndex];
+    if (!layerId || this.scenario.activeLayer.id === layerId) return;
+    if (!this.scenario.activateLayer(layerId)) return;
+    this.map = this.scenario.map;
+    this.mapRevision += 1;
+    this.navigationField.reset(this.map);
+    this.destinationFields.reset(this.map);
+    this.reachability.reset(this.map);
+    this.broadphase.reset(this.map);
+    this.#refreshPreparedAuthoringState();
+  }
+
+  #verticalResolutionSystem(dt) {
+    this.#resolveElevatorRiderAfterHorizontal(BODY_PLAYER, 0);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#resolveElevatorRiderAfterHorizontal(BODY_ENEMY_WIZARD, index);
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.#resolveElevatorRiderAfterHorizontal(BODY_ROCK, index);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#resolveElevatorRiderAfterHorizontal(BODY_ENEMY_WIZARD_BODY, index);
+    }
+    this.#captureFloorHoleForBody(BODY_PLAYER, 0);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#captureFloorHoleForBody(BODY_ENEMY_WIZARD, index);
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.#captureFloorHoleForBody(BODY_ROCK, index);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#captureFloorHoleForBody(BODY_ENEMY_WIZARD_BODY, index);
+    }
+    this.#integrateVerticalBody(BODY_PLAYER, 0, dt);
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#integrateVerticalBody(BODY_ENEMY_WIZARD, index, dt);
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      this.#integrateVerticalBody(BODY_ROCK, index, dt);
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      this.#integrateVerticalBody(BODY_ENEMY_WIZARD_BODY, index, dt);
+    }
+    this.#syncRuntimeViewToPlayerLayer();
   }
 
   /** @param {number} dt */
@@ -4370,7 +5588,7 @@ export class Simulation {
     for (let pass = 0; pass < 8; pass += 1) {
       if (
         !firstSolidContact(
-          this.map,
+          this.layerMaps[player.layerIndex] ?? this.map,
           player.x,
           player.z,
           player.radius,
@@ -4409,7 +5627,7 @@ export class Simulation {
     for (let pass = 0; pass < 8; pass += 1) {
       if (
         !firstSolidContact(
-          this.map,
+          this.layerMaps[pool.layerIndex[index]] ?? this.map,
           pool.x[index],
           pool.z[index],
           pool.radius[index],
@@ -4448,7 +5666,11 @@ export class Simulation {
     const pool = this.rocks;
     for (let pass = 0; pass < 8; pass += 1) {
       if (
-        !this.#dynamicBodyGridContact(this.map, index, this._gridContact)
+        !this.#dynamicBodyGridContact(
+          this.layerMaps[pool.layerIndex[index]] ?? this.map,
+          index,
+          this._gridContact,
+        )
       ) {
         break;
       }
@@ -4475,7 +5697,7 @@ export class Simulation {
     for (let pass = 0; pass < 8; pass += 1) {
       if (
         !firstSolidContact(
-          this.map,
+          this.layerMaps[pool.layerIndex[index]] ?? this.map,
           pool.x[index],
           pool.z[index],
           pool.radius[index],
@@ -4507,6 +5729,7 @@ export class Simulation {
 
   /** @param {number} index @param {boolean} record */
   #resolvePlayerRock(index, record) {
+    if (!this.#verticalBodiesCollide(BODY_PLAYER, 0, BODY_ROCK, index)) return;
     const player = this.player;
     const pool = this.rocks;
     if (
@@ -4557,6 +5780,12 @@ export class Simulation {
 
   /** @param {number} enemyIndex @param {number} rockIndex @param {boolean} record */
   #resolveEnemyRock(enemyIndex, rockIndex, record) {
+    if (!this.#verticalBodiesCollide(
+      BODY_ENEMY_WIZARD,
+      enemyIndex,
+      BODY_ROCK,
+      rockIndex,
+    )) return;
     const enemies = this.enemies;
     const rocks = this.rocks;
     if (
@@ -4623,6 +5852,7 @@ export class Simulation {
 
   /** @param {number} enemyIndex @param {boolean} record */
   #resolvePlayerEnemy(enemyIndex, record) {
+    if (!this.#verticalBodiesCollide(BODY_PLAYER, 0, BODY_ENEMY_WIZARD, enemyIndex)) return;
     const player = this.player;
     const enemies = this.enemies;
     if (
@@ -4693,6 +5923,12 @@ export class Simulation {
 
   /** @param {number} left @param {number} right @param {boolean} record */
   #resolveEnemyEnemy(left, right, record) {
+    if (!this.#verticalBodiesCollide(
+      BODY_ENEMY_WIZARD,
+      left,
+      BODY_ENEMY_WIZARD,
+      right,
+    )) return;
     const pool = this.enemies;
     if (
       !circleCircleContact(
@@ -4761,6 +5997,7 @@ export class Simulation {
 
   /** @param {number} left @param {number} right @param {boolean} record */
   #resolveRockRock(left, right, record) {
+    if (!this.#verticalBodiesCollide(BODY_ROCK, left, BODY_ROCK, right)) return;
     const pool = this.rocks;
     if (
       !this.#dynamicBodyPairContact(left, right, this._bodyContact)
@@ -4817,6 +6054,12 @@ export class Simulation {
 
   /** @param {number} bodyIndex @param {boolean} record */
   #resolvePlayerDeadBody(bodyIndex, record) {
+    if (!this.#verticalBodiesCollide(
+      BODY_PLAYER,
+      0,
+      BODY_ENEMY_WIZARD_BODY,
+      bodyIndex,
+    )) return;
     const player = this.player;
     const bodies = this.dynamicDeadBodies;
     if (
@@ -4870,6 +6113,12 @@ export class Simulation {
 
   /** @param {number} enemyIndex @param {number} bodyIndex @param {boolean} record */
   #resolveEnemyDeadBody(enemyIndex, bodyIndex, record) {
+    if (!this.#verticalBodiesCollide(
+      BODY_ENEMY_WIZARD,
+      enemyIndex,
+      BODY_ENEMY_WIZARD_BODY,
+      bodyIndex,
+    )) return;
     const enemies = this.enemies;
     const bodies = this.dynamicDeadBodies;
     if (
@@ -4939,6 +6188,12 @@ export class Simulation {
 
   /** @param {number} rockIndex @param {number} bodyIndex @param {boolean} record */
   #resolveRockDeadBody(rockIndex, bodyIndex, record) {
+    if (!this.#verticalBodiesCollide(
+      BODY_ROCK,
+      rockIndex,
+      BODY_ENEMY_WIZARD_BODY,
+      bodyIndex,
+    )) return;
     const rocks = this.rocks;
     const bodies = this.dynamicDeadBodies;
     if (
@@ -4998,6 +6253,12 @@ export class Simulation {
 
   /** @param {number} leftIndex @param {number} rightIndex @param {boolean} record */
   #resolveDeadBodyDeadBody(leftIndex, rightIndex, record) {
+    if (!this.#verticalBodiesCollide(
+      BODY_ENEMY_WIZARD_BODY,
+      leftIndex,
+      BODY_ENEMY_WIZARD_BODY,
+      rightIndex,
+    )) return;
     const bodies = this.dynamicDeadBodies;
     if (
       !circleCircleContact(
@@ -5150,6 +6411,7 @@ export class Simulation {
       definitionRevision: spell.currentRevision,
       effectId,
       effectSeed,
+      layerIndex: player.layerIndex,
     });
     if (id !== 0) {
       this.spellCooldowns[spell.code] = Number(definition.cast.cooldown);
@@ -5183,6 +6445,7 @@ export class Simulation {
       ownerId: player.id,
       ownerKind: PROJECTILE_OWNER_KIND.player,
       ownerTeam: ACTOR_TEAM.player,
+      layerIndex: player.layerIndex,
     });
     if (id !== 0) player.cooldown = PROJECTILE.cooldown;
   }
@@ -5220,6 +6483,8 @@ export class Simulation {
 
       const startX = pool.x[index];
       const startZ = pool.z[index];
+      const projectileLayerIndex = pool.layerIndex[index];
+      const projectileMap = this.layerMaps[projectileLayerIndex] ?? this.map;
       const deltaX = pool.vx[index] * dt;
       const deltaZ = pool.vz[index] * dt;
       const distance = Math.hypot(deltaX, deltaZ);
@@ -5258,7 +6523,7 @@ export class Simulation {
         const alpha = step / steps;
         const testX = startX + deltaX * alpha;
         const testZ = startZ + deltaZ * alpha;
-        if (firstSolidContact(this.map, testX, testZ, pool.radius[index], this._gridContact)) {
+        if (firstSolidContact(projectileMap, testX, testZ, pool.radius[index], this._gridContact)) {
           hitKind = "cell";
           hitX = testX;
           hitZ = testZ;
@@ -5266,6 +6531,7 @@ export class Simulation {
         }
         for (let candidate = 0; candidate < rockCandidateCount; candidate += 1) {
           const rockIndex = this.broadphase.rockCandidates[candidate];
+          if (this.rocks.layerIndex[rockIndex] !== projectileLayerIndex) continue;
           if (this.#circleDynamicBodyContact(
             testX,
             testZ,
@@ -5283,6 +6549,7 @@ export class Simulation {
         if (hitKind) break;
         for (let candidate = 0; candidate < deadBodyCandidateCount; candidate += 1) {
           const bodyIndex = this.broadphase.deadBodyCandidates[candidate];
+          if (this.dynamicDeadBodies.layerIndex[bodyIndex] !== projectileLayerIndex) continue;
           if (
             Math.hypot(
               testX - this.dynamicDeadBodies.x[bodyIndex],
@@ -5299,6 +6566,8 @@ export class Simulation {
         if (hitKind) break;
         if (pool.ownerTeam[index] === ACTOR_TEAM.enemy) {
           if (
+            this.player.layerIndex === projectileLayerIndex
+            &&
             Math.hypot(testX - this.player.x, testZ - this.player.z)
             <= pool.radius[index] + this.player.radius
           ) {
@@ -5309,6 +6578,7 @@ export class Simulation {
         } else if (pool.ownerTeam[index] === ACTOR_TEAM.player) {
           for (let candidate = 0; candidate < enemyCandidateCount; candidate += 1) {
             const enemyIndex = this.broadphase.enemyCandidates[candidate];
+            if (this.enemies.layerIndex[enemyIndex] !== projectileLayerIndex) continue;
             if (
               Math.hypot(
                 testX - this.enemies.x[enemyIndex],
@@ -5348,6 +6618,7 @@ export class Simulation {
             sourceKind: pool.ownerKind[index],
             sourceId: pool.ownerId[index],
             sourceTeam: pool.ownerTeam[index],
+            layerIndex: pool.layerIndex[index],
             x: Number(event.originX),
             z: Number(event.originZ),
             radius: PERCEPTIVE_WIZARD.fireballHearingMeters,
@@ -5393,6 +6664,7 @@ export class Simulation {
     );
     for (let candidate = 0; candidate < candidateCount; candidate += 1) {
       const index = this.broadphase.enemyCandidates[candidate];
+      if (this.enemies.layerIndex[index] !== sounds.layerIndex[eventIndex]) continue;
       if (!(this.enemies.health[index] > 0)) continue;
       this.soundEventMetrics.listenerChecks += 1;
       const hearing = soundHearingCheck(
@@ -5462,6 +6734,7 @@ export class Simulation {
     );
     for (let candidate = 0; candidate < candidateCount; candidate += 1) {
       const index = this.broadphase.enemyCandidates[candidate];
+      if (this.enemies.layerIndex[index] !== event.layerIndex) continue;
       if (!(this.enemies.health[index] > 0)) continue;
       const hearing = fireballHearingCheck(
         this.enemies.x[index],
@@ -5608,6 +6881,8 @@ export class Simulation {
       id: this.nextExplosionId,
       tick: this.tickCount + 1,
       projectileId: pool.id[projectileIndex],
+      layerIndex: pool.layerIndex[projectileIndex],
+      layerId: this.layerIds[pool.layerIndex[projectileIndex]] ?? null,
       spellId: spell?.id ?? FIREBALL_SPELL_ID,
       spellCode,
       definitionRevision,
@@ -5661,6 +6936,7 @@ export class Simulation {
 
   /** @param {Record<string, any>} event */
   #applyExplosionToPlayer(event) {
+    if (this.player.layerIndex !== event.layerIndex) return;
     let response = computeExplosionResponse({
       originX: event.originX,
       originZ: event.originZ,
@@ -5685,7 +6961,7 @@ export class Simulation {
     );
     const blocked = hasBlastResponse
       ? gridRayBlocked(
-        this.map,
+        this.layerMaps[event.layerIndex] ?? this.map,
         event.originX,
         event.originZ,
         this.player.x,
@@ -5724,6 +7000,7 @@ export class Simulation {
   /** @param {Record<string, any>} event @param {number} index */
   #applyExplosionToEnemy(event, index) {
     const pool = this.enemies;
+    if (pool.layerIndex[index] !== event.layerIndex) return;
     let response = computeExplosionResponse({
       originX: event.originX,
       originZ: event.originZ,
@@ -5748,7 +7025,7 @@ export class Simulation {
     );
     const blocked = hasBlastResponse
       ? gridRayBlocked(
-        this.map,
+        this.layerMaps[event.layerIndex] ?? this.map,
         event.originX,
         event.originZ,
         pool.x[index],
@@ -5947,6 +7224,7 @@ export class Simulation {
 
   /** @param {Record<string, any>} event @param {number} index */
   #applyExplosionToRock(event, index) {
+    if (this.rocks.layerIndex[index] !== event.layerIndex) return;
     const response = computeExplosionResponse({
       originX: event.originX,
       originZ: event.originZ,
@@ -5961,7 +7239,7 @@ export class Simulation {
     });
     if (!response) return;
     const blocked = gridRayBlocked(
-      this.map,
+      this.layerMaps[event.layerIndex] ?? this.map,
       event.originX,
       event.originZ,
       this.rocks.x[index],
@@ -5993,6 +7271,7 @@ export class Simulation {
   /** @param {Record<string, any>} event @param {number} index */
   #applyExplosionToDeadBody(event, index) {
     const pool = this.dynamicDeadBodies;
+    if (pool.layerIndex[index] !== event.layerIndex) return;
     let response = computeExplosionResponse({
       originX: event.originX,
       originZ: event.originZ,
@@ -6017,7 +7296,7 @@ export class Simulation {
     );
     const blocked = hasBlastResponse
       ? gridRayBlocked(
-        this.map,
+        this.layerMaps[event.layerIndex] ?? this.map,
         event.originX,
         event.originZ,
         pool.x[index],
@@ -6093,6 +7372,7 @@ export class Simulation {
         event.originZ,
         event.nx,
         event.nz,
+        Number(event.layerIndex ?? this.player.layerIndex),
       );
       return;
     }
@@ -6102,6 +7382,8 @@ export class Simulation {
     const normalZ = Number(event.nz);
     const emission = definition.emission;
     const lifecycle = definition.particleLifecycle;
+    const layerIndex = Number(event.layerIndex ?? this.player.layerIndex);
+    const particleMap = this.layerMaps[layerIndex] ?? this.map;
     const normalLength = Math.hypot(normalX, normalZ);
     const outwardX = normalLength > 1e-9 ? normalX / normalLength : 1;
     const outwardZ = normalLength > 1e-9 ? normalZ / normalLength : 0;
@@ -6176,7 +7458,7 @@ export class Simulation {
       );
       if (
         !sanitizePointAgainstGrid(
-          this.map,
+          particleMap,
           x,
           z,
           outwardX,
@@ -6203,6 +7485,7 @@ export class Simulation {
         effectSeed: event.effectSeed,
         sampleOrdinal: ordinal,
         sampleSeed,
+        layerIndex,
       });
       if (id === 0) continue;
       const sampledHorizontalSpeed = Math.hypot(vx, vz);
@@ -6270,8 +7553,9 @@ export class Simulation {
     this.latestSpellSamples.set(Number(event.spellCode), statistics);
   }
 
-  /** @param {number} x @param {number} z @param {number} normalX @param {number} normalZ */
-  #emitLegacyParticles(x, z, normalX, normalZ) {
+  /** @param {number} x @param {number} z @param {number} normalX @param {number} normalZ @param {number} layerIndex */
+  #emitLegacyParticles(x, z, normalX, normalZ, layerIndex) {
+    const particleMap = this.layerMaps[layerIndex] ?? this.map;
     const normalLength = Math.hypot(normalX, normalZ);
     const outwardX = normalLength > 1e-9 ? normalX / normalLength : 1;
     const outwardZ = normalLength > 1e-9 ? normalZ / normalLength : 0;
@@ -6313,7 +7597,7 @@ export class Simulation {
       );
       if (
         !sanitizePointAgainstGrid(
-          this.map,
+          particleMap,
           x,
           z,
           outwardX,
@@ -6334,6 +7618,7 @@ export class Simulation {
         vz,
         lifetime,
         size,
+        layerIndex,
       });
     }
   }
@@ -6348,6 +7633,7 @@ export class Simulation {
         pool.definitionRevision[index],
       );
       const collision = definition?.collision ?? null;
+      const particleMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
       const gravity = Number(definition?.emission.gravity ?? PARTICLE.gravity);
       pool.age[index] += dt;
       if (pool.age[index] >= pool.lifetime[index]) {
@@ -6358,10 +7644,10 @@ export class Simulation {
       const wallCollisionEnabled = this.debugFlags.particleWallCollision
         && (collision?.wallCollision ?? true);
       if (wallCollisionEnabled) {
-        if (this.map.get(Math.floor(pool.x[index]), Math.floor(pool.z[index])) === 1) {
+        if (particleMap.get(Math.floor(pool.x[index]), Math.floor(pool.z[index])) === 1) {
           if (
             !sanitizePointAgainstGrid(
-              this.map,
+              particleMap,
               pool.x[index],
               pool.z[index],
               -pool.vx[index],
@@ -6377,7 +7663,7 @@ export class Simulation {
           pool.x[index] = this._particleSpawnPoint.x;
           pool.z[index] = this._particleSpawnPoint.z;
         }
-        this.#advanceParticleAgainstWalls(index, dt, collision);
+        this.#advanceParticleAgainstWalls(index, dt, collision, particleMap);
       } else {
         pool.x[index] += pool.vx[index] * dt;
         pool.z[index] += pool.vz[index] * dt;
@@ -6423,8 +7709,8 @@ export class Simulation {
     }
   }
 
-  /** @param {number} index @param {number} dt @param {Record<string,any>|null} collision */
-  #advanceParticleAgainstWalls(index, dt, collision) {
+  /** @param {number} index @param {number} dt @param {Record<string,any>|null} collision @param {GridMap} particleMap */
+  #advanceParticleAgainstWalls(index, dt, collision, particleMap) {
     const pool = this.particles;
     let remaining = dt;
     for (
@@ -6438,7 +7724,7 @@ export class Simulation {
       const endZ = Math.fround(startZ + pool.vz[index] * remaining);
       if (
         !sweepPointAgainstGrid(
-          this.map,
+          particleMap,
           startX,
           startZ,
           endX,
@@ -7065,9 +8351,42 @@ export class Simulation {
         vz: this.rocks.vz[index],
         radius: this.rocks.radius[index],
         massKg: this.rocks.massKg[index],
+        worldY: this.rocks.worldY[index],
+        previousWorldY: this.rocks.previousWorldY[index],
+        verticalVelocityY: this.rocks.verticalVelocityY[index],
+        verticalMode: VERTICAL_MODE_NAMES[this.rocks.verticalMode[index]] ?? "unknown",
+        verticalModeCode: this.rocks.verticalMode[index],
+        supportKind: SUPPORT_KIND_NAMES[this.rocks.supportKind[index]] ?? "none",
+        supportKindCode: this.rocks.supportKind[index],
+        supportId: this.rocks.supportId[index] || null,
+        layerId: this.layerIds[this.rocks.layerIndex[index]] ?? null,
+        layerIndex: this.rocks.layerIndex[index],
+        transitConnectorId: this.rocks.transitConnectorId[index] || null,
+        canRideElevator: hasVerticalCapability(
+          this.rocks.verticalCapabilities[index],
+          VERTICAL_CAPABILITY.CAN_RIDE_ELEVATOR,
+        ),
+        canActivateElevator: hasVerticalCapability(
+          this.rocks.verticalCapabilities[index],
+          VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR,
+        ),
+        footprint: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+          ? {
+            type: "rectangle",
+            halfWidth: this.rocks.halfWidth[index],
+            halfDepth: this.rocks.halfDepth[index],
+            rotation: this.rocks.rotation[index],
+          }
+          : { type: "circle", radius: this.rocks.radius[index] },
+        latestApertureFit: this.rocks.latestApertureFit[index] === 0
+          ? null
+          : this.rocks.latestApertureFit[index] > 0,
       };
     }
 
+    // Rendering consumes the currently active layer projection.  Encounter
+    // spawning uses scenario.encounterObelisk instead, so a map-wide marker
+    // never leaks into every floor's visual map.
     const obelisks = this.scenario.entities
       .filter((entity) => entity.kind === "obelisk")
       .map((entity) => ({
@@ -7135,6 +8454,21 @@ export class Simulation {
         ...tacticalState,
         ...(perceptionState ?? {}),
         lineOfSight: Boolean(this.enemies.lineOfSight[index]),
+        worldY: this.enemies.worldY[index],
+        previousWorldY: this.enemies.previousWorldY[index],
+        verticalVelocityY: this.enemies.verticalVelocityY[index],
+        verticalMode: VERTICAL_MODE_NAMES[this.enemies.verticalMode[index]] ?? "unknown",
+        verticalModeCode: this.enemies.verticalMode[index],
+        supportKind: SUPPORT_KIND_NAMES[this.enemies.supportKind[index]] ?? "none",
+        supportKindCode: this.enemies.supportKind[index],
+        supportId: this.enemies.supportId[index] || null,
+        layerId: this.layerIds[this.enemies.layerIndex[index]] ?? null,
+        layerIndex: this.enemies.layerIndex[index],
+        transitConnectorId: this.enemies.transitConnectorId[index] || null,
+        footprint: { type: "circle", radius: this.enemies.radius[index] },
+        latestApertureFit: this.enemies.latestApertureFit[index] === 0
+          ? null
+          : this.enemies.latestApertureFit[index] > 0,
       };
     }
 
@@ -7164,6 +8498,14 @@ export class Simulation {
         radius: this.dynamicDeadBodies.radius[index],
         massKg: this.dynamicDeadBodies.massKg[index],
         quietTickCount: this.dynamicDeadBodies.quietTickCount[index],
+        worldY: this.dynamicDeadBodies.worldY[index],
+        previousWorldY: this.dynamicDeadBodies.previousWorldY[index],
+        verticalVelocityY: this.dynamicDeadBodies.verticalVelocityY[index],
+        verticalMode: VERTICAL_MODE_NAMES[this.dynamicDeadBodies.verticalMode[index]] ?? "unknown",
+        supportKind: SUPPORT_KIND_NAMES[this.dynamicDeadBodies.supportKind[index]] ?? "none",
+        supportId: this.dynamicDeadBodies.supportId[index] || null,
+        layerId: this.layerIds[this.dynamicDeadBodies.layerIndex[index]] ?? null,
+        layerIndex: this.dynamicDeadBodies.layerIndex[index],
       };
     }
     const inertDeadBodies = new Array(this.inertDeadBodies.length);
@@ -7194,6 +8536,14 @@ export class Simulation {
         radius: this.inertDeadBodies.radius[index],
         massKg: this.inertDeadBodies.massKg[index],
         quietTickCount: DEAD_BODY.quietTicks,
+        worldY: this.inertDeadBodies.worldY[index],
+        previousWorldY: this.inertDeadBodies.worldY[index],
+        verticalVelocityY: 0,
+        verticalMode: "supported",
+        supportKind: "floor",
+        supportId: null,
+        layerId: this.layerIds[this.inertDeadBodies.layerIndex[index]] ?? null,
+        layerIndex: this.inertDeadBodies.layerIndex[index],
       };
     }
 
@@ -7216,6 +8566,8 @@ export class Simulation {
         definitionRevision: this.projectiles.definitionRevision[index],
         effectId: this.projectiles.effectId[index],
         effectSeed: this.projectiles.effectSeed[index],
+        layerIndex: this.projectiles.layerIndex[index],
+        layerId: this.layerIds[this.projectiles.layerIndex[index]] ?? null,
         index,
         x: this.projectiles.x[index],
         z: this.projectiles.z[index],
@@ -7242,6 +8594,8 @@ export class Simulation {
         effectSeed: this.particles.effectSeed[index],
         sampleOrdinal: this.particles.sampleOrdinal[index],
         sampleSeed: this.particles.sampleSeed[index],
+        layerIndex: this.particles.layerIndex[index],
+        layerId: this.layerIds[this.particles.layerIndex[index]] ?? null,
         index,
         x: this.particles.x[index],
         y: this.particles.y[index],
@@ -7296,6 +8650,7 @@ export class Simulation {
     const recentPerceptionEvents = this.perceptionEvents
       .toArray(PERCEPTIVE_WIZARD.perceptionSnapshotEventCount)
       .map(cloneUnknown);
+    const recentHoleEvents = this.holeEvents.toArray(32).map(cloneUnknown);
     const currentSoundEvents = new Array(this.soundEvents.activeCount);
     for (let index = 0; index < currentSoundEvents.length; index += 1) {
       currentSoundEvents[index] = this.#soundEventSnapshot(index);
@@ -7303,6 +8658,35 @@ export class Simulation {
     const recentSoundEvents = this.soundEventHistory
       .toArray(MOVEMENT_SOUND.snapshotEventCount)
       .map(cloneUnknown);
+    const elevators = new Array(this.elevators.activeCount);
+    for (let index = 0; index < elevators.length; index += 1) {
+      elevators[index] = {
+        kind: "elevator",
+        id: this.elevators.id[index],
+        connectorId: this.elevators.authoringId[index],
+        x: this.elevators.x[index],
+        z: this.elevators.z[index],
+        currentY: this.elevators.worldY[index],
+        previousY: this.elevators.previousWorldY[index],
+        velocityY: this.elevators.velocityY[index],
+        lowerY: this.elevators.lowerY[index],
+        upperY: this.elevators.upperY[index],
+        lowerLayerId: this.layerIds[this.elevators.lowerLayerIndex[index]],
+        upperLayerId: this.layerIds[this.elevators.upperLayerIndex[index]],
+        platformWidth: this.elevators.platformWidth[index],
+        apertureWidth: this.elevators.apertureWidth[index],
+        currentStop: ELEVATOR_STOP_NAMES[this.elevators.currentStop[index]],
+        requestedStop: ELEVATOR_STOP_NAMES[this.elevators.requestedStop[index]],
+        motionState: ELEVATOR_MOTION_NAMES[this.elevators.motion[index]],
+        dwellTicksRemaining: this.elevators.dwellRemaining[index],
+        activatorCount: this.elevators.activatorCount[index],
+        supportedBodyCount: this.elevators.supportedBodyCount[index],
+        rejectedLoadCount: this.elevators.rejectedLoadCount[index],
+        failedEjectionCount: this.elevators.failedEjectionCount[index],
+      };
+    }
+    const runtimeLayerId = this.layerIds[this.player.layerIndex]
+      ?? this.scenario.startLayerId;
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
@@ -7350,7 +8734,7 @@ export class Simulation {
       particleProfile: this.particleProfile,
       scenarioVersion: SCENARIO_VERSION,
       authoringMapVersion: AUTHORING_MAP_VERSION,
-      runtimeLayerId: this.scenario.activeLayer.id,
+      runtimeLayerId,
       authoring: this._preparedAuthoringState.authoring,
       map: {
         version: MAP_VERSION,
@@ -7362,6 +8746,8 @@ export class Simulation {
         occluderCells: this._preparedAuthoringState.occluderCells,
         surface: this._preparedAuthoringState.surface,
         structure: this._preparedAuthoringState.structure,
+        holes: (this.layerHoles[this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0] ?? [])
+          .map((hole) => ({ ...hole })),
         playerSpawn: { ...this.map.playerSpawn },
       },
       player: {
@@ -7370,6 +8756,22 @@ export class Simulation {
         ...this.player,
         movementMode: PLAYER_MOVEMENT_MODE_NAMES[this.player.movementMode] ?? "idle",
         movementModeCode: this.player.movementMode,
+        layerId: runtimeLayerId,
+        verticalMode: VERTICAL_MODE_NAMES[this.player.verticalMode] ?? "unknown",
+        verticalModeCode: this.player.verticalMode,
+        supportKind: SUPPORT_KIND_NAMES[this.player.supportKind] ?? "none",
+        supportKindCode: this.player.supportKind,
+        supportId: this.player.supportId || null,
+        transitConnectorId: this.player.transitConnectorId || null,
+        footprint: { type: "circle", radius: this.player.radius },
+        latestApertureFit: this.player.latestApertureFit === 0
+          ? null
+          : this.player.latestApertureFit > 0,
+        holeDebug: {
+          nextFloorY: this.#nextFloorPlaneBelow(this.player.worldY),
+          candidateHoleId: this._holeCandidate?.id ?? null,
+          airControl: { ...this._rimAttraction },
+        },
         movement: {
           mode: PLAYER_MOVEMENT_MODE_NAMES[this.player.movementMode] ?? "idle",
           targetDistanceMeters: this.player.movementTargetDistance,
@@ -7409,6 +8811,7 @@ export class Simulation {
         this.#spellRevisionReferences(recentEvents),
       ),
       rocks,
+      elevators,
       obelisks,
       enemies,
       deadBodies: {
@@ -7424,6 +8827,13 @@ export class Simulation {
       recentEvents,
       recentCombatEvents,
       recentPerceptionEvents,
+      recentHoleEvents,
+      holeMetrics: {
+        ...this.holeMetrics,
+        retained: this.holeEvents.length,
+        capacity: this.holeEvents.capacity,
+        dropped: this.holeEventDropped,
+      },
       soundEvents: {
         current: currentSoundEvents,
         recent: recentSoundEvents,
@@ -7510,12 +8920,14 @@ export class Simulation {
   queryAt(x, z) {
     let best = null;
     let bestDistance = Infinity;
+    const activeLayerIndex = this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0;
     const playerDistance = Math.hypot(x - this.player.x, z - this.player.z);
-    if (playerDistance <= this.player.radius) {
+    if (this.player.layerIndex === activeLayerIndex && playerDistance <= this.player.radius) {
       best = this.#describePlayer();
       bestDistance = playerDistance;
     }
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (this.enemies.layerIndex[index] !== activeLayerIndex) continue;
       const distance = Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index]);
       if (distance <= this.enemies.radius[index] + 0.08 && distance < bestDistance) {
         best = this.#describeEnemy(index);
@@ -7523,6 +8935,7 @@ export class Simulation {
       }
     }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      if (this.rocks.layerIndex[index] !== activeLayerIndex) continue;
       const distance = Math.hypot(x - this.rocks.x[index], z - this.rocks.z[index]);
       const hit = this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
         ? Math.abs(x - this.rocks.x[index]) <= this.#dynamicBodyHalfX(index) + 0.08
@@ -7534,6 +8947,7 @@ export class Simulation {
       }
     }
     for (let index = 0; index < this.projectiles.activeCount; index += 1) {
+      if (this.projectiles.layerIndex[index] !== activeLayerIndex) continue;
       const distance = Math.hypot(x - this.projectiles.x[index], z - this.projectiles.z[index]);
       if (distance <= this.projectiles.radius[index] + 0.08 && distance < bestDistance) {
         best = this.#describeProjectile(index);
@@ -7541,6 +8955,7 @@ export class Simulation {
       }
     }
     for (let index = 0; index < this.particles.activeCount; index += 1) {
+      if (this.particles.layerIndex[index] !== activeLayerIndex) continue;
       const distance = Math.hypot(x - this.particles.x[index], z - this.particles.z[index]);
       if (distance <= this.#currentParticleSize(index) + 0.08 && distance < bestDistance) {
         best = this.#describeParticle(index);
@@ -7556,7 +8971,7 @@ export class Simulation {
       kind: "cell",
       id: `${cx}:${cz}`,
       index: this.map.inBounds(cx, cz) ? this.map.index(cx, cz) : -1,
-      position: { x: cx + 0.5, y: 0, z: cz + 0.5 },
+      position: { x: cx + 0.5, y: this.layerBaseY[activeLayerIndex] ?? 0, z: cz + 0.5 },
       velocity: null,
       radius: null,
       massKg: null,
@@ -7573,7 +8988,7 @@ export class Simulation {
     if (selection.kind === "player" && Number(selection.id) === this.player.id) {
       return this.#describePlayer();
     }
-    if (selection.kind === "rock" || selection.kind === "torch") {
+    if (selection.kind === "rock" || selection.kind === "torch" || selection.kind === "table") {
       const index = this.rocks.findIndexById(Number(selection.id));
       return index < 0 ? null : this.#describeRock(index);
     }
@@ -7607,8 +9022,19 @@ export class Simulation {
       kind: "player",
       id: this.player.id,
       index: 0,
-      position: { x: this.player.x, y: 0, z: this.player.z },
-      velocity: { x: this.player.vx, y: 0, z: this.player.vz },
+      position: { x: this.player.x, y: this.player.worldY, z: this.player.z },
+      velocity: { x: this.player.vx, y: this.player.verticalVelocityY, z: this.player.vz },
+      layerId: this.layerIds[this.player.layerIndex] ?? null,
+      vertical: {
+        mode: VERTICAL_MODE_NAMES[this.player.verticalMode] ?? "unknown",
+        supportKind: SUPPORT_KIND_NAMES[this.player.supportKind] ?? "none",
+        supportId: this.player.supportId || null,
+        transitConnectorId: this.player.transitConnectorId || null,
+        footprint: { type: "circle", radius: this.player.radius },
+        latestApertureFit: this.player.latestApertureFit === 0
+          ? null
+          : this.player.latestApertureFit > 0,
+      },
       desiredVelocity: { x: this.player.desiredVx, y: 0, z: this.player.desiredVz },
       locomotionVelocity: {
         x: this.player.locomotionVx,
@@ -7673,8 +9099,19 @@ export class Simulation {
       index,
       spawnSequence: this.enemies.spawnSequence[index],
       spawnTick: this.enemies.spawnTick[index],
-      position: { x: this.enemies.x[index], y: 0, z: this.enemies.z[index] },
-      velocity: { x: this.enemies.vx[index], y: 0, z: this.enemies.vz[index] },
+      position: { x: this.enemies.x[index], y: this.enemies.worldY[index], z: this.enemies.z[index] },
+      velocity: { x: this.enemies.vx[index], y: this.enemies.verticalVelocityY[index], z: this.enemies.vz[index] },
+      layerId: this.layerIds[this.enemies.layerIndex[index]] ?? null,
+      vertical: {
+        mode: VERTICAL_MODE_NAMES[this.enemies.verticalMode[index]] ?? "unknown",
+        supportKind: SUPPORT_KIND_NAMES[this.enemies.supportKind[index]] ?? "none",
+        supportId: this.enemies.supportId[index] || null,
+        transitConnectorId: this.enemies.transitConnectorId[index] || null,
+        footprint: { type: "circle", radius: this.enemies.radius[index] },
+        latestApertureFit: this.enemies.latestApertureFit[index] === 0
+          ? null
+          : this.enemies.latestApertureFit[index] > 0,
+      },
       desiredVelocity: {
         x: this.enemies.desiredVx[index],
         y: 0,
@@ -7755,8 +9192,26 @@ export class Simulation {
       authoringId: this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]),
       definitionId,
       archetype: ROCK_NAME_BY_CODE.get(this.rocks.archetype[index]) ?? "unknown",
-      position: { x: this.rocks.x[index], y: 0, z: this.rocks.z[index] },
-      velocity: { x: this.rocks.vx[index], y: 0, z: this.rocks.vz[index] },
+      position: { x: this.rocks.x[index], y: this.rocks.worldY[index], z: this.rocks.z[index] },
+      velocity: { x: this.rocks.vx[index], y: this.rocks.verticalVelocityY[index], z: this.rocks.vz[index] },
+      layerId: this.layerIds[this.rocks.layerIndex[index]] ?? null,
+      vertical: {
+        mode: VERTICAL_MODE_NAMES[this.rocks.verticalMode[index]] ?? "unknown",
+        supportKind: SUPPORT_KIND_NAMES[this.rocks.supportKind[index]] ?? "none",
+        supportId: this.rocks.supportId[index] || null,
+        transitConnectorId: this.rocks.transitConnectorId[index] || null,
+        footprint: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+          ? {
+            type: "rectangle",
+            halfWidth: this.rocks.halfWidth[index],
+            halfDepth: this.rocks.halfDepth[index],
+            rotation: this.rocks.rotation[index],
+          }
+          : { type: "circle", radius: this.rocks.radius[index] },
+        latestApertureFit: this.rocks.latestApertureFit[index] === 0
+          ? null
+          : this.rocks.latestApertureFit[index] > 0,
+      },
       collider: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
         ? "box"
         : "circle",
@@ -7792,6 +9247,8 @@ export class Simulation {
       definitionRevision: this.projectiles.definitionRevision[index],
       effectId: this.projectiles.effectId[index],
       effectSeed: this.projectiles.effectSeed[index],
+      layerIndex: this.projectiles.layerIndex[index],
+      layerId: this.layerIds[this.projectiles.layerIndex[index]] ?? null,
       index,
       position: {
         x: this.projectiles.x[index],
@@ -7822,6 +9279,8 @@ export class Simulation {
       effectSeed: this.particles.effectSeed[index],
       sampleOrdinal: this.particles.sampleOrdinal[index],
       sampleSeed: this.particles.sampleSeed[index],
+      layerIndex: this.particles.layerIndex[index],
+      layerId: this.layerIds[this.particles.layerIndex[index]] ?? null,
       index,
       position: {
         x: this.particles.x[index],
@@ -7884,7 +9343,8 @@ export class Simulation {
         metadata: { ...this.scenario.authoringMap.metadata },
         activeLayer: { ...this.scenario.activeLayer },
         activeEditorLayerId: this.scenario.activeLayer.id,
-        runtimeLayerId: this.scenario.activeLayer.id,
+        runtimeLayerId: this.layerIds[this.player?.layerIndex ?? -1]
+          ?? this.scenario.startLayerId,
         playerStartLayerId: this.scenario.startLayerId,
         playerStart: { ...this.scenario.playerStart },
         compiledLayerIds: [...this.scenario.compiledLayerIds],
@@ -7910,6 +9370,9 @@ export class Simulation {
           ...mapping,
           collisionCells: mapping.collisionCells.map((cell) => ({ ...cell })),
         })),
+        connectors: this.scenario.connectors.map((connector) => ({ ...connector })),
+        connectorEndpoints: this.scenario.compiledLayer(this.scenario.activeLayer.id)
+          ?.connectorEndpoints.map((endpoint) => ({ ...endpoint })) ?? [],
       },
       occluderCells: Array.from(this.scenario.occluderMask),
       surface: {
@@ -7950,7 +9413,9 @@ export class Simulation {
       },
       solidCells: Array.from(compiled.solidMask),
       occluderCells: Array.from(compiled.occluderMask),
+      holes: compiled.holes.map((hole) => ({ ...hole })),
       markers: cloneUnknown(source.markers),
+      connectorEndpoints: compiled.connectorEndpoints.map((endpoint) => ({ ...endpoint })),
       instances: source.instances.map((instance) => {
         const definition = getPlaceableDefinition(instance.definitionId);
         return {
@@ -7980,6 +9445,14 @@ export class Simulation {
       });
     }
     return null;
+  }
+
+  /** @param {string} connectorId */
+  getAuthoredConnector(connectorId) {
+    const connector = this.scenario.authoringMap.connectors.find(
+      (candidate) => candidate.id === connectorId,
+    );
+    return connector ? cloneUnknown(connector) : null;
   }
 
   /** @param {number} runtimeId */

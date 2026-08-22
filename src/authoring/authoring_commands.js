@@ -6,6 +6,7 @@ import {
   DEFAULT_SURFACE_DEFINITION_ID,
   MAX_AUTHORING_LAYERS,
 } from "./authoring_map.js";
+import { VERTICAL_PHYSICS } from "../config.js";
 import { getPlaceableDefinition } from "./definition_catalog.js";
 import { normalizeQuarterTurns } from "./footprint.js";
 
@@ -20,6 +21,11 @@ function layerFor(document, layerId) {
 /** @param {number} ordinal */
 function generatedLayerId(ordinal) {
   return `layer-${String(ordinal).padStart(4, "0")}`;
+}
+
+/** @param {number} ordinal */
+function generatedConnectorId(ordinal) {
+  return `elevator-${String(ordinal).padStart(4, "0")}`;
 }
 
 /**
@@ -86,6 +92,11 @@ export function deleteLayer(input, layerId) {
   }
   const index = document.layers.findIndex((layer) => layer.id === layerId);
   if (index < 0) throw new RangeError(`Unknown authoring layer "${layerId}"`);
+  if (document.connectors.some((connector) => (
+    connector.lowerLayerId === layerId || connector.upperLayerId === layerId
+  ))) {
+    throw new RangeError("A layer linked by an elevator must have that connector deleted first");
+  }
   document.layers.splice(index, 1);
   return cloneAuthoringMap(document);
 }
@@ -117,6 +128,85 @@ export function setPlayerStartLayer(input, layerId) {
   return cloneAuthoringMap(document);
 }
 
+/**
+ * Places one map-level two-stop connector at one shared aligned X/Z point.
+ * @param {unknown} input
+ * @param {number} x
+ * @param {number} z
+ * @param {{lowerLayerId:string,upperLayerId:string,platformWidth?:number,apertureWidth?:number,travelSpeed?:number,dwellSeconds?:number,initialStop?:"lower"|"upper",activationPolicy?:"occupancy"|"manual"}} options
+ */
+export function placeElevatorConnector(input, x, z, options) {
+  const document = cloneAuthoringMap(input);
+  const lower = layerFor(document, options.lowerLayerId);
+  const upper = layerFor(document, options.upperLayerId);
+  if (!(lower.baseY < upper.baseY)) {
+    throw new RangeError("Elevator lower layer must be below its upper layer");
+  }
+  let ordinal = document.nextConnectorOrdinal;
+  const usedIds = new Set(document.connectors.map((connector) => connector.id));
+  let connectorId = generatedConnectorId(ordinal);
+  while (usedIds.has(connectorId)) {
+    ordinal += 1;
+    connectorId = generatedConnectorId(ordinal);
+  }
+  const connector = {
+    id: connectorId,
+    definitionId: "connector.elevator.two-stop",
+    lowerLayerId: lower.id,
+    upperLayerId: upper.id,
+    x: Math.round(Number(x) * 10) / 10,
+    z: Math.round(Number(z) * 10) / 10,
+    platformWidth: Number(
+      options.platformWidth ?? VERTICAL_PHYSICS.defaultPlatformWidthMeters,
+    ),
+    apertureWidth: Number(
+      options.apertureWidth ?? VERTICAL_PHYSICS.defaultApertureWidthMeters,
+    ),
+    travelSpeed: Number(
+      options.travelSpeed ?? VERTICAL_PHYSICS.defaultTravelSpeedMetersPerSecond,
+    ),
+    dwellSeconds: Number(options.dwellSeconds ?? VERTICAL_PHYSICS.defaultDwellSeconds),
+    initialStop: options.initialStop ?? "lower",
+    activationPolicy: options.activationPolicy ?? "occupancy",
+  };
+  document.connectors.push(connector);
+  document.nextConnectorOrdinal = ordinal + 1;
+  return { document: cloneAuthoringMap(document), connectorId };
+}
+
+/** @param {unknown} input @param {string} connectorId */
+export function removeConnector(input, connectorId) {
+  const document = cloneAuthoringMap(input);
+  const index = document.connectors.findIndex((connector) => connector.id === connectorId);
+  if (index < 0) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
+  document.connectors.splice(index, 1);
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} input @param {string} connectorId @param {Record<string,unknown>} changes */
+export function updateConnector(input, connectorId, changes) {
+  const document = cloneAuthoringMap(input);
+  const connector = document.connectors.find((candidate) => candidate.id === connectorId);
+  if (!connector) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
+  for (const field of [
+    "lowerLayerId",
+    "upperLayerId",
+    "x",
+    "z",
+    "platformWidth",
+    "apertureWidth",
+    "travelSpeed",
+    "dwellSeconds",
+    "initialStop",
+    "activationPolicy",
+  ]) {
+    if (changes[field] !== undefined) connector[field] = changes[field];
+  }
+  if (changes.x !== undefined) connector.x = Math.round(Number(changes.x) * 10) / 10;
+  if (changes.z !== undefined) connector.z = Math.round(Number(changes.z) * 10) / 10;
+  return cloneAuthoringMap(document);
+}
+
 /** @param {Record<string, any>} layer @param {number} cx @param {number} cz */
 function cellIndex(layer, cx, cz) {
   if (!Number.isInteger(cx) || !Number.isInteger(cz)) {
@@ -128,7 +218,7 @@ function cellIndex(layer, cx, cz) {
   return cz * layer.width + cx;
 }
 
-/** @param {string} definitionId @param {"surface"|"structure"|"instance"} target */
+/** @param {string} definitionId @param {"surface"|"structure"|"instance"|"connector"} target */
 function definitionFor(definitionId, target) {
   const definition = getPlaceableDefinition(definitionId);
   if (!definition) throw new RangeError(`Unknown placeable definition "${definitionId}"`);
@@ -257,7 +347,8 @@ function generatedInstanceId(definitionId, ordinal) {
  * @param {number} z
  */
 export function snapDefinitionPlacement(definitionId, x, z) {
-  const definition = definitionFor(definitionId, "instance");
+  const definition = getPlaceableDefinition(definitionId);
+  if (!definition) throw new RangeError(`Unknown placeable definition "${definitionId}"`);
   const numericX = Number(x);
   const numericZ = Number(z);
   if (!Number.isFinite(numericX) || !Number.isFinite(numericZ)) {

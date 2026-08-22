@@ -312,8 +312,17 @@ export function sampleKineticFragment(burst, ordinal, target = {}) {
 
 /** @param {Record<string, any>} snapshot */
 function explosionEvents(snapshot) {
+  const activeLayerId = snapshot?.map?.layerId ?? snapshot?.runtimeLayerId ?? null;
   return Array.isArray(snapshot?.recentEvents)
-    ? snapshot.recentEvents.filter((event) => event?.type === "explosion")
+    ? snapshot.recentEvents.filter((event) => (
+      event?.type === "explosion"
+      && (
+        activeLayerId === null
+        || event.layerId === undefined
+        || event.layerId === null
+        || event.layerId === activeLayerId
+      )
+    ))
     : [];
 }
 

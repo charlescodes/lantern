@@ -50,6 +50,7 @@ export class SoundEventQueue {
     this.sourceKind = new Uint8Array(capacity);
     this.sourceId = new Uint32Array(capacity);
     this.sourceTeam = new Uint8Array(capacity);
+    this.layerIndex = new Uint16Array(capacity);
     this.x = new Float32Array(capacity);
     this.z = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
@@ -68,7 +69,7 @@ export class SoundEventQueue {
     this.activeCount = 0;
   }
 
-  /** @param {{tick:number,kind:number,reason:number,sourceKind:number,sourceId:number,sourceTeam:number,x:number,z:number,radius:number,effectId?:number,projectileId?:number}} value */
+  /** @param {{tick:number,kind:number,reason:number,sourceKind:number,sourceId:number,sourceTeam:number,layerIndex?:number,x:number,z:number,radius:number,effectId?:number,projectileId?:number}} value */
   push(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -84,6 +85,7 @@ export class SoundEventQueue {
     this.sourceKind[index] = value.sourceKind;
     this.sourceId[index] = value.sourceId;
     this.sourceTeam[index] = value.sourceTeam;
+    this.layerIndex[index] = Number(value.layerIndex ?? 0);
     this.x[index] = value.x;
     this.z[index] = value.z;
     this.radius[index] = value.radius;

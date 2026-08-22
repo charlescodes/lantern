@@ -20,7 +20,8 @@ These documents preserve future intent and candidate experiments. They are mutab
 ## Current contracts
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
-- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v2, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, and atomic persistence.
+- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v4, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, and map-level connector authoring.
+- [M1B.1–M1B.2 vertical bodies, elevator, and holes](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, and single-cell multi-floor falls.
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
@@ -73,7 +74,7 @@ These identifiers evolve independently:
 
 - Application/package release: `0.9.0`.
 - Snapshot and command-recording schema: v11.
-- Authoring-map schema: `lantern-authoring-map` v2; v1 and legacy map/scenario documents migrate explicitly.
+- Authoring-map schema: `lantern-authoring-map` v4; v3, v2, v1, and legacy map/scenario documents migrate explicitly.
 - Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the schema-v11 recording compatibility projection.
 - Fireball definition format: v1.
 - Performance-report schema: v4.

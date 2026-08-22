@@ -247,6 +247,33 @@ export const DYNAMIC_PHYSICS = Object.freeze({
   travelRadiusFraction: 0.5,
 });
 
+export const VERTICAL_PHYSICS = Object.freeze({
+  gravityMetersPerSecondSquared: -9.81,
+  terminalVelocityMetersPerSecond: -24,
+  supportContactToleranceMeters: 0.035,
+  supportReleaseToleranceMeters: 0.06,
+  landingSeparationEpsilonMeters: 0.0001,
+  apertureClearanceMeters: 0.01,
+  elevatorCapacity: 16,
+  defaultPlatformWidthMeters: 0.9,
+  defaultApertureWidthMeters: 0.9,
+  defaultTravelSpeedMetersPerSecond: 1.5,
+  defaultDwellSeconds: 0.75,
+  ejectionStepMeters: 0.08,
+  // Standalone floor apertures deliberately use the same positive-clearance
+  // geometry contract as elevator openings.  They stay individual cells;
+  // adjacent holes never merge into a wider opening.
+  defaultHoleApertureWidthMeters: 0.9,
+  holeFitClearanceMeters: 0.01,
+  holeRimAttractionBandMeters: 0.42,
+  holeRimAttractionAccelerationMetersPerSecondSquared: 2.2,
+  holeMaximumCombinedAttractionMetersPerSecondSquared: 2.8,
+  playerFallingAccelerationMetersPerSecondSquared: 13,
+  playerFallingMaximumSpeedMetersPerSecond: 3.4,
+  maximumFloorPlanesPerStep: 32,
+  voidRescueDepthMeters: 24,
+});
+
 export const EXPLOSION = Object.freeze({
   radius: 2.5,
   pressureImpulse: 800,

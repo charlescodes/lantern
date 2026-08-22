@@ -325,21 +325,23 @@ test("schema-v11 Fireball impacts use the shared sound queue and retain source i
 
 test("the one-tick sound queue is bounded, ordered, and drops newest", () => {
   const queue = new SoundEventQueue(2);
-  const event = (tick, kind) => ({
+  const event = (tick, kind, layerIndex = 0) => ({
     tick,
     kind,
     reason: SOUND_EVENT_REASON.stride,
     sourceKind: 1,
     sourceId: 1,
     sourceTeam: ACTOR_TEAM.player,
+    layerIndex,
     x: tick,
     z: 0,
     radius: 8,
   });
   assert.equal(queue.push(event(1, SOUND_EVENT_KIND.footstep)), 1);
-  assert.equal(queue.push(event(1, SOUND_EVENT_KIND.fireballImpact)), 2);
+  assert.equal(queue.push(event(1, SOUND_EVENT_KIND.fireballImpact, 7)), 2);
   assert.equal(queue.push(event(1, SOUND_EVENT_KIND.footstep)), 0);
   assert.deepEqual(Array.from(queue.id), [1, 2]);
+  assert.deepEqual(Array.from(queue.layerIndex), [0, 7]);
   assert.equal(queue.dropped, 1);
   assert.equal(queue.maximumEventsPerTick, 2);
   queue.beginTick();

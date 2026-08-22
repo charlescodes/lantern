@@ -159,6 +159,7 @@ export class MapPalette {
       ["surface", "Surface"],
       ["structure", "Structure"],
       ["instance", "Instances"],
+      ["connector", "Connectors"],
     ]) {
       const button = document.createElement("button");
       button.type = "button";

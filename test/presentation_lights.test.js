@@ -114,6 +114,22 @@ test("default topology is two atomic eight-slot effect groups", () => {
   assert.equal(budget.groupCapacity, 2);
 });
 
+test("transient lights are isolated to the visible runtime layer", () => {
+  const budget = new PresentationLightBudget();
+  const lowerProjectile = { ...projectile(1, 2, 2), layerId: "lower" };
+  const upperProjectile = { ...projectile(2, 7, 7), layerId: "upper" };
+  let assignments = budget.allocate(/** @type {any} */ (snapshot({
+    projectiles: [lowerProjectile, upperProjectile],
+  })), true, true, "lower");
+  assert.deepEqual(assignments.map((light) => light.sourceId), [1]);
+
+  assignments = budget.allocate(/** @type {any} */ (snapshot({
+    tick: 101,
+    projectiles: [lowerProjectile, upperProjectile],
+  })), true, true, "upper");
+  assert.deepEqual(assignments.map((light) => light.sourceId), [2]);
+});
+
 test("projectile slot zero becomes its explosion pulse without changing identity", () => {
   const budget = new PresentationLightBudget();
   const value = snapshot({

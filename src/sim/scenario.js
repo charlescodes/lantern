@@ -13,6 +13,8 @@ import {
   paintStructure as paintAuthoringStructure,
   paintSurfaceCells as paintAuthoringSurfaceCells,
   paintSurface as paintAuthoringSurface,
+  createLayer as createAuthoringLayer,
+  placeElevatorConnector,
   placeInstance as placeAuthoringInstance,
   removeInstance as removeAuthoringInstance,
   updateInstanceTransform as updateAuthoringInstanceTransform,
@@ -72,6 +74,7 @@ export class ArenaScenario {
     this.compiledLayerIds = [...compiled.layerIds];
     this.validationDiagnostics = compiled.diagnostics.map((entry) => ({ ...entry }));
     this._compiledLayers = compiled.layers;
+    this.connectors = compiled.connectors.map((connector) => ({ ...connector }));
     const selected = getCompiledLayer(compiled, requestedLayerId)
       ?? getCompiledLayer(compiled, compiled.startLayerId);
     if (!selected) throw new RangeError("Compiled authoring map has no playable layer");
@@ -186,6 +189,16 @@ export class ArenaScenario {
   /** @param {string} layerId */
   compiledLayer(layerId) {
     return this._compiledLayers.find((layer) => layer.id === layerId) ?? null;
+  }
+
+  compiledLayers() {
+    return this._compiledLayers.slice();
+  }
+
+  allRuntimeEntities() {
+    return this._compiledLayers.flatMap((layer) => (
+      layer.entities.map((entity) => ({ ...entity, layerId: layer.id }))
+    ));
   }
 
   layerSummaries() {
@@ -373,12 +386,20 @@ export class ArenaScenario {
 
   /** @param {string} authoringId */
   spawnIdForAuthoringId(authoringId) {
-    return this.entities.find((entity) => entity.authoringId === authoringId)?.spawnId ?? null;
+    for (const layer of this._compiledLayers) {
+      const entity = layer.entities.find((candidate) => candidate.authoringId === authoringId);
+      if (entity) return entity.spawnId ?? null;
+    }
+    return null;
   }
 
   /** @param {number} spawnId */
   authoringIdForSpawnId(spawnId) {
-    return this.entities.find((entity) => entity.spawnId === spawnId)?.authoringId ?? null;
+    for (const layer of this._compiledLayers) {
+      const entity = layer.entities.find((candidate) => candidate.spawnId === spawnId);
+      if (entity) return entity.authoringId ?? null;
+    }
+    return null;
   }
 
   /** @param {number} x @param {number} z */
@@ -402,6 +423,15 @@ export class ArenaScenario {
     return this.entities.find((entity) => entity.kind === "obelisk") ?? null;
   }
 
+  /**
+   * The arena encounter is map-owned, not a property of whichever layer the
+   * editor or camera is currently viewing.  Authoring validation keeps this
+   * singleton marker unambiguous.
+   */
+  get encounterObelisk() {
+    return this.allRuntimeEntities().find((entity) => entity.kind === "obelisk") ?? null;
+  }
+
   /** @param {string | Record<string, unknown>} input */
   static fromJSON(input) {
     return new ArenaScenario(loadAuthoringMap(input));
@@ -418,4 +448,71 @@ export function createDebugArenaScenario() {
     { kind: "rock", archetype: "small", x: 9.5, z: 12.5 },
     { kind: "obelisk", x: 20.5, z: 18.5 },
   ]);
+}
+
+/**
+ * Focused two-floor M1B acceptance arena. Open with `?arena=elevator`; the
+ * normal debug arena remains unchanged for frozen replay and combat fixtures.
+ */
+export function createVerticalDebugArenaScenario() {
+  let document = createDebugArenaScenario().toAuthoringJSON();
+  const lowerLayerId = document.playerStart.layerId;
+  const created = createAuthoringLayer(document, lowerLayerId, "above", {
+    name: "Elevator upper",
+    baseY: 3,
+  });
+  document = created.document;
+  const upperLayerId = created.layerId;
+  document = placeElevatorConnector(document, 8, 18.5, {
+    lowerLayerId,
+    upperLayerId,
+    initialStop: "lower",
+    activationPolicy: "occupancy",
+  }).document;
+  document = placeAuthoringInstance(document, "object.rock.small", 9.2, 18.5, {
+    layerId: lowerLayerId,
+  }).document;
+  document = placeAuthoringInstance(document, "object.torch", 7.2, 18.5, {
+    layerId: lowerLayerId,
+  }).document;
+  document = placeAuthoringInstance(document, "object.table", 10.5, 18.5, {
+    layerId: lowerLayerId,
+  }).document;
+  return new ArenaScenario(document);
+}
+
+/**
+ * Four-floor M1B.2 acceptance arena. Open with `?arena=holes`.  The holes
+ * are ordinary authored surface cells, so this fixture also exercises the
+ * palette/undo/save path used by temple maps.
+ */
+export function createHoleDebugArenaScenario() {
+  let document = createDebugArenaScenario().toAuthoringJSON();
+  const ground = document.playerStart.layerId;
+  let created = createAuthoringLayer(document, ground, "above", { name: "Hole deck", baseY: 3 });
+  document = created.document;
+  const deck = created.layerId;
+  created = createAuthoringLayer(document, deck, "above", { name: "Hole gallery", baseY: 6 });
+  document = created.document;
+  const gallery = created.layerId;
+  created = createAuthoringLayer(document, gallery, "above", { name: "Hole crown", baseY: 9 });
+  document = created.document;
+  const crown = created.layerId;
+  // A centered vertical column; ground intentionally has no matching hole.
+  for (const layerId of [deck, gallery, crown]) {
+    document = paintAuthoringSurface(document, 8, 18, "surface.hole", layerId);
+  }
+  // Adjacent holes keep their seam, and this wall makes corrective movement
+  // toward one opening visibly harder without changing its geometry.
+  document = paintAuthoringSurface(document, 12, 12, "surface.hole", deck);
+  document = paintAuthoringSurface(document, 13, 12, "surface.hole", deck);
+  document = paintAuthoringStructure(document, 14, 12, "structure.wall", deck);
+  // Start beside—not over—the shaft so the arena can be inspected before the
+  // player deliberately steps into the first aperture.
+  document.playerStart = { layerId: crown, x: 9.5, z: 18.5 };
+  document = placeAuthoringInstance(document, "object.rock.small", 8.5, 17.5, { layerId: crown }).document;
+  document = placeAuthoringInstance(document, "object.torch", 7.5, 18.5, { layerId: crown }).document;
+  document = placeAuthoringInstance(document, "object.table", 14.5, 18.5, { layerId: crown }).document;
+  document = placeAuthoringInstance(document, "object.rock.large", 17.5, 18.5, { layerId: crown }).document;
+  return new ArenaScenario(document);
 }

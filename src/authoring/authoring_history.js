@@ -11,13 +11,16 @@ import {
   paintStructureCells,
   paintSurface,
   paintSurfaceCells,
+  placeElevatorConnector,
   placeInstance,
   renameLayer,
+  removeConnector,
   removeInstance,
   setLayerBaseY,
   setPlayerStartLayer,
   updateInstanceProperties,
   updateInstanceTransform,
+  updateConnector,
 } from "./authoring_commands.js";
 import { validateAuthoringMap } from "./authoring_map.js";
 import {
@@ -122,6 +125,20 @@ function layerSnapshot(input, layerId, path) {
   return snapshot;
 }
 
+/** @param {unknown} input @param {string} connectorId @param {string} path */
+function connectorSnapshot(input, connectorId, path) {
+  if (input === null) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError(`${path} must be a connector snapshot or null`);
+  }
+  const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+  if (snapshot.id !== connectorId) {
+    throw new TypeError(`${path}.id must equal patch connectorId "${connectorId}"`);
+  }
+  nonEmptyString(snapshot.definitionId, `${path}.definitionId`);
+  return snapshot;
+}
+
 /** @param {unknown} input @param {string} path */
 function playerStartSnapshot(input, path) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -162,7 +179,7 @@ export function cloneAuthoringCommand(input) {
     let key;
     if (kind === "map") {
       const field = String(patch.field);
-      if (field === "nextLayerOrdinal") {
+      if (field === "nextLayerOrdinal" || field === "nextConnectorOrdinal") {
         const before = finiteInteger(patch.before, `${path}.before`);
         const after = finiteInteger(patch.after, `${path}.after`);
         if (before < 1 || after < 1) throw new TypeError(`${path} ordinals must be positive integers`);
@@ -175,7 +192,7 @@ export function cloneAuthoringCommand(input) {
           after: playerStartSnapshot(patch.after, `${path}.after`),
         };
       } else {
-        throw new TypeError(`${path}.field must be nextLayerOrdinal or playerStart`);
+        throw new TypeError(`${path}.field must be an ordinal or playerStart`);
       }
       key = `${kind}:${field}`;
     } else if (kind === "layer-record") {
@@ -193,6 +210,21 @@ export function cloneAuthoringCommand(input) {
       }
       normalized = { kind, layerId, before, after, beforeIndex, afterIndex };
       key = `${kind}:${layerId}`;
+    } else if (kind === "connector") {
+      const connectorId = nonEmptyString(patch.connectorId, `${path}.connectorId`);
+      const before = connectorSnapshot(patch.before, connectorId, `${path}.before`);
+      const after = connectorSnapshot(patch.after, connectorId, `${path}.after`);
+      const beforeIndex = patch.beforeIndex === null
+        ? null
+        : finiteInteger(patch.beforeIndex, `${path}.beforeIndex`);
+      const afterIndex = patch.afterIndex === null
+        ? null
+        : finiteInteger(patch.afterIndex, `${path}.afterIndex`);
+      if ((before === null) !== (beforeIndex === null) || (after === null) !== (afterIndex === null)) {
+        throw new TypeError(`${path} snapshot and ordering index must both be null or both be present`);
+      }
+      normalized = { kind, connectorId, before, after, beforeIndex, afterIndex };
+      key = `${kind}:${connectorId}`;
     } else if (kind === "cell") {
       const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
       const channel = patch.channel;
@@ -325,6 +357,14 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
       after: after.nextLayerOrdinal,
     });
   }
+  if (before.nextConnectorOrdinal !== after.nextConnectorOrdinal) {
+    patches.push({
+      kind: "map",
+      field: "nextConnectorOrdinal",
+      before: before.nextConnectorOrdinal,
+      after: after.nextConnectorOrdinal,
+    });
+  }
   if (!jsonEqual(before.playerStart, after.playerStart)) {
     patches.push({
       kind: "map",
@@ -448,6 +488,34 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
       });
     }
   }
+  const beforeConnectors = new Map(
+    before.connectors.map((connector, index) => [connector.id, { connector, index }]),
+  );
+  const afterConnectors = new Map(
+    after.connectors.map((connector, index) => [connector.id, { connector, index }]),
+  );
+  const connectorIds = [...new Set([
+    ...beforeConnectors.keys(),
+    ...afterConnectors.keys(),
+  ])].sort();
+  for (const connectorId of connectorIds) {
+    const beforeEntry = beforeConnectors.get(connectorId) ?? null;
+    const afterEntry = afterConnectors.get(connectorId) ?? null;
+    if (
+      beforeEntry
+      && afterEntry
+      && beforeEntry.index === afterEntry.index
+      && jsonEqual(beforeEntry.connector, afterEntry.connector)
+    ) continue;
+    patches.push({
+      kind: "connector",
+      connectorId,
+      before: beforeEntry ? cloneJson(beforeEntry.connector) : null,
+      after: afterEntry ? cloneJson(afterEntry.connector) : null,
+      beforeIndex: beforeEntry?.index ?? null,
+      afterIndex: afterEntry?.index ?? null,
+    });
+  }
   if (patches.length === 0) return null;
   return cloneAuthoringCommand({ id: options.id ?? 0, label, patches });
 }
@@ -486,6 +554,15 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
       const current = index < 0 ? null : document.layers[index];
       if (index !== (expectedIndex ?? -1) || !jsonEqual(current, patch[sourceSide])) {
         throw new RangeError(`Layer patch precondition failed for "${patch.layerId}"`);
+      }
+      continue;
+    }
+    if (patch.kind === "connector") {
+      const index = document.connectors.findIndex((connector) => connector.id === patch.connectorId);
+      const expectedIndex = patch[sourceIndexSide];
+      const current = index < 0 ? null : document.connectors[index];
+      if (index !== (expectedIndex ?? -1) || !jsonEqual(current, patch[sourceSide])) {
+        throw new RangeError(`Connector patch precondition failed for "${patch.connectorId}"`);
       }
       continue;
     }
@@ -534,6 +611,25 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
   for (const patch of command.patches) {
     if (patch.kind !== "map") continue;
     document[patch.field] = cloneJson(patch[targetSide]);
+  }
+
+  const connectorPatches = command.patches.filter((patch) => patch.kind === "connector");
+  if (connectorPatches.length > 0) {
+    const touchedIds = new Set(connectorPatches.map((patch) => patch.connectorId));
+    document.connectors = document.connectors.filter((connector) => !touchedIds.has(connector.id));
+    const insertions = connectorPatches
+      .filter((patch) => patch[targetSide] !== null)
+      .sort((left, right) => (
+        left[targetIndexSide] - right[targetIndexSide]
+        || left.connectorId.localeCompare(right.connectorId)
+      ));
+    for (const patch of insertions) {
+      const targetIndex = patch[targetIndexSide];
+      if (targetIndex > document.connectors.length) {
+        throw new RangeError(`Connector ordering for "${patch.connectorId}" is outside the document`);
+      }
+      document.connectors.splice(targetIndex, 0, cloneJson(patch[targetSide]));
+    }
   }
 
   // Legends first so stable definition IDs can be resolved into target codes.
@@ -764,6 +860,37 @@ export function commandFromAuthoringAction(documentInput, action) {
       if (!target) throw new RangeError(`Unknown authoring layer "${String(action.layerId)}"`);
       after = setPlayerStartLayer(before, target.id);
       label = `Set Start Layer ${target.name}`;
+      break;
+    }
+    case "placeConnector": {
+      const result = placeElevatorConnector(before, Number(action.x), Number(action.z), {
+        lowerLayerId: String(action.lowerLayerId),
+        upperLayerId: String(action.upperLayerId),
+        ...(action.platformWidth === undefined ? {} : { platformWidth: Number(action.platformWidth) }),
+        ...(action.apertureWidth === undefined ? {} : { apertureWidth: Number(action.apertureWidth) }),
+        ...(action.travelSpeed === undefined ? {} : { travelSpeed: Number(action.travelSpeed) }),
+        ...(action.dwellSeconds === undefined ? {} : { dwellSeconds: Number(action.dwellSeconds) }),
+        ...(action.initialStop === undefined ? {} : { initialStop: action.initialStop }),
+        ...(action.activationPolicy === undefined ? {} : { activationPolicy: action.activationPolicy }),
+      });
+      after = result.document;
+      label = "Place Two-stop Elevator";
+      break;
+    }
+    case "removeConnector": {
+      const connectorId = String(action.connectorId);
+      const connector = before.connectors.find((candidate) => candidate.id === connectorId);
+      if (!connector) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
+      after = removeConnector(before, connectorId);
+      label = "Delete Two-stop Elevator";
+      break;
+    }
+    case "updateConnector": {
+      const connectorId = String(action.connectorId);
+      const connector = before.connectors.find((candidate) => candidate.id === connectorId);
+      if (!connector) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
+      after = updateConnector(before, connectorId, action.changes ?? {});
+      label = "Edit Two-stop Elevator";
       break;
     }
     default:

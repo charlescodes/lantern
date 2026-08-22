@@ -4,7 +4,7 @@ import * as THREE from "three/webgpu";
 import { attribute, instancedDynamicBufferAttribute, pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
-import { ENEMY_WIZARD, ROCK_ARCHETYPES } from "../config.js";
+import { ENEMY_WIZARD, ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
 import {
   getPlaceableDefinition,
   isDynamicBodyDefinition,
@@ -200,6 +200,8 @@ export class ThreePresentation {
     this.torchLampMesh = null;
     this.tableMesh = null;
     this.authoringOverlayMesh = null;
+    this.elevatorPlatformMesh = null;
+    this.elevatorApertureMesh = null;
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
@@ -406,6 +408,35 @@ export class ThreePresentation {
       depthTest: false,
       depthWrite: false,
     });
+    this.elevatorPlatformGeometry = new THREE.BoxGeometry(1, 0.08, 1);
+    this.elevatorPlatformMaterial = new THREE.MeshStandardNodeMaterial({
+      color: 0x4c8f9f,
+      emissive: 0x0b3139,
+      emissiveIntensity: 0.55,
+      roughness: 0.54,
+      metalness: 0.42,
+    });
+    this.elevatorApertureGeometry = new THREE.BoxGeometry(1, 0.018, 1);
+    this.elevatorApertureMaterial = new THREE.MeshBasicNodeMaterial({
+      color: 0xffd377,
+      transparent: true,
+      opacity: 0.26,
+      depthWrite: false,
+    });
+    this.elevatorPlatformMesh = createDynamicInstancedPool(
+      this.elevatorPlatformGeometry,
+      this.elevatorPlatformMaterial,
+      VERTICAL_PHYSICS.elevatorCapacity,
+      "elevator-platforms",
+    );
+    this.elevatorApertureMesh = createDynamicInstancedPool(
+      this.elevatorApertureGeometry,
+      this.elevatorApertureMaterial,
+      VERTICAL_PHYSICS.elevatorCapacity,
+      "elevator-apertures",
+    );
+    this.elevatorApertureMesh.renderOrder = 8;
+    this.scene.add(this.elevatorPlatformMesh, this.elevatorApertureMesh);
     this.rockGeometry = new THREE.IcosahedronGeometry(1, 1);
     this.rockMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffffff,
@@ -774,11 +805,12 @@ export class ThreePresentation {
     this.#updateScorchMarks(snapshot);
     this.#updateKineticFragments(snapshot, alpha);
     this.#updateObelisk(snapshot.obelisks ?? []);
-    this.#updatePlayer(snapshot.player, alpha);
+    this.#updatePlayer(snapshot, alpha);
     this.#updateEnemies(snapshot, alpha);
     this.#updateDeadBodies(snapshot, alpha);
     this.#updateHealthBars(snapshot, alpha);
     this.#updateRocks(snapshot, alpha);
+    this.#updateElevators(snapshot, alpha);
     this.#updateProjectiles(snapshot, alpha);
     this.#updateParticles(snapshot);
     this.#updateView(snapshot, view);
@@ -956,11 +988,12 @@ export class ThreePresentation {
     this.#updateWallOcclusion(snapshot.player, 0);
     this.#updateKineticFragments(snapshot, 0);
     this.#updateObelisk(snapshot.obelisks ?? []);
-    this.#updatePlayer(snapshot.player, 0);
+    this.#updatePlayer(snapshot, 0);
     this.#updateEnemies(snapshot, 0);
     this.#updateDeadBodies(snapshot, 0);
     this.#updateHealthBars(snapshot, 0);
     this.#updateRocks(snapshot, 0);
+    this.#updateElevators(snapshot, 0);
     this.#updateProjectiles(snapshot, 0);
     this.#updateParticles(snapshot);
     this.#updateView(snapshot, view);
@@ -1355,11 +1388,15 @@ export class ThreePresentation {
           ? map.surface.legend[map.surface.cells[index]]
           : "surface.stone";
         const definition = getPlaceableDefinition(definitionId);
+        const isHole = definition?.traits.runtimeKind === "floor-hole";
         const color = (cx + cz) % 2 === 0
           ? definition?.debug.fill ?? "#586358"
           : definition?.debug.alternateFill ?? "#5b665b";
         this._position.set(cx + 0.5, 0.004, cz + 0.5);
-        this._scale.set(0.995, 0.995, 0.995);
+        const surfaceScale = isHole
+          ? Number(definition?.traits.apertureWidth ?? 0.9)
+          : 0.995;
+        this._scale.set(surfaceScale, surfaceScale, surfaceScale);
         this._matrix.compose(this._position, this._quaternion, this._scale);
         this.surfaceMesh.setMatrixAt(surfaceCount, this._matrix);
         this._color.set(color);
@@ -1551,25 +1588,46 @@ export class ThreePresentation {
     this.worldRoot.add(this.wallMesh);
   }
 
-  /** @param {Record<string, any>} player @param {number} alpha */
-  #updatePlayer(player, alpha) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #updatePlayer(snapshot, alpha) {
+    const player = snapshot.player;
+    this.player.visible = player.layerId === (snapshot.map.layerId ?? snapshot.runtimeLayerId);
+    if (!this.player.visible) return;
     const x = interpolateRenderValue(player.previousX, player.x, alpha);
     const z = interpolateRenderValue(player.previousZ, player.z, alpha);
-    this.player.position.set(x, PLAYER_HEIGHT_METERS / 2, z);
+    const worldY = interpolateRenderValue(
+      player.previousWorldY ?? player.worldY ?? this.activeBaseY,
+      player.worldY ?? this.activeBaseY,
+      alpha,
+    );
+    this.player.position.set(
+      x,
+      worldY - this.activeBaseY + PLAYER_HEIGHT_METERS / 2,
+      z,
+    );
     this.player.scale.set(player.radius * 2, PLAYER_HEIGHT_METERS, player.radius * 2);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #updateEnemies(snapshot, alpha) {
     const enemies = snapshot.enemies ?? [];
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
+    let count = 0;
     for (let index = 0; index < enemies.length; index += 1) {
       const enemy = enemies[index];
+      if (enemy.layerId !== visibleLayerId) continue;
       const x = enemy.previousX + (enemy.x - enemy.previousX) * alpha;
       const z = enemy.previousZ + (enemy.z - enemy.previousZ) * alpha;
-      this._position.set(x, PLAYER_HEIGHT_METERS / 2, z);
+      const worldY = interpolateRenderValue(
+        enemy.previousWorldY ?? enemy.worldY ?? this.activeBaseY,
+        enemy.worldY ?? this.activeBaseY,
+        alpha,
+      );
+      const localY = worldY - this.activeBaseY;
+      this._position.set(x, localY + PLAYER_HEIGHT_METERS / 2, z);
       this._scale.set(enemy.radius * 2, PLAYER_HEIGHT_METERS, enemy.radius * 2);
       this._matrix.compose(this._position, this._quaternion, this._scale);
-      this.enemyMesh.setMatrixAt(index, this._matrix);
+      this.enemyMesh.setMatrixAt(count, this._matrix);
       const facing = normalizedEnemyFacing(enemy);
       const markerScale = Math.max(0.5, enemy.radius / ENEMY_WIZARD.radius);
       this._facingDirection.set(facing.x, 0, facing.z).normalize();
@@ -1583,15 +1641,16 @@ export class ThreePresentation {
       );
       this._position.set(
         x + facing.x * markerCenterDistance,
-        PLAYER_HEIGHT_METERS * 0.66,
+        localY + PLAYER_HEIGHT_METERS * 0.66,
         z + facing.z * markerCenterDistance,
       );
       this._scale.setScalar(markerScale);
       this._matrix.compose(this._position, this._facingQuaternion, this._scale);
-      this.enemyFacingMesh.setMatrixAt(index, this._matrix);
+      this.enemyFacingMesh.setMatrixAt(count, this._matrix);
+      count += 1;
     }
-    publishInstancedPool(this.enemyMesh, enemies.length);
-    publishInstancedPool(this.enemyFacingMesh, enemies.length);
+    publishInstancedPool(this.enemyMesh, count);
+    publishInstancedPool(this.enemyFacingMesh, count);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
@@ -1613,11 +1672,11 @@ export class ThreePresentation {
     }
     const inertBodies = snapshot.deadBodies?.inert ?? [];
     const dynamicBodies = snapshot.deadBodies?.dynamic ?? [];
-    const bodyCount = inertBodies.length + dynamicBodies.length;
-    for (let index = 0; index < bodyCount; index += 1) {
-      const body = index < inertBodies.length
-        ? inertBodies[index]
-        : dynamicBodies[index - inertBodies.length];
+    const bodies = [...inertBodies, ...dynamicBodies];
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
+    let bodyCount = 0;
+    for (const body of bodies) {
+      if (body.layerId !== visibleLayerId) continue;
       const pose = enemyDeadBodyPose(body, alpha, this._deadBodyPose);
       const sin = Math.sin(pose.angleRadians);
       this._deadBodyAxis.set(
@@ -1629,7 +1688,12 @@ export class ThreePresentation {
         this._facingOrigin,
         this._deadBodyAxis,
       );
-      this._position.set(pose.x, pose.centerY, pose.z);
+      const worldY = interpolateRenderValue(
+        body.previousWorldY ?? body.worldY ?? this.activeBaseY,
+        body.worldY ?? this.activeBaseY,
+        alpha,
+      );
+      this._position.set(pose.x, pose.centerY + worldY - this.activeBaseY, pose.z);
       this._scale.set(
         body.radius * 2,
         ENEMY_BODY_HEIGHT_METERS,
@@ -1640,7 +1704,8 @@ export class ThreePresentation {
         this._deadBodyQuaternion,
         this._scale,
       );
-      this.deadBodyMesh.setMatrixAt(index, this._matrix);
+      this.deadBodyMesh.setMatrixAt(bodyCount, this._matrix);
+      bodyCount += 1;
     }
     publishInstancedPool(this.deadBodyMesh, bodyCount);
   }
@@ -1648,6 +1713,7 @@ export class ThreePresentation {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #updateHealthBars(snapshot, alpha) {
     const actors = [snapshot.player, ...(snapshot.enemies ?? [])];
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     this._billboardQuaternion.copy(this.threeCamera.quaternion);
     this._cameraRight
       .set(1, 0, 0)
@@ -1660,14 +1726,20 @@ export class ThreePresentation {
     let count = 0;
     for (const actor of actors) {
       if (!(actor.health > 0) || count >= ENEMY_WIZARD.capacity + 1) continue;
+      if (actor.layerId && actor.layerId !== visibleLayerId) continue;
       const x = actor.previousX + (actor.x - actor.previousX) * alpha;
       const z = actor.previousZ + (actor.z - actor.previousZ) * alpha;
+      const worldY = interpolateRenderValue(
+        actor.previousWorldY ?? actor.worldY ?? this.activeBaseY,
+        actor.worldY ?? this.activeBaseY,
+        alpha,
+      );
       const ratio = healthBarRatio(actor.health, actor.maximumHealth);
       const rightOffset = actor.radius
         + HEALTH_BAR.actorGapMeters
         + HEALTH_BAR.widthMeters / 2;
       this._healthCenter
-        .set(x, PLAYER_HEIGHT_METERS * 0.57, z)
+        .set(x, worldY - this.activeBaseY + PLAYER_HEIGHT_METERS * 0.57, z)
         .addScaledVector(this._cameraRight, rightOffset);
 
       this._scale.set(HEALTH_BAR.widthMeters, HEALTH_BAR.heightMeters, 1);
@@ -1745,12 +1817,20 @@ export class ThreePresentation {
     let rockCount = 0;
     let torchCount = 0;
     let tableCount = 0;
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     for (let index = 0; index < snapshot.rocks.length; index += 1) {
       const rock = snapshot.rocks[index];
+      if (rock.layerId !== visibleLayerId) continue;
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
+      const worldY = interpolateRenderValue(
+        rock.previousWorldY ?? rock.worldY ?? this.activeBaseY,
+        rock.worldY ?? this.activeBaseY,
+        alpha,
+      );
+      const localY = worldY - this.activeBaseY;
       if (rock.kind === "table") {
-        this._position.set(x, 0.34, z);
+        this._position.set(x, localY + 0.26, z);
         this._scale.set(1, 1, 1);
         this._authoringQuaternion.setFromAxisAngle(
           this._facingOrigin,
@@ -1762,17 +1842,17 @@ export class ThreePresentation {
         continue;
       }
       if (rock.kind === "torch") {
-        this._position.set(x, 0.86, z);
+        this._position.set(x, localY + 0.86, z);
         this._scale.set(1, 1, 1);
         this._matrix.compose(this._position, this._quaternion, this._scale);
         this.torchPoleMesh.setMatrixAt(torchCount, this._matrix);
-        this._position.set(x, 1.82, z);
+        this._position.set(x, localY + 1.82, z);
         this._matrix.compose(this._position, this._quaternion, this._scale);
         this.torchLampMesh.setMatrixAt(torchCount, this._matrix);
         torchCount += 1;
         continue;
       }
-      this._position.set(x, rock.radius, z);
+      this._position.set(x, localY + rock.radius, z);
       this._scale.setScalar(rock.radius);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.rockMesh.setMatrixAt(rockCount, this._matrix);
@@ -1795,6 +1875,30 @@ export class ThreePresentation {
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #updateElevators(snapshot, alpha) {
+    let count = 0;
+    for (const elevator of snapshot.elevators ?? []) {
+      if (
+        elevator.lowerLayerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)
+        && elevator.upperLayerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)
+        && elevator.supportedBodyCount === 0
+      ) continue;
+      const worldY = interpolateRenderValue(elevator.previousY, elevator.currentY, alpha);
+      this._position.set(elevator.x, worldY - this.activeBaseY - 0.04, elevator.z);
+      this._scale.set(elevator.platformWidth, 1, elevator.platformWidth);
+      this._matrix.compose(this._position, this._quaternion, this._scale);
+      this.elevatorPlatformMesh.setMatrixAt(count, this._matrix);
+      this._position.y = worldY - this.activeBaseY + 0.012;
+      this._scale.set(elevator.apertureWidth, 1, elevator.apertureWidth);
+      this._matrix.compose(this._position, this._quaternion, this._scale);
+      this.elevatorApertureMesh.setMatrixAt(count, this._matrix);
+      count += 1;
+    }
+    publishInstancedPool(this.elevatorPlatformMesh, count);
+    publishInstancedPool(this.elevatorApertureMesh, count);
+  }
+
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #updateProjectiles(snapshot, alpha) {
     const capacity = snapshot.pools.projectiles.capacity;
     if (!this.projectileMesh || this.projectileMesh.userData.capacity !== capacity) {
@@ -1812,21 +1916,24 @@ export class ThreePresentation {
       );
       this.worldRoot.add(this.projectileMesh);
     }
+    let count = 0;
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     for (let index = 0; index < snapshot.projectiles.length; index += 1) {
       const projectile = snapshot.projectiles[index];
+      if (projectile.layerId !== visibleLayerId) continue;
       const x = projectile.previousX + (projectile.x - projectile.previousX) * alpha;
       const z = projectile.previousZ + (projectile.z - projectile.previousZ) * alpha;
       this._position.set(x, FIREBALL_PRESENTATION_HEIGHT_METERS, z);
       this._scale.setScalar(projectile.radius * 1.15);
       this._matrix.compose(this._position, this._quaternion, this._scale);
-      this.projectileMesh.setMatrixAt(index, this._matrix);
+      this.projectileMesh.setMatrixAt(count, this._matrix);
       const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
       writeFireballPaletteColor(this._color, definition, {
         kind: FIREBALL_COLOR_PROJECTILE,
         effectSeed: projectile.effectSeed,
         variationEnabled: this.flags.values.lightColorVariation,
       });
-      this.projectileMesh.setColorAt(index, this._color);
+      this.projectileMesh.setColorAt(count, this._color);
       writeFireballPaletteColor(this._emissiveColor, definition, {
         kind: FIREBALL_COLOR_CORE,
         effectSeed: projectile.effectSeed,
@@ -1834,12 +1941,13 @@ export class ThreePresentation {
       });
       setInstancedEmissiveAt(
         this.projectileMesh,
-        index,
+        count,
         this._emissiveColor,
         Number(definition.presentation.projectileEmissiveStrength),
       );
+      count += 1;
     }
-    publishInstancedPool(this.projectileMesh, snapshot.projectiles.length, {
+    publishInstancedPool(this.projectileMesh, count, {
       deferCountGrowth: true,
       instanceColors: true,
       instanceEmissive: true,
@@ -1864,14 +1972,15 @@ export class ThreePresentation {
       );
       this.worldRoot.add(this.particleMesh);
     }
-    for (let index = 0; index < snapshot.particles.length; index += 1) {
-      const particle = snapshot.particles[index];
+    let count = 0;
+    for (const particle of snapshot.particles) {
+      if (particle.layerId !== snapshot.map.layerId) continue;
       const life = clamp(1 - particle.age / particle.lifetime, 0, 1);
       const size = Math.max(0.001, particle.currentSize);
       this._position.set(particle.x, particle.y, particle.z);
       this._scale.set(size, size * 1.25, size);
       this._matrix.compose(this._position, this._quaternion, this._scale);
-      this.particleMesh.setMatrixAt(index, this._matrix);
+      this.particleMesh.setMatrixAt(count, this._matrix);
       const definition = fireballDefinitionFromSnapshot(snapshot, particle);
       writeFireballPaletteColor(this._color, definition, {
         kind: FIREBALL_COLOR_PARTICLE,
@@ -1881,15 +1990,16 @@ export class ThreePresentation {
         sampleSeed: particle.sampleSeed,
         variationEnabled: this.flags.values.lightColorVariation,
       });
-      this.particleMesh.setColorAt(index, this._color);
+      this.particleMesh.setColorAt(count, this._color);
       setInstancedEmissiveAt(
         this.particleMesh,
-        index,
+        count,
         this._color,
         Number(definition.presentation.particleEmissiveStrength),
       );
+      count += 1;
     }
-    publishInstancedPool(this.particleMesh, snapshot.particles.length, {
+    publishInstancedPool(this.particleMesh, count, {
       deferCountGrowth: true,
       instanceColors: true,
       instanceEmissive: true,
@@ -1902,11 +2012,13 @@ export class ThreePresentation {
       snapshot,
       this.flags.values.dynamicLights,
       this.flags.values.lightColorVariation,
+      snapshot.map.layerId ?? snapshot.runtimeLayerId ?? null,
     );
     const assignments = mergeCatalogPropLights(
       transientAssignments,
-      snapshot.rocks,
+      snapshot.rocks.filter((body) => body.layerId === (snapshot.map.layerId ?? snapshot.runtimeLayerId)),
       this.lightBudget.capacity,
+      this.activeBaseY,
     );
     this.activeLightCount = applyLightPool(
       this.dynamicLights,

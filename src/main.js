@@ -30,7 +30,11 @@ import {
   AuthoringHistory,
   commandFromAuthoringAction,
 } from "./authoring/authoring_history.js";
-import { ArenaScenario } from "./sim/scenario.js";
+import {
+  ArenaScenario,
+  createHoleDebugArenaScenario,
+  createVerticalDebugArenaScenario,
+} from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
 import { TrueSightSystem } from "./visibility/true_sight.js";
 import {
@@ -41,7 +45,14 @@ import {
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("arena"));
 if (!canvas) throw new Error("Missing #arena canvas");
 
-const simulation = new Simulation();
+const requestedArena = new URLSearchParams(window.location.search).get("arena");
+const elevatorArenaRequested = requestedArena === "elevator";
+const holeArenaRequested = requestedArena === "holes";
+const simulation = new Simulation({
+  ...(elevatorArenaRequested
+    ? { scenario: createVerticalDebugArenaScenario() }
+    : holeArenaRequested ? { scenario: createHoleDebugArenaScenario() } : {}),
+});
 const initialSnapshot = simulation.snapshot();
 const ui = new ArenaUi();
 const presentationOptions = parsePresentationOptions(window.location.search);
@@ -315,25 +326,22 @@ function toggleMode() {
     resumeAfterEdit = !runtime.paused;
     runtime.pause();
     mode = "edit";
-    if (editorLayerBeforePlay && editorLayerBeforePlay !== simulation.authoringSnapshot().runtimeLayerId) {
-      const result = applyImmediateMutation({ type: "activateLayer", layerId: editorLayerBeforePlay });
-      if (!result.ok) ui.showError(result.error ?? "Editor layer activation failed");
+    // Begin editing where the live player currently is.  This changes only
+    // the editor/view recipe; it never rewinds a body to its authored start.
+    const runtimeLayerId = simulation.authoringSnapshot().runtimeLayerId;
+    if (runtimeLayerId && runtimeLayerId !== simulation.authoringSnapshot().activeLayerId) {
+      if (!authoringEditor?.activateLayer(runtimeLayerId)) {
+        ui.showError(`Could not activate runtime layer "${runtimeLayerId}" for editing`);
+      }
     }
   } else {
     authoringEditor?.cancel();
     editorLayerBeforePlay = authoringEditor?.snapshot().activeLayerId
       ?? simulation.authoringSnapshot().playerStartLayerId;
     authoringEditor?.setReferenceLayer(null);
-    const playerStartLayerId = simulation.authoringSnapshot().playerStartLayerId;
-    if (simulation.authoringSnapshot().runtimeLayerId !== playerStartLayerId) {
-      const result = applyImmediateMutation({ type: "activateLayer", layerId: playerStartLayerId });
-      if (!result.ok) {
-        ui.showError(result.error ?? "Player-start layer activation failed");
-        return;
-      }
-    }
-    trueSight.requestSnap("reset");
-    injectMutation({ type: "restoreScenario" });
+    // Leaving edit mode resumes the same disposable simulation.  The explicit
+    // Restore positions control remains the only authored-state rewind.
+    trueSight.requestSnap("map");
     pinned = null;
     mode = "play";
     if (resumeAfterEdit) runtime.resume();
@@ -359,7 +367,7 @@ function toggleMode() {
   ui.announce(
     mode === "edit"
       ? "Edit mode paused: choose a catalog definition"
-      : "Play mode restored from authored state: RMB move, LMB cast",
+      : "Play mode resumed: RMB move, LMB cast",
   );
 }
 
@@ -531,6 +539,14 @@ authoringInspector = new AuthoringInspector({
   },
   onDelete: (instanceId) => {
     const ok = authoringEditor.removeInstance(instanceId);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onUpdateConnector: (connectorId, changes) => {
+    const ok = authoringEditor.updateConnector(connectorId, changes);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onDeleteConnector: (connectorId) => {
+    const ok = authoringEditor.removeConnector(connectorId);
     return { ok, message: authoringEditor.snapshot().status.message };
   },
 });
@@ -719,6 +735,31 @@ const probe = Object.freeze({
   queryAt(x, z) {
     return simulation.queryAt(Number(x), Number(z));
   },
+  elevators() {
+    return simulation.snapshot().elevators.map((elevator) => structuredClone(elevator));
+  },
+  holes(layerId = null) {
+    const snapshot = simulation.snapshot();
+    if (layerId === null || layerId === undefined) return structuredClone(snapshot.map.holes ?? []);
+    return structuredClone(simulation.authoringLayerSnapshot(String(layerId))?.holes ?? []);
+  },
+  holeDiagnostics() {
+    const snapshot = simulation.snapshot();
+    return {
+      metrics: structuredClone(snapshot.holeMetrics ?? {}),
+      recentEvents: structuredClone(snapshot.recentHoleEvents ?? []),
+    };
+  },
+  verticalBody(kind, id) {
+    return simulation.resolveSelection({ kind: String(kind), id: Number(id) });
+  },
+  cycleElevator(connectorId) {
+    return injectMutation({ type: "cycleElevator", connectorId: String(connectorId) });
+  },
+  summonElevator(connectorId, stop = "lower") {
+    if (stop !== "lower" && stop !== "upper") return false;
+    return injectMutation({ type: "summonElevator", connectorId: String(connectorId), stop });
+  },
   authoring() {
     const editor = authoringEditor.snapshot();
     const history = editor.history;
@@ -828,6 +869,28 @@ const probe = Object.freeze({
   getAuthoredInstance(authoringId) {
     return simulation.getAuthoredInstance(String(authoringId));
   },
+  getAuthoredConnector(connectorId) {
+    return simulation.getAuthoredConnector(String(connectorId));
+  },
+  placeElevatorConnector(lowerLayerId, upperLayerId, x, z, options = {}) {
+    if (mode !== "edit") return false;
+    return commitAuthoringAction({
+      ...options,
+      type: "placeConnector",
+      definitionId: "connector.elevator.two-stop",
+      lowerLayerId: String(lowerLayerId),
+      upperLayerId: String(upperLayerId),
+      x: Number(x),
+      z: Number(z),
+    }).ok;
+  },
+  updateElevatorConnector(connectorId, changes = {}) {
+    return mode === "edit"
+      && authoringEditor.updateConnector(String(connectorId), changes);
+  },
+  removeElevatorConnector(connectorId) {
+    return mode === "edit" && authoringEditor.removeConnector(String(connectorId));
+  },
   setTile(cx, cz, tile) {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
     return commitAuthoringAction({ type: "setTile", cx, cz, tile }).ok;
@@ -835,6 +898,10 @@ const probe = Object.freeze({
   paintSurface(cx, cz, definitionId = "surface.stone") {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
     return commitAuthoringAction({ type: "paintSurface", cx, cz, definitionId }).ok;
+  },
+  paintHole(cx, cz) {
+    if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
+    return commitAuthoringAction({ type: "paintSurface", cx, cz, definitionId: "surface.hole" }).ok;
   },
   paintStructure(cx, cz, definitionId = "structure.wall") {
     if (!simulation.map.inBounds(Math.trunc(cx), Math.trunc(cz))) return false;
@@ -964,6 +1031,9 @@ const probe = Object.freeze({
           "renameLayer",
           "setLayerBaseY",
           "setPlayerStartLayer",
+          "placeConnector",
+          "removeConnector",
+          "updateConnector",
         ]).has(String(action.type))
       ) {
         return commitAuthoringAction(action).ok;

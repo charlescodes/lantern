@@ -202,6 +202,7 @@ export class PresentationLightBudget {
     this.orphanGeneration = 0;
     this.lastTick = null;
     this.lastSeed = null;
+    this.lastLayerId = null;
   }
 
   reset() {
@@ -213,25 +214,40 @@ export class PresentationLightBudget {
     this.orphanGeneration = 0;
     this.lastTick = null;
     this.lastSeed = null;
+    this.lastLayerId = null;
   }
 
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {boolean} [enabled]
    * @param {boolean} [colorVariation]
+   * @param {string|null} [activeLayerId]
    */
-  allocate(snapshot, enabled = true, colorVariation = true) {
+  allocate(snapshot, enabled = true, colorVariation = true, activeLayerId = null) {
     if (!enabled) {
       this.reset();
       return [];
     }
+    const layerId = activeLayerId === null ? null : String(activeLayerId);
+    const layerChanged = this.lastLayerId !== null && layerId !== this.lastLayerId;
+    if (layerChanged) this.reset();
+    this.lastLayerId = layerId;
+    const onActiveLayer = (value) => (
+      layerId === null
+      || value.layerId === undefined
+      || value.layerId === null
+      || value.layerId === layerId
+    );
+    const visibleParticles = snapshot.particles.filter(onActiveLayer);
+    const visibleProjectiles = snapshot.projectiles.filter(onActiveLayer);
+    const visibleRecentEvents = snapshot.recentEvents.filter(onActiveLayer);
     const transientTimelineCleared = this.lastTick !== null
-      && snapshot.recentEvents.length === 0
+      && visibleRecentEvents.length === 0
       && (
         this.observedEventIds.size > 0
         || (
-          snapshot.projectiles.length === 0
-          && snapshot.particles.length === 0
+          visibleProjectiles.length === 0
+          && visibleParticles.length === 0
           && (this.groups.size > 0 || this.observedParticleIds.size > 0)
         )
       );
@@ -249,17 +265,17 @@ export class PresentationLightBudget {
     this.lastSeed = Number(snapshot.seed ?? 0);
 
     const particlesById = new Map(
-      snapshot.particles.map((particle) => [Number(particle.id), particle]),
+      visibleParticles.map((particle) => [Number(particle.id), particle]),
     );
     const projectilesById = new Map(
-      snapshot.projectiles.map((projectile) => [Number(projectile.id), projectile]),
+      visibleProjectiles.map((projectile) => [Number(projectile.id), projectile]),
     );
     const currentEventIds = new Set(
-      snapshot.recentEvents
+      visibleRecentEvents
         .filter((event) => event.type === "explosion")
         .map((event) => Number(event.id)),
     );
-    const newEvents = snapshot.recentEvents
+    const newEvents = visibleRecentEvents
       .filter((event) => (
         event.type === "explosion"
         && !this.observedEventIds.has(Number(event.id))
@@ -271,7 +287,7 @@ export class PresentationLightBudget {
     this.observedEventIds = currentEventIds;
 
     const newParticles = [];
-    for (const particle of snapshot.particles) {
+    for (const particle of visibleParticles) {
       const id = Number(particle.id);
       if (this.observedParticleIds.has(id)) continue;
       this.observedParticleIds.add(id);
@@ -279,7 +295,7 @@ export class PresentationLightBudget {
     }
     this.observedParticleIds = new Set(particlesById.keys());
     const relevantProjectileIds = new Set(
-      snapshot.recentEvents
+      visibleRecentEvents
         .filter((event) => event.type === "explosion")
         .map((event) => Number(event.projectileId ?? event.id)),
     );
@@ -290,7 +306,7 @@ export class PresentationLightBudget {
     }
 
     const admissionRequests = new Set();
-    for (const projectile of [...snapshot.projectiles].sort(
+    for (const projectile of [...visibleProjectiles].sort(
       (left, right) => Number(left.id) - Number(right.id),
     )) {
       const projectileId = Number(projectile.id);

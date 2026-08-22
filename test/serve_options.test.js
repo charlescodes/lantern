@@ -72,6 +72,8 @@ test("printed network routes are phone-ready and include the unauthenticated-LAN
     output,
     /http:\/\/192\.168\.1\.50:4173\/\?renderer=3d&backend=webgl/,
   );
+  assert.match(output, /http:\/\/192\.168\.1\.50:4173\/\?arena=holes&renderer=2d/);
+  assert.match(output, /http:\/\/192\.168\.1\.50:4173\/\?arena=holes&renderer=3d/);
   assert.match(output, /no authentication/i);
   assert.match(output, /secure context/i);
 
@@ -79,5 +81,8 @@ test("printed network routes are phone-ready and include the unauthenticated-LAN
     canvas2d: "http://[::1]:4173/?renderer=2d",
     automatic3d: "http://[::1]:4173/?renderer=3d",
     forcedWebgl2: "http://[::1]:4173/?renderer=3d&backend=webgl",
+    holesCanvas2d: "http://[::1]:4173/?arena=holes&renderer=2d",
+    holesAutomatic3d: "http://[::1]:4173/?arena=holes&renderer=3d",
+    holesForcedWebgl2: "http://[::1]:4173/?arena=holes&renderer=3d&backend=webgl",
   });
 });

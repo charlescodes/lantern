@@ -34,6 +34,8 @@ export class AuthoringInspector {
    * onUpdateProperties?:(instanceId:string,properties:Record<string,unknown>)=>boolean|{ok:boolean,message?:string},
    * onRotate:(instanceId:string)=>boolean|{ok:boolean,message?:string},
    * onDelete:(instanceId:string)=>boolean|{ok:boolean,message?:string},
+   * onUpdateConnector?:(connectorId:string,changes:Record<string,unknown>)=>boolean|{ok:boolean,message?:string},
+   * onDeleteConnector?:(connectorId:string)=>boolean|{ok:boolean,message?:string},
    * }} options
    */
   constructor(options) {
@@ -43,6 +45,8 @@ export class AuthoringInspector {
     this.onUpdateProperties = options.onUpdateProperties ?? (() => false);
     this.onRotate = options.onRotate;
     this.onDelete = options.onDelete;
+    this.onUpdateConnector = options.onUpdateConnector ?? (() => false);
+    this.onDeleteConnector = options.onDeleteConnector ?? (() => false);
     this.collapsed = false;
     this.signature = "";
     this.#renderShell();
@@ -86,6 +90,8 @@ export class AuthoringInspector {
     const target = editor.selectedTarget;
     const targetKey = target?.kind === "instance"
       ? `instance:${target.layerId}:${target.instanceId}`
+      : target?.kind === "connector"
+        ? `connector:${target.layerId}:${target.connectorId}`
       : target?.kind === "cell"
         ? `cell:${target.layerId}:${target.x}:${target.z}`
         : "none";
@@ -122,6 +128,10 @@ export class AuthoringInspector {
       appendRow(list, "Occluding", details.occluding ? "yes" : "no");
       this.content.append(list);
       this.showStatus("Compiled flags are read-only diagnostics", true);
+      return;
+    }
+    if (target.kind === "connector") {
+      this.#renderConnector(snapshot, target);
       return;
     }
 
@@ -283,6 +293,133 @@ export class AuthoringInspector {
     properties.append(summary, propertyForm);
     this.content.append(properties);
     this.showStatus("Transform edits validate and commit through authoring actions", true);
+  }
+
+  /** @param {Record<string,any>} snapshot @param {Record<string,any>} target */
+  #renderConnector(snapshot, target) {
+    const connector = (snapshot.authoring.connectors ?? []).find(
+      (candidate) => candidate.id === target.connectorId,
+    );
+    if (!connector) {
+      this.showStatus("The selected connector no longer exists", false);
+      return;
+    }
+    const definition = getPlaceableDefinition(connector.definitionId);
+    const list = document.createElement("dl");
+    list.className = "authoring-inspector-list";
+    appendRow(list, "Connector ID", connector.id);
+    appendRow(list, "Definition", `${definition?.label ?? connector.definitionId} · ${connector.definitionId}`);
+    appendRow(list, "Visible endpoint", target.layerId);
+    appendRow(list, "Lower layer", connector.lowerLayerId);
+    appendRow(list, "Upper layer", connector.upperLayerId);
+    this.content.append(list);
+
+    const form = document.createElement("form");
+    form.className = "authoring-transform-form";
+    const addSelect = (labelText, name, value, values) => {
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      const select = document.createElement("select");
+      select.name = name;
+      for (const item of values) {
+        const option = document.createElement("option");
+        option.value = String(item.value);
+        option.textContent = String(item.label);
+        option.selected = String(item.value) === String(value);
+        select.append(option);
+      }
+      label.append(select);
+      form.append(label);
+      return select;
+    };
+    const addNumber = (labelText, name, value, step) => {
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.name = name;
+      input.step = step;
+      input.value = String(value);
+      label.append(input);
+      form.append(label);
+      return input;
+    };
+    const layerOptions = snapshot.authoring.layers.map((layer) => ({
+      value: layer.id,
+      label: `${layer.name} · ${layer.baseY} m`,
+    }));
+    const lower = addSelect("Lower layer", "lowerLayerId", connector.lowerLayerId, layerOptions);
+    const upper = addSelect("Upper layer", "upperLayerId", connector.upperLayerId, layerOptions);
+    const x = addNumber("X", "x", connector.x, "0.1");
+    const z = addNumber("Z", "z", connector.z, "0.1");
+    const platformWidth = addNumber("Platform width", "platformWidth", connector.platformWidth, "0.01");
+    const apertureWidth = addNumber("Aperture width", "apertureWidth", connector.apertureWidth, "0.01");
+    const travelSpeed = addNumber("Travel speed", "travelSpeed", connector.travelSpeed, "0.1");
+    const dwellSeconds = addNumber("Dwell seconds", "dwellSeconds", connector.dwellSeconds, "0.05");
+    const initialStop = addSelect("Initial stop", "initialStop", connector.initialStop, [
+      { value: "lower", label: "Lower" },
+      { value: "upper", label: "Upper" },
+    ]);
+    const activationPolicy = addSelect(
+      "Activation",
+      "activationPolicy",
+      connector.activationPolicy,
+      [
+        { value: "occupancy", label: "Occupancy" },
+        { value: "manual", label: "Manual / debug command" },
+      ],
+    );
+    const apply = document.createElement("button");
+    apply.type = "submit";
+    apply.className = "accent-button";
+    apply.textContent = "Apply connector";
+    form.append(apply);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const changes = {
+        lowerLayerId: lower.value,
+        upperLayerId: upper.value,
+        x: Number(x.value),
+        z: Number(z.value),
+        platformWidth: Number(platformWidth.value),
+        apertureWidth: Number(apertureWidth.value),
+        travelSpeed: Number(travelSpeed.value),
+        dwellSeconds: Number(dwellSeconds.value),
+        initialStop: initialStop.value,
+        activationPolicy: activationPolicy.value,
+      };
+      if ([changes.x, changes.z, changes.platformWidth, changes.apertureWidth,
+        changes.travelSpeed, changes.dwellSeconds].some((value) => !Number.isFinite(value))) {
+        this.showStatus("Connector numeric values must be finite", false);
+        return;
+      }
+      const result = this.onUpdateConnector(connector.id, changes);
+      const ok = typeof result === "boolean" ? result : result.ok;
+      if (!ok) this.showStatus(
+        typeof result === "object" && result.message
+          ? result.message
+          : "Connector update was rejected",
+        false,
+      );
+    });
+    this.content.append(form);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "danger-button";
+    deleteButton.textContent = "Delete connector";
+    deleteButton.addEventListener("click", () => {
+      const result = this.onDeleteConnector(connector.id);
+      const ok = typeof result === "boolean" ? result : result.ok;
+      if (!ok) this.showStatus(
+        typeof result === "object" && result.message
+          ? result.message
+          : "Connector deletion was rejected",
+        false,
+      );
+    });
+    this.content.append(deleteButton);
+    this.showStatus("Live motion is runtime state and is never authored", true);
   }
 
   /** @param {string} message @param {boolean} valid */

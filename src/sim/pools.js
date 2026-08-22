@@ -1,5 +1,12 @@
 // @ts-check
 
+import {
+  copyVerticalBody,
+  DEFAULT_ACTOR_VERTICAL_CAPABILITIES,
+  initializeVerticalBody,
+  installVerticalBodyColumns,
+} from "./vertical_body.js";
+
 export class ProjectilePool {
   /** @param {number} capacity */
   constructor(capacity) {
@@ -24,6 +31,7 @@ export class ProjectilePool {
     this.definitionRevision = new Uint32Array(capacity);
     this.effectId = new Uint32Array(capacity);
     this.effectSeed = new Uint32Array(capacity);
+    this.layerIndex = new Uint16Array(capacity);
   }
 
   reset() {
@@ -32,7 +40,7 @@ export class ProjectilePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number}} value */
+  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -58,6 +66,7 @@ export class ProjectilePool {
     this.definitionRevision[index] = value.definitionRevision ?? 0;
     this.effectId[index] = value.effectId ?? 0;
     this.effectSeed[index] = value.effectSeed ?? 0;
+    this.layerIndex[index] = value.layerIndex ?? 0;
     this.activeCount += 1;
     return id;
   }
@@ -84,6 +93,7 @@ export class ProjectilePool {
       this.definitionRevision[index] = this.definitionRevision[last];
       this.effectId[index] = this.effectId[last];
       this.effectSeed[index] = this.effectSeed[last];
+      this.layerIndex[index] = this.layerIndex[last];
     }
     this.activeCount = last;
     return true;
@@ -219,6 +229,7 @@ export class EnemyWizardPool {
     this.investigationOriginX = new Float32Array(capacity);
     this.investigationOriginZ = new Float32Array(capacity);
     this.navigationSlot = new Int16Array(capacity);
+    installVerticalBodyColumns(this, capacity);
   }
 
   reset() {
@@ -227,7 +238,7 @@ export class EnemyWizardPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number}} value */
+  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -359,6 +370,7 @@ export class EnemyWizardPool {
     this.investigationOriginX[index] = Number.NaN;
     this.investigationOriginZ[index] = Number.NaN;
     this.navigationSlot[index] = -1;
+    initializeVerticalBody(this, index, value, DEFAULT_ACTOR_VERTICAL_CAPABILITIES);
     this.activeCount += 1;
     return id;
   }
@@ -483,6 +495,16 @@ export class EnemyWizardPool {
         this.investigationOriginX,
         this.investigationOriginZ,
         this.navigationSlot,
+        this.worldY,
+        this.previousWorldY,
+        this.verticalVelocityY,
+        this.verticalMode,
+        this.supportKind,
+        this.supportId,
+        this.layerIndex,
+        this.transitConnectorId,
+        this.verticalCapabilities,
+        this.latestApertureFit,
       ]) {
         component[index] = component[last];
       }
@@ -525,6 +547,8 @@ export class RockPool {
     this.halfDepth = new Float32Array(capacity);
     this.massKg = new Float32Array(capacity);
     this.inverseMass = new Float32Array(capacity);
+    this.airbornePassable = new Uint8Array(capacity);
+    installVerticalBodyColumns(this, capacity);
   }
 
   reset() {
@@ -534,7 +558,7 @@ export class RockPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnId:number,definitionId?:string|null,archetype:number,collider?:number,rotation?:number,x:number,z:number,radius:number,halfWidth?:number,halfDepth?:number,massKg:number}} value */
+  /** @param {{spawnId:number,definitionId?:string|null,archetype:number,collider?:number,rotation?:number,x:number,z:number,radius:number,halfWidth?:number,halfDepth?:number,massKg:number,airbornePassable?:boolean,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -560,6 +584,8 @@ export class RockPool {
     this.halfDepth[index] = value.halfDepth ?? 0;
     this.massKg[index] = value.massKg;
     this.inverseMass[index] = 1 / value.massKg;
+    this.airbornePassable[index] = value.airbornePassable === false ? 0 : 1;
+    initializeVerticalBody(this, index, value);
     this.activeCount += 1;
     return id;
   }
@@ -586,6 +612,8 @@ export class RockPool {
       this.halfDepth[index] = this.halfDepth[last];
       this.massKg[index] = this.massKg[last];
       this.inverseMass[index] = this.inverseMass[last];
+      this.airbornePassable[index] = this.airbornePassable[last];
+      copyVerticalBody(this, index, last);
     }
     this.activeCount = last;
     this.definitionId[last] = null;
@@ -637,6 +665,7 @@ export class ParticlePool {
     this.effectSeed = new Uint32Array(capacity);
     this.sampleOrdinal = new Uint16Array(capacity);
     this.sampleSeed = new Uint32Array(capacity);
+    this.layerIndex = new Uint16Array(capacity);
   }
 
   reset() {
@@ -648,7 +677,7 @@ export class ParticlePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,y:number,z:number,vx:number,vy:number,vz:number,lifetime:number,size:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,sampleOrdinal?:number,sampleSeed?:number}} value */
+  /** @param {{x:number,y:number,z:number,vx:number,vy:number,vz:number,lifetime:number,size:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,sampleOrdinal?:number,sampleSeed?:number,layerIndex?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -675,6 +704,7 @@ export class ParticlePool {
     this.effectSeed[index] = value.effectSeed ?? 0;
     this.sampleOrdinal[index] = value.sampleOrdinal ?? 0;
     this.sampleSeed[index] = value.sampleSeed ?? 0;
+    this.layerIndex[index] = value.layerIndex ?? 0;
     this.activeCount += 1;
     return id;
   }
@@ -702,6 +732,7 @@ export class ParticlePool {
       this.effectSeed[index] = this.effectSeed[last];
       this.sampleOrdinal[index] = this.sampleOrdinal[last];
       this.sampleSeed[index] = this.sampleSeed[last];
+      this.layerIndex[index] = this.layerIndex[last];
     }
     this.activeCount = last;
     return true;

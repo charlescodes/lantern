@@ -1,11 +1,12 @@
 // @ts-check
 
-import { ROCK_ARCHETYPES } from "../config.js";
+import { ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
 
 const CATEGORY_LABELS = Object.freeze({
   surface: "Surfaces",
   structure: "Structures",
   object: "Objects",
+  connector: "Connectors",
 });
 
 /** @param {Record<string, any>} definition */
@@ -54,6 +55,25 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
     traits: { surfaceMaterial: "moss", blocksMovement: false, blocksSight: false },
   }),
   freezeDefinition({
+    id: "surface.hole",
+    label: "Floor hole",
+    category: "surface",
+    categoryLabel: CATEGORY_LABELS.surface,
+    placementMode: "paint",
+    placementTarget: "surface",
+    footprint: { cells: [{ x: 0, z: 0 }] },
+    debug: { fill: "#20252a", alternateFill: "#20252a", stroke: "#bdc7cf", glyph: "" },
+    renderAsset: null,
+    traits: {
+      surfaceMaterial: "hole",
+      runtimeKind: "floor-hole",
+      apertureWidth: VERTICAL_PHYSICS.defaultHoleApertureWidthMeters,
+      apertureClearance: VERTICAL_PHYSICS.holeFitClearanceMeters,
+      blocksMovement: false,
+      blocksSight: false,
+    },
+  }),
+  freezeDefinition({
     id: "structure.wall",
     label: "Wall",
     category: "structure",
@@ -87,6 +107,9 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       massKg: rock.massKg,
       collider: "circle",
       dynamic: true,
+      airbornePassable: true,
+      canRideElevator: true,
+      canActivateElevator: false,
       snap: "tenth",
       blocksMovement: true,
       blocksSight: false,
@@ -130,6 +153,9 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       collider: "circle",
       dynamic: true,
       upright: true,
+      airbornePassable: false,
+      canRideElevator: true,
+      canActivateElevator: false,
       blocksMovement: true,
       blocksSight: false,
       presentationLight: {
@@ -157,6 +183,9 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       snap: "cell-center",
       rotatable: true,
       dynamic: true,
+      airbornePassable: true,
+      canRideElevator: true,
+      canActivateElevator: false,
       collider: "box",
       halfWidth: 0.9,
       halfDepth: 0.36,
@@ -165,6 +194,23 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       fixedRotation: true,
       runtimeAnchor: "footprint-center",
       blocksMovement: true,
+      blocksSight: false,
+    },
+  }),
+  freezeDefinition({
+    id: "connector.elevator.two-stop",
+    label: "Two-stop elevator",
+    category: "connector",
+    categoryLabel: CATEGORY_LABELS.connector,
+    placementMode: "stamp",
+    placementTarget: "connector",
+    footprint: { cells: [{ x: 0, z: 0 }] },
+    debug: { fill: "#4c8f9f", alternateFill: "#356d7a", stroke: "#b9f3ff", glyph: "E" },
+    renderAsset: null,
+    traits: {
+      runtimeKind: "elevator-connector",
+      snap: "tenth",
+      blocksMovement: false,
       blocksSight: false,
     },
   }),

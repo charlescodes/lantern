@@ -11,13 +11,14 @@ import {
 } from "./footprint.js";
 
 export const EDITOR_TOOLS = Object.freeze(["select", "paint", "erase", "eyedropper"]);
-export const AUTHORING_CHANNELS = Object.freeze(["surface", "structure", "instance"]);
+export const AUTHORING_CHANNELS = Object.freeze(["surface", "structure", "instance", "connector"]);
 
 /** @param {Record<string, any>} definition */
 export function authoringChannelForDefinition(definition) {
   if (definition?.placementTarget === "surface") return "surface";
   if (definition?.placementTarget === "structure") return "structure";
   if (definition?.placementTarget === "instance") return "instance";
+  if (definition?.placementTarget === "connector") return "connector";
   return null;
 }
 
@@ -63,6 +64,30 @@ export function pickAuthoredInstance(authoring, worldX, worldZ) {
     : null;
 }
 
+/** Map-level connectors are selectable from either endpoint layer. */
+export function pickAuthoredConnector(authoring, worldX, worldZ) {
+  if (!authoringCellAt(authoring, worldX, worldZ)) return null;
+  const activeLayerId = authoring.activeLayer.id;
+  const matches = [];
+  for (let index = 0; index < (authoring.connectors ?? []).length; index += 1) {
+    const connector = authoring.connectors[index];
+    if (connector.lowerLayerId !== activeLayerId && connector.upperLayerId !== activeLayerId) continue;
+    const half = Number(connector.platformWidth) / 2;
+    if (
+      Math.abs(worldX - Number(connector.x)) <= half
+      && Math.abs(worldZ - Number(connector.z)) <= half
+    ) matches.push({ connector, placementIndex: index });
+  }
+  matches.sort((left, right) => (
+    right.placementIndex - left.placementIndex
+    || String(right.connector.id).localeCompare(String(left.connector.id))
+  ));
+  const winner = matches[0]?.connector;
+  return winner
+    ? { kind: "connector", layerId: activeLayerId, connectorId: winner.id }
+    : null;
+}
+
 /**
  * @param {Record<string, any>} authoring
  * @param {number} worldX
@@ -71,7 +96,9 @@ export function pickAuthoredInstance(authoring, worldX, worldZ) {
 export function pickAuthoringTarget(authoring, worldX, worldZ) {
   const cell = authoringCellAt(authoring, worldX, worldZ);
   if (!cell) return null;
-  return pickAuthoredInstance(authoring, worldX, worldZ) ?? {
+  return pickAuthoredConnector(authoring, worldX, worldZ)
+    ?? pickAuthoredInstance(authoring, worldX, worldZ)
+    ?? {
     kind: /** @type {const} */ ("cell"),
     layerId: authoring.activeLayer.id,
     x: cell.x,
@@ -85,6 +112,15 @@ export function reconcileAuthoringTarget(authoring, target) {
   if (target.kind === "instance") {
     return authoring.instances.some((instance) => instance.id === target.instanceId)
       ? { kind: "instance", layerId: target.layerId, instanceId: target.instanceId }
+      : null;
+  }
+  if (target.kind === "connector") {
+    const connector = (authoring.connectors ?? []).find(
+      (candidate) => candidate.id === target.connectorId,
+    );
+    return connector
+      && (connector.lowerLayerId === target.layerId || connector.upperLayerId === target.layerId)
+      ? { kind: "connector", layerId: target.layerId, connectorId: target.connectorId }
       : null;
   }
   if (target.kind === "cell") {
@@ -106,6 +142,12 @@ export function occupiedCellsForTarget(authoring, target) {
   const reconciled = reconcileAuthoringTarget(authoring, target);
   if (!reconciled) return [];
   if (reconciled.kind === "cell") return [{ cx: reconciled.x, cz: reconciled.z }];
+  if (reconciled.kind === "connector") {
+    const connector = (authoring.connectors ?? []).find(
+      (candidate) => candidate.id === reconciled.connectorId,
+    );
+    return connector ? [{ cx: Math.floor(connector.x), cz: Math.floor(connector.z) }] : [];
+  }
   const instance = authoring.instances.find(
     (candidate) => candidate.id === reconciled.instanceId,
   );
@@ -129,13 +171,23 @@ function definitionAtCell(snapshot, cx, cz, channel) {
  * @param {Record<string, any>} snapshot
  * @param {number} worldX
  * @param {number} worldZ
- * @param {"surface"|"structure"|"instance"} activeChannel
+ * @param {"surface"|"structure"|"instance"|"connector"} activeChannel
  */
 export function sampleAuthoredDefinition(snapshot, worldX, worldZ, activeChannel) {
   const authoring = snapshot.authoring;
   const cell = authoringCellAt(authoring, worldX, worldZ);
   if (!cell) return null;
   const sampleChannel = (channel) => {
+    if (channel === "connector") {
+      const target = pickAuthoredConnector(authoring, worldX, worldZ);
+      if (!target) return null;
+      const connector = authoring.connectors.find(
+        (candidate) => candidate.id === target.connectorId,
+      );
+      return connector
+        ? { definitionId: connector.definitionId, channel, target }
+        : null;
+    }
     if (channel === "instance") {
       const target = pickAuthoredInstance(authoring, worldX, worldZ);
       if (!target) return null;
@@ -160,7 +212,7 @@ export function sampleAuthoredDefinition(snapshot, worldX, worldZ, activeChannel
       }
       : null;
   };
-  const order = [activeChannel, "instance", "structure", "surface"];
+  const order = [activeChannel, "connector", "instance", "structure", "surface"];
   const visited = new Set();
   for (const channel of order) {
     if (visited.has(channel)) continue;

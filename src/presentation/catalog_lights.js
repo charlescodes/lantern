@@ -19,8 +19,9 @@ function compareStableBodyIdentity(left, right) {
  * @param {Array<Record<string, any>>} transientAssignments
  * @param {Array<Record<string, any>>} bodies
  * @param {number} capacity
+ * @param {number} [baseY]
  */
-export function mergeCatalogPropLights(transientAssignments, bodies, capacity) {
+export function mergeCatalogPropLights(transientAssignments, bodies, capacity, baseY = 0) {
   const residentCapacity = Math.max(0, Math.trunc(Number(capacity)));
   if (residentCapacity === 0) return [];
   const maximum = Math.min(
@@ -54,7 +55,7 @@ export function mergeCatalogPropLights(transientAssignments, bodies, capacity) {
       definitionId: definition.id,
       residentSlot: firstReservedSlot + index,
       x: Number(body.x),
-      y: Number(light.height),
+      y: Number(body.worldY ?? baseY) - Number(baseY) + Number(light.height),
       z: Number(body.z),
       color: {
         r: Number(light.color.r),

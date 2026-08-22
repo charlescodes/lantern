@@ -118,7 +118,8 @@ Code: [`src/main.js`](../src/main.js) wires the app; [`src/runtime/fixed_step_ru
 ```text
 STATE Simulation
     compatibility := seed + tick + schema/profile boundaries
-    authoredWorld := Scenario(GridMap, player spawn, rocks, one obelisk)
+    authoredWorld := Scenario(compiled layers, player spawn, dynamic props,
+                              one obelisk, two-stop connectors)
 
     entities :=
         player singleton
@@ -126,6 +127,7 @@ STATE Simulation
         bounded DynamicDeadBodyPool
         bounded InertDeadBodyRing     // FIFO scenery; no per-tick interaction
         bounded RockPool
+        bounded ElevatorPool
         bounded ProjectilePool
         bounded SoundEventQueue      // one-tick authoritative stimuli
         bounded ParticlePool        // deterministic visuals; no gameplay effect
@@ -162,7 +164,9 @@ FUNCTION Simulation.tick(rawInput)
     prepareEnemyMovement(nextTick)
     IF enemy profile uses facing perception
         facingSystem(nextTick)
-    bodyPhysicsSystem()                         // actors, rocks, dynamic bodies, grid
+    elevatorSupportAndMotionSystem()            // acquire, step once, carry exact delta Y
+    bodyPhysicsSystem()                         // normal X/Z control, pushing, per-layer grid
+    verticalResolutionSystem()                  // support loss, gravity, landing, handoff/ejection
     movementSoundSystem(nextTick)               // running cadence; walking is silent
 
     decrease cooldowns
@@ -193,7 +197,43 @@ stable ID travels with the copied row
 pool index is temporary and must never become external identity
 ```
 
-Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded scheduler; [`src/sim/pools.js`](../src/sim/pools.js) and [`src/sim/dead_body_pool.js`](../src/sim/dead_body_pool.js) own bounded storage.
+Code: [`src/sim/simulation.js`](../src/sim/simulation.js) is the crowded scheduler; [`src/sim/pools.js`](../src/sim/pools.js), [`src/sim/dead_body_pool.js`](../src/sim/dead_body_pool.js), and [`src/sim/elevator_pool.js`](../src/sim/elevator_pool.js) own bounded storage.
+
+## Vertical bodies and elevator support
+
+```text
+FOR each eligible player/enemy/prop/body
+    vertical state := worldY + velocityY + mode + layer
+                      + support kind/ID + connector context + capabilities
+
+elevatorSupportAndMotionSystem(dt):
+    acquire platform contact by center/support-point and feet-plane tolerance
+    count only capable actor activators       // props may ride without calling
+    step each unstoppable elevator once
+    add that exact platform delta Y to every supported body
+
+bodyPhysicsSystem(dt):
+    retain normal controllers, momentum, pushing, and co-rider contacts
+    query static X/Z collision from each body's own layer
+
+verticalResolutionSystem(dt):
+    after X/Z motion, detach bodies that left their support footprint
+    apply bounded gravity and terminal velocity to unsupported bodies
+    sweep downward through real elevator/floor support planes
+    at upper frame:
+        IF complete footprint fits square aperture with positive clearance
+            transfer that body to the upper layer exactly once
+        ELSE
+            detach and try deterministic bounded lateral ejection
+            increment diagnostics if only best-effort separation is possible
+    on floor landing, reenable low-clutter contact and bounded depenetration
+    update visible map only when the player changes layer
+```
+
+An elevator never owns passenger slots, centers riders, suppresses controllers,
+or changes speed for payload. Runtime Y motion and layer handoffs never modify
+the authoring document. See
+[`generic-vertical-bodies-and-elevator.md`](./notes/generic-vertical-bodies-and-elevator.md).
 
 ## Player movement and sound vertical
 

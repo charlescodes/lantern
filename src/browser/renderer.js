@@ -179,6 +179,7 @@ export class DebugRenderer {
 
     this.#drawMap(snapshot, view, developerToolsOpen);
     this.#drawAuthoringInstances(snapshot);
+    this.#drawElevators(snapshot, developerToolsOpen);
     if (developerToolsOpen && view.mode === "edit" && view.authoringEditor) {
       this.#drawAuthoringOverlays(snapshot, view.authoringEditor);
     }
@@ -327,6 +328,17 @@ export class DebugRenderer {
           ? surfaceDefinition?.debug.fill ?? COLORS.floorA
           : surfaceDefinition?.debug.alternateFill ?? COLORS.floorB;
         context.fillRect(cx, cz, 1, 1);
+        if (surfaceDefinition?.traits.runtimeKind === "floor-hole") {
+          const apertureWidth = Number(surfaceDefinition.traits.apertureWidth ?? 0.9);
+          const inset = (1 - apertureWidth) / 2;
+          // The painted cell remains a floor frame; only this central square is
+          // an aperture, including when its neighbors are also holes.
+          context.fillStyle = "#11161b";
+          context.fillRect(cx + inset, cz + inset, apertureWidth, apertureWidth);
+          context.strokeStyle = "rgba(214, 227, 234, 0.86)";
+          context.lineWidth = line * 1.4;
+          context.strokeRect(cx + inset, cz + inset, apertureWidth, apertureWidth);
+        }
         const structureDefinitionId = map.structure
           ? map.structure.legend[map.structure.cells[index]]
           : map.cells[index] === 1
@@ -477,6 +489,12 @@ export class DebugRenderer {
       context.strokeStyle = "rgba(120, 190, 224, 0.58)";
       context.lineWidth = line;
       context.strokeRect(0, 0, reference.width, reference.height);
+      for (const hole of reference.holes ?? []) {
+        const inset = (1 - hole.width) / 2;
+        context.strokeStyle = "rgba(177, 224, 242, 0.82)";
+        context.lineWidth = line * 1.2;
+        context.strokeRect(hole.cx + inset, hole.cz + inset, hole.width, hole.width);
+      }
       context.setLineDash([]);
       context.fillStyle = "rgba(174, 217, 238, 0.84)";
       context.font = `600 ${this.camera.viewportLengthToWorld(9)}px monospace`;
@@ -617,6 +635,65 @@ export class DebugRenderer {
     return this._scorchPoint;
   }
 
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {boolean} developerToolsOpen */
+  #drawElevators(snapshot, developerToolsOpen) {
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1.5);
+    const runtimeLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
+    for (const elevator of snapshot.elevators ?? []) {
+      if (
+        elevator.lowerLayerId !== runtimeLayerId
+        && elevator.upperLayerId !== runtimeLayerId
+        && elevator.supportedBodyCount === 0
+      ) continue;
+      const halfPlatform = elevator.platformWidth / 2;
+      const halfAperture = elevator.apertureWidth / 2;
+      context.save();
+      context.fillStyle = "rgba(76, 143, 159, 0.34)";
+      context.strokeStyle = "rgba(185, 243, 255, 0.96)";
+      context.lineWidth = line;
+      context.fillRect(
+        elevator.x - halfPlatform,
+        elevator.z - halfPlatform,
+        elevator.platformWidth,
+        elevator.platformWidth,
+      );
+      context.strokeRect(
+        elevator.x - halfPlatform,
+        elevator.z - halfPlatform,
+        elevator.platformWidth,
+        elevator.platformWidth,
+      );
+      context.setLineDash([line * 4, line * 3]);
+      context.strokeStyle = "rgba(255, 211, 119, 0.9)";
+      context.strokeRect(
+        elevator.x - halfAperture,
+        elevator.z - halfAperture,
+        elevator.apertureWidth,
+        elevator.apertureWidth,
+      );
+      context.setLineDash([]);
+      context.beginPath();
+      context.arc(elevator.x, elevator.z, line * 2.2, 0, Math.PI * 2);
+      context.fillStyle = elevator.motionState === "moving"
+        ? "#8bf1ff"
+        : "#ffd377";
+      context.fill();
+      if (developerToolsOpen) {
+        context.font = `600 ${this.camera.viewportLengthToWorld(8)}px monospace`;
+        context.textAlign = "center";
+        context.textBaseline = "bottom";
+        context.fillStyle = "rgba(231, 249, 252, 0.96)";
+        context.fillText(
+          `${elevator.connectorId} · y ${elevator.currentY.toFixed(2)}`,
+          elevator.x,
+          elevator.z - halfPlatform - 0.06,
+        );
+      }
+      context.restore();
+    }
+  }
+
   /** @param {Array<{x:number,z:number}>} obelisks */
   #drawObelisks(obelisks) {
     const context = this.context;
@@ -658,6 +735,7 @@ export class DebugRenderer {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const particle of snapshot.particles) {
+      if (particle.layerId !== snapshot.map.layerId) continue;
       const life = 1 - particle.age / particle.lifetime;
       const definition = fireballDefinitionFromSnapshot(snapshot, particle);
       writeFireballPaletteColor(this._fireColor, definition, {
@@ -744,6 +822,7 @@ export class DebugRenderer {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const rock of snapshot.rocks) {
+      if (rock.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
       if (rock.kind === "table") {
@@ -832,6 +911,11 @@ export class DebugRenderer {
     const line = this.camera.viewportLengthToWorld(1);
     for (const event of snapshot.recentEvents) {
       if (event.type !== "explosion") continue;
+      if (
+        event.layerId !== undefined
+        && event.layerId !== null
+        && event.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)
+      ) continue;
       const age = snapshot.tick - event.tick;
       const visualTicks = Math.max(
         1,
@@ -894,6 +978,7 @@ export class DebugRenderer {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const projectile of snapshot.projectiles) {
+      if (projectile.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
       const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
       writeFireballPaletteColor(this._fireColor, definition, {
         kind: FIREBALL_COLOR_PROJECTILE,
@@ -931,6 +1016,7 @@ export class DebugRenderer {
   #drawPlayer(snapshot, alpha, developerToolsOpen) {
     const context = this.context;
     const player = snapshot.player;
+    if (player.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) return;
     const x = interpolateRenderValue(player.previousX, player.x, alpha);
     const z = interpolateRenderValue(player.previousZ, player.z, alpha);
     const line = this.camera.viewportLengthToWorld(1);
@@ -963,6 +1049,7 @@ export class DebugRenderer {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const enemy of snapshot.enemies ?? []) {
+      if (enemy.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
       if (!(enemy.health > 0)) continue;
       const x = enemy.previousX + (enemy.x - enemy.previousX) * alpha;
       const z = enemy.previousZ + (enemy.z - enemy.previousZ) * alpha;
@@ -1019,6 +1106,7 @@ export class DebugRenderer {
       const body = index < inertBodies.length
         ? inertBodies[index]
         : dynamicBodies[index - inertBodies.length];
+      if (body.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
       const pose = enemyDeadBodyPose(body, alpha, this._deadBodyPose);
       const radius = pose.footprintWidth / 2;
       const halfSegment = Math.max(0, (pose.footprintLength - pose.footprintWidth) / 2);
@@ -1080,6 +1168,7 @@ export class DebugRenderer {
     const line = this.camera.viewportLengthToWorld(1);
     for (const actor of actors) {
       if (!(actor.health > 0)) continue;
+      if (actor.layerId && actor.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
       const x = actor.previousX + (actor.x - actor.previousX) * alpha;
       const z = actor.previousZ + (actor.z - actor.previousZ) * alpha;
       const ratio = healthBarRatio(actor.health, actor.maximumHealth);

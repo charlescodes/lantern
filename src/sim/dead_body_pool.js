@@ -1,5 +1,10 @@
 // @ts-check
 
+import {
+  initializeVerticalBody,
+  installVerticalBodyColumns,
+} from "./vertical_body.js";
+
 export const DEAD_BODY_SETTLE_REASON = Object.freeze({
   none: 0,
   quiet: 1,
@@ -36,9 +41,12 @@ export class DynamicDeadBodyPool {
     this.facingZ = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
     this.massKg = new Float32Array(capacity);
+    this.worldY = new Float32Array(capacity);
+    this.layerIndex = new Uint16Array(capacity);
     this.inverseMass = new Float32Array(capacity);
     this.quietTickCount = new Uint16Array(capacity);
     this.touched = new Uint8Array(capacity);
+    installVerticalBodyColumns(this, capacity);
   }
 
   reset() {
@@ -49,7 +57,7 @@ export class DynamicDeadBodyPool {
     this.speedClamped = 0;
   }
 
-  /** @param {{id:number,spawnSequence:number,deathTick:number,x:number,z:number,vx:number,vz:number,facingX:number,facingZ:number,radius:number,massKg:number}} value */
+  /** @param {{id:number,spawnSequence:number,deathTick:number,x:number,z:number,vx:number,vz:number,facingX:number,facingZ:number,radius:number,massKg:number,worldY?:number,layerIndex?:number,verticalVelocityY?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) return -1;
     const index = this.activeCount;
@@ -70,6 +78,7 @@ export class DynamicDeadBodyPool {
     this.inverseMass[index] = 1 / value.massKg;
     this.quietTickCount[index] = 0;
     this.touched[index] = 0;
+    initializeVerticalBody(this, index, value);
     this.activeCount += 1;
     return index;
   }
@@ -96,6 +105,16 @@ export class DynamicDeadBodyPool {
         this.inverseMass,
         this.quietTickCount,
         this.touched,
+        this.worldY,
+        this.previousWorldY,
+        this.verticalVelocityY,
+        this.verticalMode,
+        this.supportKind,
+        this.supportId,
+        this.layerIndex,
+        this.transitConnectorId,
+        this.verticalCapabilities,
+        this.latestApertureFit,
       ]) {
         component[index] = component[last];
       }
@@ -139,6 +158,8 @@ export class InertDeadBodyRing {
     this.facingZ = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
     this.massKg = new Float32Array(capacity);
+    this.worldY = new Float32Array(capacity);
+    this.layerIndex = new Uint16Array(capacity);
     this.settleReason = new Uint8Array(capacity);
   }
 
@@ -148,7 +169,7 @@ export class InertDeadBodyRing {
     this.overwritten = 0;
   }
 
-  /** @param {{id:number,spawnSequence:number,deathTick:number,settledTick:number,x:number,z:number,facingX:number,facingZ:number,radius:number,massKg:number,settleReason:number}} value */
+  /** @param {{id:number,spawnSequence:number,deathTick:number,settledTick:number,x:number,z:number,facingX:number,facingZ:number,radius:number,massKg:number,worldY?:number,layerIndex?:number,settleReason:number}} value */
   push(value) {
     const index = (this.start + this.length) % this.capacity;
     this.id[index] = value.id;
@@ -161,6 +182,8 @@ export class InertDeadBodyRing {
     this.facingZ[index] = value.facingZ;
     this.radius[index] = value.radius;
     this.massKg[index] = value.massKg;
+    this.worldY[index] = Number(value.worldY ?? 0);
+    this.layerIndex[index] = Number(value.layerIndex ?? 0);
     this.settleReason[index] = value.settleReason;
     if (this.length < this.capacity) {
       this.length += 1;

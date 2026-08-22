@@ -7,6 +7,7 @@ import {
   authoringChannelForDefinition,
   EditorInteractionState,
   occupiedCellsForTarget,
+  pickAuthoredConnector,
   pickAuthoredInstance,
   pickAuthoringTarget,
   sampleAuthoredDefinition,
@@ -324,6 +325,14 @@ export class AuthoringEditorController {
     }
 
     if (effectiveTool === "erase") {
+      if (this.state.activeChannel === "connector") {
+        const picked = pickAuthoredConnector(authoring, x, z);
+        this.gesture = picked
+          ? { kind: "removeConnector", button, connectorId: picked.connectorId }
+          : null;
+        this.state.setPlacementPreview(null);
+        return Boolean(picked);
+      }
       if (this.state.activeChannel === "instance") {
         const picked = pickAuthoredInstance(authoring, x, z);
         this.gesture = picked
@@ -351,7 +360,7 @@ export class AuthoringEditorController {
     if (!definition) return false;
     const channel = authoringChannelForDefinition(definition);
     if (channel !== this.state.activeChannel) return false;
-    if (channel === "instance") {
+    if (channel === "instance" || channel === "connector") {
       this.gesture = { kind: "stamp", button };
       this.#refreshHoverAndPreview();
       return true;
@@ -386,6 +395,7 @@ export class AuthoringEditorController {
     if (gesture.kind === "stroke") result = this.#commitStroke(gesture);
     if (gesture.kind === "stamp") result = this.#commitStamp();
     if (gesture.kind === "remove") result = this.removeInstance(gesture.instanceId);
+    if (gesture.kind === "removeConnector") result = this.removeConnector(gesture.connectorId);
     if (gesture.kind === "eyedropper") result = this.#sample(x, z);
     if (gesture.kind === "move") {
       const moved = Boolean(options.moved) || gesture.moved;
@@ -422,7 +432,10 @@ export class AuthoringEditorController {
       return this.gesture.validation.valid;
     }
     const definition = getPlaceableDefinition(this.state.selectedDefinitionId);
-    if (this.state.activeTool === "paint" && definition?.placementTarget === "instance") {
+    if (
+      this.state.activeTool === "paint"
+      && (definition?.placementTarget === "instance" || definition?.placementTarget === "connector")
+    ) {
       this.state.rotatePreview();
       this.#refreshHoverAndPreview();
       return true;
@@ -487,6 +500,37 @@ export class AuthoringEditorController {
     return result;
   }
 
+  /** @param {string} connectorId */
+  removeConnector(connectorId) {
+    if (!this.#connector(connectorId)) return false;
+    const result = this.#commit({ type: "removeConnector", connectorId });
+    if (
+      result
+      && this.state.selectedTarget?.kind === "connector"
+      && this.state.selectedTarget.connectorId === connectorId
+    ) this.state.setSelectedTarget(null);
+    if (result) this.#message(`Removed ${connectorId}`, true);
+    return result;
+  }
+
+  /** @param {string} connectorId @param {Record<string,unknown>} changes */
+  updateConnector(connectorId, changes) {
+    if (!this.#connector(connectorId)) return false;
+    const result = this.#commit({ type: "updateConnector", connectorId, changes });
+    if (result) {
+      const connector = this.#connector(connectorId);
+      const layerId = connector?.lowerLayerId === this.activeLayerId
+        || connector?.upperLayerId === this.activeLayerId
+        ? this.activeLayerId
+        : connector?.lowerLayerId;
+      this.state.setSelectedTarget(layerId
+        ? { kind: "connector", layerId, connectorId }
+        : null);
+      this.#message(`Updated ${connectorId}`, true);
+    }
+    return result;
+  }
+
   /** @param {string} instanceId @param {Record<string,unknown>|undefined} properties */
   updateInstanceProperties(instanceId, properties) {
     if (!this.#instance(instanceId)) return false;
@@ -519,6 +563,18 @@ export class AuthoringEditorController {
     return true;
   }
 
+  /** @param {string} connectorId */
+  selectConnector(connectorId) {
+    const connector = this.#connector(connectorId);
+    if (!connector) return false;
+    this.state.setSelectedTarget({
+      kind: "connector",
+      layerId: this.activeLayerId,
+      connectorId,
+    });
+    return true;
+  }
+
   /** @param {number} x @param {number} z */
   selectAt(x, z) {
     const target = pickAuthoringTarget(this.currentSnapshot.authoring, x, z);
@@ -532,6 +588,12 @@ export class AuthoringEditorController {
       : null;
     const hoveredDefinition = hoveredInstance
       ? getPlaceableDefinition(hoveredInstance.definitionId)
+      : null;
+    const hoveredConnector = this.state.hoveredTarget?.kind === "connector"
+      ? this.#connector(this.state.hoveredTarget.connectorId)
+      : null;
+    const hoveredConnectorDefinition = hoveredConnector
+      ? getPlaceableDefinition(hoveredConnector.definitionId)
       : null;
     const history = {
       ...this.getHistorySnapshot(),
@@ -558,7 +620,13 @@ export class AuthoringEditorController {
           definitionId: hoveredInstance.definitionId,
           label: hoveredDefinition?.label ?? hoveredInstance.definitionId,
         }
-        : null,
+        : hoveredConnector
+          ? {
+            authoringId: hoveredConnector.id,
+            definitionId: hoveredConnector.definitionId,
+            label: hoveredConnectorDefinition?.label ?? hoveredConnector.definitionId,
+          }
+          : null,
       dragging: this.gesture?.kind === "move",
       pendingAction: this.gesture?.kind ?? null,
       history,
@@ -600,7 +668,7 @@ export class AuthoringEditorController {
     const definition = getPlaceableDefinition(this.state.selectedDefinitionId);
     if (
       this.state.activeTool !== "paint"
-      || definition?.placementTarget !== "instance"
+      || (definition?.placementTarget !== "instance" && definition?.placementTarget !== "connector")
       || !this.pointer.inside
     ) {
       this.state.setPlacementPreview(null);
@@ -608,6 +676,32 @@ export class AuthoringEditorController {
     }
     try {
       const snapped = snapDefinitionPlacement(definition.id, this.pointer.x, this.pointer.z);
+      if (definition.placementTarget === "connector") {
+        const pair = this.#connectorLayerPair();
+        const layer = this.currentSnapshot.authoring.activeLayer;
+        const inside = pair
+          && snapped.x >= 0
+          && snapped.z >= 0
+          && snapped.x < layer.width
+          && snapped.z < layer.height;
+        this.state.setPlacementPreview({
+          kind: "place",
+          definitionId: definition.id,
+          valid: Boolean(inside),
+          code: inside ? "valid" : pair ? "bounds" : "layers",
+          message: inside
+            ? `Links ${pair.lowerLayerId} to ${pair.upperLayerId}`
+            : pair
+              ? "Elevator endpoint is outside the shared map bounds"
+              : "Create another layer before placing an elevator",
+          transform: { x: snapped.x, z: snapped.z, rotation: 0 },
+          occupiedCells: inside
+            ? [{ cx: Math.min(layer.width - 1, Math.floor(snapped.x)), cz: Math.min(layer.height - 1, Math.floor(snapped.z)) }]
+            : [],
+          ...(pair ?? {}),
+        });
+        return;
+      }
       const validation = this.validatePlacement(
         definition.id,
         snapped.x,
@@ -713,6 +807,22 @@ export class AuthoringEditorController {
       this.#message(preview?.message ?? "Placement is invalid", false);
       return false;
     }
+    if (preview.definitionId === "connector.elevator.two-stop") {
+      const before = new Set((this.currentSnapshot.authoring.connectors ?? []).map((item) => item.id));
+      const result = this.#commit({
+        type: "placeConnector",
+        definitionId: preview.definitionId,
+        lowerLayerId: preview.lowerLayerId,
+        upperLayerId: preview.upperLayerId,
+        x: preview.transform.x,
+        z: preview.transform.z,
+      });
+      if (!result) return false;
+      const placed = this.currentSnapshot.authoring.connectors.find((item) => !before.has(item.id));
+      if (placed) this.selectConnector(placed.id);
+      this.#message(`Placed ${preview.definitionId}`, true);
+      return true;
+    }
     const before = new Set(this.currentSnapshot.authoring.instances.map((instance) => instance.id));
     const result = this.#commit({
       type: "placeInstance",
@@ -787,6 +897,30 @@ export class AuthoringEditorController {
     return this.currentSnapshot.authoring.instances.find(
       (instance) => instance.id === instanceId,
     ) ?? null;
+  }
+
+  /** @param {string} connectorId */
+  #connector(connectorId) {
+    return (this.currentSnapshot.authoring.connectors ?? []).find(
+      (connector) => connector.id === connectorId,
+    ) ?? null;
+  }
+
+  #connectorLayerPair() {
+    const layers = [...(this.currentSnapshot.authoring.layers ?? [])];
+    const active = layers.find((layer) => layer.id === this.activeLayerId);
+    if (!active || layers.length < 2) return null;
+    const other = layers
+      .filter((layer) => layer.id !== active.id)
+      .sort((left, right) => (
+        Math.abs(left.baseY - active.baseY) - Math.abs(right.baseY - active.baseY)
+        || left.baseY - right.baseY
+        || left.id.localeCompare(right.id)
+      ))[0];
+    if (!other || other.baseY === active.baseY) return null;
+    return active.baseY < other.baseY
+      ? { lowerLayerId: active.id, upperLayerId: other.id }
+      : { lowerLayerId: other.id, upperLayerId: active.id };
   }
 
   #reconcileLayers() {

@@ -81,6 +81,9 @@ export function developmentRoutes(host, port) {
     canvas2d: new URL("?renderer=2d", baseUrl).href,
     automatic3d: new URL("?renderer=3d", baseUrl).href,
     forcedWebgl2: new URL("?renderer=3d&backend=webgl", baseUrl).href,
+    holesCanvas2d: new URL("?arena=holes&renderer=2d", baseUrl).href,
+    holesAutomatic3d: new URL("?arena=holes&renderer=3d", baseUrl).href,
+    holesForcedWebgl2: new URL("?arena=holes&renderer=3d&backend=webgl", baseUrl).href,
   });
 }
 
@@ -115,6 +118,9 @@ export function startupMessages(options) {
     lines.push(`  ${routeHost.label} · Canvas2D       ${routes.canvas2d}`);
     lines.push(`  ${routeHost.label} · Automatic 3D    ${routes.automatic3d}`);
     lines.push(`  ${routeHost.label} · Forced WebGL 2  ${routes.forcedWebgl2}`);
+    lines.push(`  ${routeHost.label} · Holes · Canvas2D ${routes.holesCanvas2d}`);
+    lines.push(`  ${routeHost.label} · Holes · 3D       ${routes.holesAutomatic3d}`);
+    lines.push(`  ${routeHost.label} · Holes · WebGL 2  ${routes.holesForcedWebgl2}`);
   }
   if (
     (options.host === "0.0.0.0" || options.host === "::" || options.host === "[::]")

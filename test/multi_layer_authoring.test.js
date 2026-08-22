@@ -255,7 +255,7 @@ test("tables remain active-layer movement bodies without becoming sight occluder
   }
 });
 
-test("only the activated runtime layer spawns dynamic props and torch lights", () => {
+test("all authored layers retain runtime bodies while presentation lights stay layer-filterable", () => {
   const { document, upperId } = threeLayerDocument();
   const groundTorch = placeInstance(document, "object.torch", 3.5, 3.5, {
     layerId: "ground",
@@ -268,24 +268,38 @@ test("only the activated runtime layer spawns dynamic props and torch lights", (
   });
   const simulation = simulationFor(upperTable.document);
 
-  assert.deepEqual(simulation.snapshot().rocks.map((body) => body.authoringId), [groundTorch.instanceId]);
-  let lights = mergeCatalogPropLights([], simulation.snapshot().rocks, 16);
+  assert.deepEqual(
+    new Set(simulation.snapshot().rocks.map((body) => body.authoringId)),
+    new Set([groundTorch.instanceId, upperTorch.instanceId, upperTable.instanceId]),
+  );
+  let lights = mergeCatalogPropLights(
+    [],
+    simulation.snapshot().rocks.filter((body) => body.layerId === "ground"),
+    16,
+  );
   assert.deepEqual(lights.map((light) => light.authoringId), [groundTorch.instanceId]);
 
   assert.equal(simulation.activateRuntimeLayer(upperId), true);
-  assert.deepEqual(
-    new Set(simulation.snapshot().rocks.map((body) => body.authoringId)),
-    new Set([upperTorch.instanceId, upperTable.instanceId]),
+  assert.equal(simulation.snapshot().rocks.length, 3);
+  lights = mergeCatalogPropLights(
+    [],
+    simulation.snapshot().rocks.filter((body) => body.layerId === upperId),
+    16,
+    3,
   );
-  lights = mergeCatalogPropLights([], simulation.snapshot().rocks, 16);
   assert.deepEqual(lights.map((light) => light.authoringId), [upperTorch.instanceId]);
   assert.equal(simulation.snapshot().map.baseY, 3);
 
   assert.equal(simulation.activateRuntimeLayer("ground"), true);
   assert.equal(simulation.activateRuntimeLayer(upperId), true);
-  assert.equal(simulation.snapshot().rocks.length, 2, "repeated activation must not duplicate bodies");
+  assert.equal(simulation.snapshot().rocks.length, 3, "view-layer changes must not duplicate bodies");
   assert.equal(
-    mergeCatalogPropLights([], simulation.snapshot().rocks, 16)
+    mergeCatalogPropLights(
+      [],
+      simulation.snapshot().rocks.filter((body) => body.layerId === upperId),
+      16,
+      3,
+    )
       .filter((light) => light.authoringId === upperTorch.instanceId).length,
     1,
   );
@@ -557,8 +571,10 @@ test("serialized maps exclude editor, history, reference, and disposable runtime
     "version",
     "metadata",
     "nextLayerOrdinal",
+    "nextConnectorOrdinal",
     "playerStart",
     "layers",
+    "connectors",
   ]);
   assert.equal(text.includes("activeEditorLayerId"), false);
   assert.equal(text.includes("referenceLayerId"), false);

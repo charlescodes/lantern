@@ -35,13 +35,16 @@ test("the centralized catalog contains the representative M1A definitions", () =
 
 test("palette groups are derived from catalog categories in stable order", () => {
   const groups = groupPaletteDefinitions(listPlaceableDefinitions());
-  assert.deepEqual(groups.map((group) => group.id), ["surface", "structure", "object"]);
+  assert.deepEqual(groups.map((group) => group.id), ["surface", "structure", "object", "connector"]);
   assert.deepEqual(
     groups[0].definitions.map((definition) => definition.id),
-    ["surface.stone", "surface.moss"],
+    ["surface.stone", "surface.moss", "surface.hole"],
   );
   assert.equal(groups[1].definitions[0].placementMode, "paint");
   assert.equal(groups[2].definitions.every((definition) => definition.placementMode === "stamp"), true);
+  assert.deepEqual(groups[3].definitions.map((definition) => definition.id), [
+    "connector.elevator.two-stop",
+  ]);
 });
 
 test("editor markup provides one generated palette mount and generated history controls", async () => {

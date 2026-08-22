@@ -79,6 +79,10 @@ export function scorchMapHash(map, obelisks = []) {
   let hash = 2_166_136_261;
   hash = Math.imul(hash ^ (Number(map.width) >>> 0), 16_777_619);
   hash = Math.imul(hash ^ (Number(map.height) >>> 0), 16_777_619);
+  const layerId = String(map.layerId ?? "");
+  for (let index = 0; index < layerId.length; index += 1) {
+    hash = Math.imul(hash ^ layerId.charCodeAt(index), 16_777_619);
+  }
   const cells = map.cells ?? [];
   for (let index = 0; index < cells.length; index += 1) {
     hash = Math.imul(hash ^ (Number(cells[index]) >>> 0), 16_777_619);
@@ -372,8 +376,17 @@ export function createScorchMark(event, map, obelisks = []) {
 
 /** @param {Record<string, any>} snapshot */
 function explosionEvents(snapshot) {
+  const activeLayerId = snapshot?.map?.layerId ?? snapshot?.runtimeLayerId ?? null;
   return Array.isArray(snapshot?.recentEvents)
-    ? snapshot.recentEvents.filter((event) => event?.type === "explosion")
+    ? snapshot.recentEvents.filter((event) => (
+      event?.type === "explosion"
+      && (
+        activeLayerId === null
+        || event.layerId === undefined
+        || event.layerId === null
+        || event.layerId === activeLayerId
+      )
+    ))
     : [];
 }
 

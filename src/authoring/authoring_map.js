@@ -1,6 +1,11 @@
 // @ts-check
 
-import { MAP_VERSION, ROCK, SCENARIO_VERSION } from "../config.js";
+import {
+  MAP_VERSION,
+  ROCK,
+  SCENARIO_VERSION,
+  VERTICAL_PHYSICS,
+} from "../config.js";
 import {
   getPlaceableDefinition,
   rockDefinitionId,
@@ -8,8 +13,12 @@ import {
 import { validateInstancePlacement } from "./placement_validation.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 2;
-export const LEGACY_AUTHORING_MAP_VERSION = 1;
+export const AUTHORING_MAP_VERSION = 4;
+/** M1B.1 connector maps. */
+export const LEGACY_AUTHORING_MAP_VERSION = 3;
+/** M1A.4 multi-layer maps. */
+export const M1A_AUTHORING_MAP_VERSION = 2;
+export const ORIGINAL_AUTHORING_MAP_VERSION = 1;
 export const MAX_AUTHORING_LAYERS = 16;
 export const DEFAULT_LAYER_SPACING_METERS = 3;
 export const DEFAULT_LAYER_ID = "ground";
@@ -48,7 +57,7 @@ function isRecord(value) {
  * geometry-specific diagnostics such as a blocked player start.
  * @param {unknown} input
  */
-function normalizeVersionTwo(input) {
+function normalizeCurrentDocument(input) {
   /** @type {Array<{severity:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} */
   const diagnostics = [];
   const issue = (severity, path, code, message, layerId) => {
@@ -73,7 +82,16 @@ function normalizeVersionTwo(input) {
   };
   rejectUnknownFields(
     source,
-    new Set(["format", "version", "metadata", "nextLayerOrdinal", "playerStart", "layers"]),
+    new Set([
+      "format",
+      "version",
+      "metadata",
+      "nextLayerOrdinal",
+      "nextConnectorOrdinal",
+      "playerStart",
+      "layers",
+      "connectors",
+    ]),
     "",
   );
   if (source.format !== AUTHORING_MAP_FORMAT) {
@@ -185,6 +203,10 @@ function normalizeVersionTwo(input) {
     metadata.name = stringValue(source.metadata.name, "metadata.name");
   }
   const nextLayerOrdinal = positiveInteger(source.nextLayerOrdinal, "nextLayerOrdinal");
+  const nextConnectorOrdinal = positiveInteger(
+    source.nextConnectorOrdinal,
+    "nextConnectorOrdinal",
+  );
   let playerStart = { layerId: "", x: 0, z: 0 };
   if (!isRecord(source.playerStart)) {
     issue("error", "playerStart", "object", "Player start must be an object.");
@@ -305,6 +327,18 @@ function normalizeVersionTwo(input) {
       }
       return Number(value);
     });
+    for (let index = 0; index < surfaceCells.length; index += 1) {
+      const definition = getPlaceableDefinition(surfaceLegend[surfaceCells[index]]);
+      if (definition?.traits.runtimeKind !== "floor-hole") continue;
+      const apertureWidth = Number(definition.traits.apertureWidth);
+      const clearance = Number(definition.traits.apertureClearance);
+      if (!(apertureWidth > 0 && apertureWidth < 1)) {
+        issue("error", `${path}.surface.cells[${index}]`, "hole-aperture-width", "Hole aperture width must be positive and smaller than its cell.", id);
+      }
+      if (!(clearance > 0 && clearance < apertureWidth / 2)) {
+        issue("error", `${path}.surface.cells[${index}]`, "hole-clearance", "Hole clearance must be positive and leave usable aperture space.", id);
+      }
+    }
 
     const structureSource = isRecord(layerSource.structure) ? layerSource.structure : {};
     if (!isRecord(layerSource.structure)) {
@@ -464,14 +498,178 @@ function normalizeVersionTwo(input) {
     );
   }
 
+  if (!Array.isArray(source.connectors)) {
+    issue("error", "connectors", "array", "Connectors must be an array.");
+  } else if (source.connectors.length > VERTICAL_PHYSICS.elevatorCapacity) {
+    issue(
+      "error",
+      "connectors",
+      "connector-capacity",
+      `Map contains more than the ${VERTICAL_PHYSICS.elevatorCapacity}-elevator limit.`,
+    );
+  }
+  const connectorIds = new Set();
+  const connectors = (Array.isArray(source.connectors) ? source.connectors : [])
+    .map((connectorValue, connectorIndex) => {
+      const path = `connectors[${connectorIndex}]`;
+      if (!isRecord(connectorValue)) {
+        issue("error", path, "object", "Connector must be an object.");
+      }
+      const connector = isRecord(connectorValue)
+        ? /** @type {Record<string,any>} */ (connectorValue)
+        : {};
+      rejectUnknownFields(
+        connector,
+        new Set([
+          "id",
+          "definitionId",
+          "lowerLayerId",
+          "upperLayerId",
+          "x",
+          "z",
+          "platformWidth",
+          "apertureWidth",
+          "travelSpeed",
+          "dwellSeconds",
+          "initialStop",
+          "activationPolicy",
+        ]),
+        path,
+      );
+      const id = stringValue(connector.id, `${path}.id`);
+      if (id && connectorIds.has(id)) {
+        issue("error", `${path}.id`, "duplicate-connector-id", `Connector ID "${id}" is already in use.`);
+      }
+      if (id) connectorIds.add(id);
+      const definitionId = stringValue(connector.definitionId, `${path}.definitionId`);
+      const definition = getPlaceableDefinition(definitionId);
+      if (!definition) {
+        issue("error", `${path}.definitionId`, "unknown-definition", `Unknown definition "${definitionId}".`);
+      } else if (definition.placementTarget !== "connector") {
+        issue("error", `${path}.definitionId`, "definition-target", `Definition "${definitionId}" is not a connector.`);
+      }
+      const lowerLayerId = stringValue(connector.lowerLayerId, `${path}.lowerLayerId`);
+      const upperLayerId = stringValue(connector.upperLayerId, `${path}.upperLayerId`);
+      const lowerLayer = layers.find((layer) => layer.id === lowerLayerId);
+      const upperLayer = layers.find((layer) => layer.id === upperLayerId);
+      if (!lowerLayer) {
+        issue("error", `${path}.lowerLayerId`, "missing-connector-layer", `Connector references missing layer "${lowerLayerId}".`);
+      }
+      if (!upperLayer) {
+        issue("error", `${path}.upperLayerId`, "missing-connector-layer", `Connector references missing layer "${upperLayerId}".`);
+      }
+      if (lowerLayerId && lowerLayerId === upperLayerId) {
+        issue("error", path, "connector-distinct-layers", "Elevator stops must reference distinct layers.");
+      }
+      if (lowerLayer && upperLayer && !(lowerLayer.baseY < upperLayer.baseY)) {
+        issue("error", path, "connector-stop-order", "Lower layer base Y must be below upper layer base Y.");
+      }
+      const x = finiteValue(connector.x, `${path}.x`);
+      const z = finiteValue(connector.z, `${path}.z`);
+      if (
+        Math.abs(x * 10 - Math.round(x * 10)) > 1e-9
+        || Math.abs(z * 10 - Math.round(z * 10)) > 1e-9
+      ) {
+        issue("error", path, "connector-alignment", "Elevator endpoints must use shared tenth-meter X/Z coordinates.");
+      }
+      if (lowerLayer && (x < 0 || z < 0 || x >= lowerLayer.width || z >= lowerLayer.height)) {
+        issue("error", path, "connector-out-of-bounds", "Elevator endpoint is outside the shared map bounds.");
+      }
+      const positiveWidth = (value, field) => {
+        const number = finiteValue(value, `${path}.${field}`);
+        if (!(number > 0 && number <= 1)) {
+          issue("error", `${path}.${field}`, "connector-cell-fit", "Value must be greater than zero and no wider than one cell.");
+        }
+        return number;
+      };
+      const platformWidth = positiveWidth(connector.platformWidth, "platformWidth");
+      const apertureWidth = positiveWidth(connector.apertureWidth, "apertureWidth");
+      const travelSpeed = finiteValue(connector.travelSpeed, `${path}.travelSpeed`);
+      if (!(travelSpeed > 0 && travelSpeed <= 20)) {
+        issue("error", `${path}.travelSpeed`, "connector-travel-speed", "Travel speed must be greater than zero and at most 20 m/s.");
+      }
+      const dwellSeconds = finiteValue(connector.dwellSeconds, `${path}.dwellSeconds`);
+      if (!(dwellSeconds >= 0 && dwellSeconds <= 60)) {
+        issue("error", `${path}.dwellSeconds`, "connector-dwell", "Dwell must be from 0 through 60 seconds.");
+      }
+      const initialStop = connector.initialStop === "upper" ? "upper" : "lower";
+      if (connector.initialStop !== "lower" && connector.initialStop !== "upper") {
+        issue("error", `${path}.initialStop`, "connector-initial-stop", "Initial stop must be lower or upper.");
+      }
+      const activationPolicy = connector.activationPolicy === "occupancy"
+        ? "occupancy"
+        : connector.activationPolicy === "manual"
+          ? "manual"
+          : "";
+      if (!activationPolicy) {
+        issue("error", `${path}.activationPolicy`, "connector-activation-policy", "Activation policy must be occupancy or manual.");
+      }
+      return {
+        id,
+        definitionId,
+        lowerLayerId,
+        upperLayerId,
+        x,
+        z,
+        platformWidth,
+        apertureWidth,
+        travelSpeed,
+        dwellSeconds,
+        initialStop,
+        activationPolicy,
+      };
+    });
+
   const document = {
     format: AUTHORING_MAP_FORMAT,
     version: AUTHORING_MAP_VERSION,
     metadata,
     nextLayerOrdinal,
+    nextConnectorOrdinal,
     playerStart,
     layers,
+    connectors,
   };
+  // A single cell may have exactly one aperture owner. Surface holes are
+  // independent (including adjacent cells), but cannot silently overlap a
+  // connector endpoint at the same layer/cell.
+  for (let connectorIndex = 0; connectorIndex < connectors.length; connectorIndex += 1) {
+    const connector = connectors[connectorIndex];
+    const cx = Math.floor(connector.x);
+    const cz = Math.floor(connector.z);
+    for (const layerId of [connector.lowerLayerId, connector.upperLayerId]) {
+      const layerIndex = layers.findIndex((layer) => layer.id === layerId);
+      const layer = layerIndex < 0 ? null : layers[layerIndex];
+      if (!layer || cx < 0 || cz < 0 || cx >= layer.width || cz >= layer.height) continue;
+      const surfaceId = layer.surface.legend[layer.surface.cells[cz * layer.width + cx]];
+      if (getPlaceableDefinition(surfaceId)?.traits.runtimeKind === "floor-hole") {
+        issue(
+          "error",
+          `connectors[${connectorIndex}]`,
+          "aperture-owner-conflict",
+          `Elevator connector conflicts with the standalone floor hole in ${layerId} cell (${cx}, ${cz}).`,
+          layerId,
+        );
+      }
+    }
+  }
+  // The existing obelisk encounter has one map-owned anchor.  It may live on
+  // any authored layer, but multiple markers would make deterministic spawn
+  // ownership ambiguous.
+  const obeliskLayers = layers
+    .map((layer, index) => ({ layer, index }))
+    .filter(({ layer }) => layer.markers.obelisk !== undefined);
+  if (obeliskLayers.length > 1) {
+    for (const { layer, index } of obeliskLayers.slice(1)) {
+      issue(
+        "error",
+        `layers[${index}].markers.obelisk`,
+        "multiple-obelisks",
+        `Only one map-owned obelisk marker is supported; "${layer.id}" adds another.`,
+        layer.id,
+      );
+    }
+  }
   if (!diagnostics.some((entry) => entry.severity === "error")) {
     for (let layerIndex = 0; layerIndex < layers.length; layerIndex += 1) {
       const layer = layers[layerIndex];
@@ -498,7 +696,7 @@ function normalizeVersionTwo(input) {
 
 /** @param {unknown} input */
 export function authoringMapDiagnostics(input) {
-  return normalizeVersionTwo(input).diagnostics.map((entry) => ({ ...entry }));
+  return normalizeCurrentDocument(input).diagnostics.map((entry) => ({ ...entry }));
 }
 
 /**
@@ -506,7 +704,7 @@ export function authoringMapDiagnostics(input) {
  * @param {unknown} input
  */
 export function validateAuthoringMap(input) {
-  const result = normalizeVersionTwo(input);
+  const result = normalizeCurrentDocument(input);
   const errors = result.diagnostics.filter((entry) => entry.severity === "error");
   if (errors.length > 0 || !result.document) throw new AuthoringMapValidationError(errors);
   return result.document;
@@ -514,7 +712,7 @@ export function validateAuthoringMap(input) {
 
 /** @param {unknown} input */
 export function validateAuthoringMapWithDiagnostics(input) {
-  const result = normalizeVersionTwo(input);
+  const result = normalizeCurrentDocument(input);
   const errors = result.diagnostics.filter((entry) => entry.severity === "error");
   if (errors.length > 0 || !result.document) throw new AuthoringMapValidationError(errors);
   return {
@@ -531,12 +729,12 @@ export function isAuthoringMapDocument(input) {
   );
 }
 
-/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into v2. @param {unknown} input */
+/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into the current schema. @param {unknown} input */
 export function migrateAuthoringMapV1(input) {
   if (!isRecord(input)) fail("map", "object", "Map must be an object.");
   const source = /** @type {Record<string,any>} */ (input);
-  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== LEGACY_AUTHORING_MAP_VERSION) {
-    fail("version", "unsupported-schema-version", `Expected authoring-map version ${LEGACY_AUTHORING_MAP_VERSION}.`);
+  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== ORIGINAL_AUTHORING_MAP_VERSION) {
+    fail("version", "unsupported-schema-version", `Expected authoring-map version ${ORIGINAL_AUTHORING_MAP_VERSION}.`);
   }
   if (!Array.isArray(source.layers) || source.layers.length === 0) {
     fail("layers", "non-empty-array", "Version 1 map must contain at least one layer.");
@@ -561,13 +759,47 @@ export function migrateAuthoringMapV1(input) {
     version: AUTHORING_MAP_VERSION,
     metadata: source.metadata,
     nextLayerOrdinal: source.layers.length + 1,
+    nextConnectorOrdinal: 1,
     playerStart: {
       layerId: startLayerId,
       x: startLayer.markers.playerSpawn.x,
       z: startLayer.markers.playerSpawn.z,
     },
     layers,
+    connectors: [],
   });
+}
+
+/** Explicitly adds the M1B connector envelope to M1A.4 authoring-map v2. @param {unknown} input */
+export function migrateAuthoringMapV2(input) {
+  if (!isRecord(input)) fail("map", "object", "Map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== M1A_AUTHORING_MAP_VERSION) {
+    fail("version", "unsupported-schema-version", `Expected authoring-map version ${M1A_AUTHORING_MAP_VERSION}.`);
+  }
+  if (Object.hasOwn(source, "connectors") || Object.hasOwn(source, "nextConnectorOrdinal")) {
+    fail(
+      Object.hasOwn(source, "connectors") ? "connectors" : "nextConnectorOrdinal",
+      "unknown-field",
+      "Authoring-map v2 cannot contain elevator connector data.",
+    );
+  }
+  return validateAuthoringMap({
+    ...source,
+    version: AUTHORING_MAP_VERSION,
+    nextConnectorOrdinal: 1,
+    connectors: [],
+  });
+}
+
+/** M1B.2 adds a catalog-backed surface-hole terrain value; v3 grids need no reshape. @param {unknown} input */
+export function migrateAuthoringMapV3(input) {
+  if (!isRecord(input)) fail("map", "object", "Map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== LEGACY_AUTHORING_MAP_VERSION) {
+    fail("version", "unsupported-schema-version", `Expected authoring-map version ${LEGACY_AUTHORING_MAP_VERSION}.`);
+  }
+  return validateAuthoringMap({ ...source, version: AUTHORING_MAP_VERSION });
 }
 
 /**
@@ -649,6 +881,7 @@ export function migrateLegacyMap(input, metadata = {}) {
       name: metadata.name ?? embeddedMetadata?.name ?? "Migrated legacy map",
     },
     nextLayerOrdinal: 2,
+    nextConnectorOrdinal: 1,
     playerStart: { layerId: DEFAULT_LAYER_ID, ...playerSpawn },
     layers: [{
       id: DEFAULT_LAYER_ID,
@@ -668,6 +901,7 @@ export function migrateLegacyMap(input, metadata = {}) {
       markers: { ...(obelisk ? { obelisk } : {}) },
       nextInstanceOrdinal: instances.length + 1,
     }],
+    connectors: [],
   });
 }
 
@@ -689,7 +923,9 @@ export function loadAuthoringMap(input) {
   if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
   const version = /** @type {Record<string,any>} */ (value).version;
   if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
-  if (version === LEGACY_AUTHORING_MAP_VERSION) return migrateAuthoringMapV1(value);
+  if (version === LEGACY_AUTHORING_MAP_VERSION) return migrateAuthoringMapV3(value);
+  if (version === M1A_AUTHORING_MAP_VERSION) return migrateAuthoringMapV2(value);
+  if (version === ORIGINAL_AUTHORING_MAP_VERSION) return migrateAuthoringMapV1(value);
   const future = Number.isInteger(version) && version > AUTHORING_MAP_VERSION;
   throw new AuthoringMapValidationError([{
     severity: "error",

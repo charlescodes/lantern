@@ -1,6 +1,6 @@
 // @ts-check
 
-import { PLAYER, ROCK } from "../config.js";
+import { PLAYER, ROCK, SIMULATION, VERTICAL_PHYSICS } from "../config.js";
 import { firstSolidContact } from "../sim/collision.js";
 import { GridMap } from "../sim/grid_map.js";
 import {
@@ -63,6 +63,8 @@ function compileLayer(document, layer, layerIndex) {
   const structureSolidCells = new Uint8Array(cellCount);
   const surfaceCodes = Uint16Array.from(layer.surface.cells);
   const structureCodes = Uint16Array.from(layer.structure.cells);
+  /** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
+  const holes = [];
   const authoredDynamicBodyCount = layer.instances.reduce((count, instance) => {
     const definition = getPlaceableDefinition(instance.definitionId);
     return count + (isDynamicBodyDefinition(definition) ? 1 : 0);
@@ -77,6 +79,22 @@ function compileLayer(document, layer, layerIndex) {
   }
 
   for (let index = 0; index < cellCount; index += 1) {
+    const surfaceDefinition = getPlaceableDefinition(layer.surface.legend[surfaceCodes[index]]);
+    if (surfaceDefinition?.traits.runtimeKind === "floor-hole") {
+      holes.push({
+        id: `hole:${layer.id}:${index}`,
+        layerId: layer.id,
+        cellIndex: index,
+        cx: index % layer.width,
+        cz: Math.floor(index / layer.width),
+        x: (index % layer.width) + 0.5,
+        z: Math.floor(index / layer.width) + 0.5,
+        width: Number(surfaceDefinition.traits.apertureWidth
+          ?? VERTICAL_PHYSICS.defaultHoleApertureWidthMeters),
+        clearance: Number(surfaceDefinition.traits.apertureClearance
+          ?? VERTICAL_PHYSICS.holeFitClearanceMeters),
+      });
+    }
     const definitionId = layer.structure.legend[structureCodes[index]];
     if (!definitionId) continue;
     const definition = getPlaceableDefinition(definitionId);
@@ -243,6 +261,23 @@ function compileLayer(document, layer, layerIndex) {
     },
     entities,
     runtimeMappings,
+    holes,
+    connectorEndpoints: document.connectors
+      .filter((connector) => (
+        connector.lowerLayerId === layer.id || connector.upperLayerId === layer.id
+      ))
+      .map((connector) => ({
+        connectorId: connector.id,
+        definitionId: connector.definitionId,
+        x: connector.x,
+        z: connector.z,
+        stop: connector.lowerLayerId === layer.id ? "lower" : "upper",
+        otherLayerId: connector.lowerLayerId === layer.id
+          ? connector.upperLayerId
+          : connector.lowerLayerId,
+        platformWidth: connector.platformWidth,
+        apertureWidth: connector.apertureWidth,
+      })),
   };
 }
 
@@ -264,6 +299,7 @@ function compatibilityProjection(layer) {
     instances: layer.instances,
     entities: layer.entities,
     runtimeMappings: layer.runtimeMappings,
+    holes: layer.holes,
   };
 }
 
@@ -280,12 +316,43 @@ export function compileAuthoringMap(input) {
   if (!startLayer) {
     fail("playerStart.layerId", "invalid-player-start-layer", "Player start layer could not be compiled.");
   }
+  const layerIndexById = new Map(layers.map((layer, index) => [layer.id, index]));
+  const connectorRuntimeIds = stableSpawnIds(
+    document.connectors.map((connector) => `connector:${connector.id}`),
+  );
+  const connectors = document.connectors.map((connector) => {
+    const lowerLayerIndex = layerIndexById.get(connector.lowerLayerId);
+    const upperLayerIndex = layerIndexById.get(connector.upperLayerId);
+    const lower = layers[lowerLayerIndex];
+    const upper = layers[upperLayerIndex];
+    return {
+      id: connector.id,
+      runtimeId: connectorRuntimeIds.get(`connector:${connector.id}`),
+      definitionId: connector.definitionId,
+      lowerLayerId: connector.lowerLayerId,
+      upperLayerId: connector.upperLayerId,
+      lowerLayerIndex,
+      upperLayerIndex,
+      x: connector.x,
+      z: connector.z,
+      platformWidth: connector.platformWidth,
+      apertureWidth: connector.apertureWidth,
+      lowerY: lower.baseY,
+      upperY: upper.baseY,
+      travelSpeed: connector.travelSpeed,
+      dwellSeconds: connector.dwellSeconds,
+      dwellTicks: Math.max(0, Math.round(connector.dwellSeconds * SIMULATION.tickHz)),
+      initialStop: connector.initialStop,
+      activationPolicy: connector.activationPolicy,
+    };
+  });
   return {
     document,
     playerStart: { ...document.playerStart },
     startLayerId: document.playerStart.layerId,
     layerIds: layers.map((layer) => layer.id),
     layers,
+    connectors,
     diagnostics: validated.diagnostics.map((entry) => ({ ...entry })),
     ...compatibilityProjection(startLayer),
   };
