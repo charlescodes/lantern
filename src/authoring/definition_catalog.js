@@ -31,6 +31,24 @@ function freezeDefinition(definition) {
  */
 export const PLACEABLE_DEFINITIONS = Object.freeze([
   freezeDefinition({
+    id: "object.pressure-plate",
+    label: "Pressure plate",
+    category: "object",
+    categoryLabel: CATEGORY_LABELS.object,
+    placementMode: "stamp",
+    placementTarget: "instance",
+    footprint: { cells: [{ x: 0, z: 0 }] },
+    debug: { fill: "#9b6040", alternateFill: "#70412d", stroke: "#ffd18d", glyph: "□" },
+    renderAsset: null,
+    traits: {
+      runtimeKind: "pressure-plate",
+      snap: "cell-center",
+      blocksMovement: false,
+      blocksSight: false,
+      requiresFloorSupport: true,
+    },
+  }),
+  freezeDefinition({
     id: "surface.stone",
     label: "Stone floor",
     category: "surface",

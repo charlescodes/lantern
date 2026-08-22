@@ -212,9 +212,33 @@ Automated renderer tests verify snapshot adaptation and bounded resource use;
 actual WebGPU/WebGL lighting, shadows, visibility, and visual readability still
 require a real-browser/GPU pass.
 
+## M1B.3 jumping and pressure plates
+
+M1B.3 adds a committed player jump without creating a second vertical-physics
+path. Space emits one replayed fixed-tick jump edge (P is the developer pause
+shortcut). A supported player takes off along the current RMB direction, or
+their facing when idle, and follows a 2m/0.55s gravity arc. Input does not steer
+that arc; an aperture miss transitions to ordinary `FALLING`, where M1B.2 air
+control resumes. Jumping ignores catalog-marked airborne-passable clutter but
+still respects walls and other full-height blockers. The shared support solver
+lands on floors or elevators and restores ordinary grounded collision.
+
+**Pressure plate** is a catalog-backed sparse one-cell instance. It is momentary:
+it is pressed only while a player, living enemy, or eligible dynamic prop is
+supported by the same ordinary floor and has its center over the plate cell.
+Airborne bodies, elevator riders, and corpses do not activate it. Compiled plate
+state is bounded runtime data; authoring IDs, history, save/load, selection, and
+the inspector remain generic. Plates cannot be placed on holes or elevator
+apertures. `__lantern.pressurePlates()` and `__lantern.pressurePlateEvents()`
+return detached diagnostics.
+
+The current replay/snapshot schema is v12. v2–v11 commands have no jump edge
+and retain their frozen behavior. Authoring-map v4 is unchanged because pressure
+plates use the existing sparse-instance format.
+
 ## Deferred
 
-Jump/levitation modes, pressure plates, breakaway floors, clutter
+Levitation, breakaway floors, clutter
 stacking/support, tipping, crushing, explosion-launched Y, general 3D interval or
 mesh collision, doors, cross-layer enemy routing, deliberate AI elevator use,
 cross-layer sight/sound/navigation/projectiles, simulation streaming/dormancy,

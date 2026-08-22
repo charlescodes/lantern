@@ -284,6 +284,7 @@ function catalogVerticalCapabilities(traits) {
   if (traits.canActivateElevator === true) {
     capabilities |= VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR;
   }
+  if (traits.canPressPlate !== false) capabilities |= VERTICAL_CAPABILITY.CAN_PRESS_PLATE;
   return capabilities;
 }
 
@@ -579,11 +580,12 @@ function canonicalAction(value) {
   }
 }
 
-/** @param {{move:{x:number,z:number}|null,cast:{x:number,z:number}|null,actions:Array<Record<string,unknown>>}} command */
+/** @param {{move:{x:number,z:number}|null,cast:{x:number,z:number}|null,jump:boolean,actions:Array<Record<string,unknown>>}} command */
 function cloneCanonicalCommand(command) {
   return {
     move: command.move ? { ...command.move } : null,
     cast: command.cast ? { ...command.cast } : null,
+    jump: command.jump === true,
     actions: command.actions.map((action) => cloneUnknown(action)),
   };
 }
@@ -637,7 +639,7 @@ function cloneEvent(event) {
  */
 export function canonicalizeCommand(input) {
   if (!input || typeof input !== "object") {
-    return { move: null, cast: null, actions: [] };
+    return { move: null, cast: null, jump: false, actions: [] };
   }
   const source = /** @type {Record<string, unknown>} */ (input);
   const move = pointFrom(source.move ?? source.moveTarget);
@@ -653,7 +655,7 @@ export function canonicalizeCommand(input) {
     const action = canonicalAction(source);
     if (action) actions.push(action);
   }
-  return { move, cast, actions };
+  return { move, cast, jump: source.jump === true, actions };
 }
 
 /** @param {number} current @param {number} target @param {number} maximumDelta */
@@ -774,6 +776,8 @@ export class Simulation {
       this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
     );
     this.layerHoles = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).holes ?? []);
+    this.pressurePlates = this.#compiledPressurePlates();
+    this.pressurePlateEvents = new RingBuffer(VERTICAL_PHYSICS.pressurePlateEventCapacity);
     this.authoringRevision = 1;
     this._preparedAuthoringState = null;
     this.#refreshPreparedAuthoringState();
@@ -1043,6 +1047,10 @@ export class Simulation {
       movementTargetDistance: 0,
       movementDirectionX: 1,
       movementDirectionZ: 0,
+      jumpDirectionX: 0,
+      jumpDirectionZ: 0,
+      jumpTakeoffY: 0,
+      jumpTicks: 0,
       runningStrideProgress: 0,
       runningNextFootstepDistance: MOVEMENT_SOUND.firstFootstepMeters,
       lastFootstepHeadingX: 1,
@@ -1179,6 +1187,11 @@ export class Simulation {
     this.dynamicDeadBodies.reset();
     this.inertDeadBodies.reset();
     this.soundEvents.reset();
+    this.pressurePlateEvents.clear();
+    for (const plate of this.pressurePlates) {
+      plate.pressed = false;
+      plate.occupantCount = 0;
+    }
     this.navigationField.reset(this.map);
     this.destinationFields.reset(this.map);
     this.reachability.reset(this.map);
@@ -1218,6 +1231,10 @@ export class Simulation {
       movementTargetDistance: 0,
       movementDirectionX: 1,
       movementDirectionZ: 0,
+      jumpDirectionX: 0,
+      jumpDirectionZ: 0,
+      jumpTakeoffY: 0,
+      jumpTicks: 0,
       runningStrideProgress: 0,
       runningNextFootstepDistance: MOVEMENT_SOUND.firstFootstepMeters,
       lastFootstepHeadingX: 1,
@@ -1303,9 +1320,11 @@ export class Simulation {
       this.#facingSystem(simulationTick);
     }
     this.#elevatorSupportAndMotionSystem(SIMULATION.dt);
+    this.#jumpSystem(command.jump, command.move);
     this.#holeRimAttractionSystem(SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
     this.#verticalResolutionSystem(SIMULATION.dt);
+    this.#pressurePlateSystem();
     this.#movementSoundSystem(simulationTick);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
@@ -1376,6 +1395,21 @@ export class Simulation {
       this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
     );
     this.layerHoles = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).holes ?? []);
+    this.pressurePlates = this.#compiledPressurePlates();
+  }
+
+  #compiledPressurePlates() {
+    const values = [];
+    for (let layerIndex = 0; layerIndex < this.layerIds.length; layerIndex += 1) {
+      const layer = this.scenario.compiledLayer(this.layerIds[layerIndex]);
+      for (const plate of layer?.pressurePlates ?? []) {
+        if (values.length >= VERTICAL_PHYSICS.pressurePlateCapacity) {
+          throw new RangeError("Pressure plate capacity exceeded");
+        }
+        values.push({ ...plate, layerIndex, pressed: false, occupantCount: 0 });
+      }
+    }
+    return values;
   }
 
   #clearLayerRuntimeEvents() {
@@ -4335,6 +4369,12 @@ export class Simulation {
   /** @param {{x:number,z:number}|null} target @param {number} dt @param {number} simulationTick */
   #prepareMovement(target, dt, simulationTick) {
     const player = this.player;
+    if (player.verticalMode === VERTICAL_MODE.JUMPING) {
+      player.movementMode = PLAYER_MOVEMENT_IDLE;
+      player.desiredVx = 0;
+      player.desiredVz = 0;
+      return;
+    }
     const previousMode = player.movementMode;
     let desiredVx = 0;
     let desiredVz = 0;
@@ -4407,11 +4447,57 @@ export class Simulation {
     }
   }
 
+  /** Starts one committed player jump after existing elevator carry. */
+  #jumpSystem(requested, target) {
+    if (!requested) return;
+    const player = this.player;
+    if (
+      player.verticalMode !== VERTICAL_MODE.SUPPORTED
+      || player.supportKind === SUPPORT_KIND.NONE
+      || !hasVerticalCapability(player.verticalCapabilities, VERTICAL_CAPABILITY.CAN_JUMP)
+      || !(player.health > 0)
+    ) return;
+    let dx = player.movementDirectionX;
+    let dz = player.movementDirectionZ;
+    if (target) {
+      const tx = target.x - player.x;
+      const tz = target.z - player.z;
+      const length = Math.hypot(tx, tz);
+      if (length > 1e-6) {
+        dx = tx / length;
+        dz = tz / length;
+      }
+    }
+    const length = Math.hypot(dx, dz);
+    if (length <= 1e-6) {
+      dx = 1;
+      dz = 0;
+    } else {
+      dx /= length;
+      dz /= length;
+    }
+    const carriedVelocity = player.supportKind === SUPPORT_KIND.ELEVATOR
+      ? player.verticalVelocityY
+      : 0;
+    player.verticalMode = VERTICAL_MODE.JUMPING;
+    player.supportKind = SUPPORT_KIND.NONE;
+    player.supportId = 0;
+    player.transitConnectorId = 0;
+    player.verticalVelocityY = VERTICAL_PHYSICS.playerJumpTakeoffVelocityMetersPerSecond + carriedVelocity;
+    player.locomotionVx = dx * VERTICAL_PHYSICS.playerJumpHorizontalSpeedMetersPerSecond;
+    player.locomotionVz = dz * VERTICAL_PHYSICS.playerJumpHorizontalSpeedMetersPerSecond;
+    player.jumpDirectionX = dx;
+    player.jumpDirectionZ = dz;
+    player.jumpTakeoffY = player.worldY;
+    player.jumpTicks = 0;
+  }
+
   /** @param {number} simulationTick */
   #movementSoundSystem(simulationTick) {
     if (
       this.movementSoundProfile !== MOVEMENT_SOUND_PROFILE_V1
       || this.player.movementMode !== PLAYER_MOVEMENT_RUNNING
+      || this.player.verticalMode !== VERTICAL_MODE.SUPPORTED
     ) {
       return;
     }
@@ -4550,12 +4636,12 @@ export class Simulation {
         - this.#bodyValue(rightKind, rightIndex, "worldY"),
       ) > VERTICAL_PHYSICS.supportReleaseToleranceMeters
     ) return false;
-    const leftFalling = this.#bodyValue(leftKind, leftIndex, "verticalMode")
-      === VERTICAL_MODE.FALLING;
-    const rightFalling = this.#bodyValue(rightKind, rightIndex, "verticalMode")
-      === VERTICAL_MODE.FALLING;
-    if (leftFalling && this.#bodyLowAirbornePassable(rightKind, rightIndex)) return false;
-    if (rightFalling && this.#bodyLowAirbornePassable(leftKind, leftIndex)) return false;
+    const leftMode = this.#bodyValue(leftKind, leftIndex, "verticalMode");
+    const rightMode = this.#bodyValue(rightKind, rightIndex, "verticalMode");
+    const leftAirborne = leftMode === VERTICAL_MODE.FALLING || leftMode === VERTICAL_MODE.JUMPING;
+    const rightAirborne = rightMode === VERTICAL_MODE.FALLING || rightMode === VERTICAL_MODE.JUMPING;
+    if (leftAirborne && this.#bodyLowAirbornePassable(rightKind, rightIndex)) return false;
+    if (rightAirborne && this.#bodyLowAirbornePassable(leftKind, leftIndex)) return false;
     return true;
   }
 
@@ -5055,7 +5141,8 @@ export class Simulation {
 
   /** @param {number} kind @param {number} index @param {number} dt */
   #integrateVerticalBody(kind, index, dt) {
-    if (this.#bodyValue(kind, index, "verticalMode") !== VERTICAL_MODE.FALLING) return;
+    const mode = this.#bodyValue(kind, index, "verticalMode");
+    if (mode !== VERTICAL_MODE.FALLING && mode !== VERTICAL_MODE.JUMPING) return;
     if (!hasVerticalCapability(this.#bodyValue(kind, index, "verticalCapabilities"), VERTICAL_CAPABILITY.GRAVITY)) return;
     const previousY = this.#bodyValue(kind, index, "worldY");
     const velocityY = Math.max(
@@ -5120,6 +5207,11 @@ export class Simulation {
           this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.ELEVATOR);
           this.#setBodyValue(kind, index, "supportId", this.elevators.id[elevatorIndex]);
           this.#setBodyValue(kind, index, "verticalVelocityY", this.elevators.velocityY[elevatorIndex]);
+          if (kind === BODY_PLAYER) {
+            this.player.jumpDirectionX = 0;
+            this.player.jumpDirectionZ = 0;
+            this.player.jumpTicks = 0;
+          }
           return;
         }
         ceiling = planeY;
@@ -5132,6 +5224,10 @@ export class Simulation {
       if (hole || (!rejectedByFrame && this.#floorHasElevatorAperture(floorLayer, x, z))) {
         this.#setBodyValue(kind, index, "layerIndex", floorLayer);
         this.#setBodyValue(kind, index, "latestApertureFit", hole ? 1 : 0);
+        if (mode === VERTICAL_MODE.JUMPING) {
+          this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
+          if (kind === BODY_PLAYER) this.player.jumpTicks = 0;
+        }
         passed += 1;
         this.holeMetrics.floorPlanePassed += 1;
         this.#recordHoleEvent("FLOOR_PLANE_PASSED", kind, index, {
@@ -5162,6 +5258,11 @@ export class Simulation {
       this.#setBodyValue(kind, index, "layerIndex", floorLayer);
       this.#setBodyValue(kind, index, "transitConnectorId", 0);
       this.#setBodyValue(kind, index, "latestApertureFit", hole ? 1 : 0);
+      if (kind === BODY_PLAYER) {
+        this.player.jumpDirectionX = 0;
+        this.player.jumpDirectionZ = 0;
+        this.player.jumpTicks = 0;
+      }
       if (kind === BODY_PLAYER) this.#resolvePlayerGrid(false);
       else if (kind === BODY_ENEMY_WIZARD) this.#resolveEnemyGrid(index, false);
       else if (kind === BODY_ROCK) this.#resolveRockGrid(index, false);
@@ -5174,6 +5275,12 @@ export class Simulation {
     }
     this.#setBodyValue(kind, index, "worldY", nextY);
     this.#setBodyValue(kind, index, "verticalVelocityY", velocityY);
+    if (kind === BODY_PLAYER && mode === VERTICAL_MODE.JUMPING) {
+      this.player.jumpTicks += 1;
+      if (velocityY < 0 && nextY <= this.player.jumpTakeoffY) {
+        this.player.verticalMode = VERTICAL_MODE.FALLING;
+      }
+    }
     let lowest = Infinity;
     for (let layerIndex = 0; layerIndex < this.layerBaseY.length; layerIndex += 1) lowest = Math.min(lowest, this.layerBaseY[layerIndex]);
     if (nextY < lowest - VERTICAL_PHYSICS.voidRescueDepthMeters) {
@@ -5293,6 +5400,48 @@ export class Simulation {
       this.#integrateVerticalBody(BODY_ENEMY_WIZARD_BODY, index, dt);
     }
     this.#syncRuntimeViewToPlayerLayer();
+  }
+
+  /** Pressure plates are floor-only, momentary supported contacts. */
+  #pressurePlateSystem() {
+    for (let plateIndex = 0; plateIndex < this.pressurePlates.length; plateIndex += 1) {
+      const plate = this.pressurePlates[plateIndex];
+      let count = 0;
+      if (this.#bodyPressesPlate(BODY_PLAYER, 0, plate)) count += 1;
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        if (this.#bodyPressesPlate(BODY_ENEMY_WIZARD, index, plate)) count += 1;
+      }
+      for (let index = 0; index < this.rocks.activeCount; index += 1) {
+        if (this.#bodyPressesPlate(BODY_ROCK, index, plate)) count += 1;
+      }
+      const pressed = count > 0;
+      if (pressed !== plate.pressed) {
+        this.pressurePlateEvents.push({
+          tick: this.tickCount,
+          kind: pressed ? "PLATE_PRESSED" : "PLATE_RELEASED",
+          plateId: plate.id,
+          layerId: plate.layerId,
+          occupantCount: count,
+        });
+      }
+      plate.pressed = pressed;
+      plate.occupantCount = count;
+    }
+  }
+
+  /** @param {number} kind @param {number} index @param {Record<string,any>} plate */
+  #bodyPressesPlate(kind, index, plate) {
+    if (
+      this.#bodyValue(kind, index, "verticalMode") !== VERTICAL_MODE.SUPPORTED
+      || this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.FLOOR
+      || this.#bodyValue(kind, index, "layerIndex") !== plate.layerIndex
+      || !hasVerticalCapability(
+        this.#bodyValue(kind, index, "verticalCapabilities"),
+        VERTICAL_CAPABILITY.CAN_PRESS_PLATE,
+      )
+    ) return false;
+    return Math.abs(this.#bodyValue(kind, index, "x") - plate.x) <= 0.5
+      && Math.abs(this.#bodyValue(kind, index, "z") - plate.z) <= 0.5;
   }
 
   /** @param {number} dt */
@@ -8687,6 +8836,7 @@ export class Simulation {
     }
     const runtimeLayerId = this.layerIds[this.player.layerIndex]
       ?? this.scenario.startLayerId;
+    const pressurePlates = this.pressurePlates.map((plate) => ({ ...plate }));
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
@@ -8812,6 +8962,8 @@ export class Simulation {
       ),
       rocks,
       elevators,
+      pressurePlates,
+      recentPressurePlateEvents: this.pressurePlateEvents.toArray(32).map(cloneUnknown),
       obelisks,
       enemies,
       deadBodies: {
@@ -9414,6 +9566,7 @@ export class Simulation {
       solidCells: Array.from(compiled.solidMask),
       occluderCells: Array.from(compiled.occluderMask),
       holes: compiled.holes.map((hole) => ({ ...hole })),
+      pressurePlates: (compiled.pressurePlates ?? []).map((plate) => ({ ...plate })),
       markers: cloneUnknown(source.markers),
       connectorEndpoints: compiled.connectorEndpoints.map((endpoint) => ({ ...endpoint })),
       instances: source.instances.map((instance) => {
@@ -9737,7 +9890,7 @@ export class Simulation {
   /** @param {Record<string, any>} recording */
   static replay(recording) {
     const recordingSchema = Number(recording.schemaVersion);
-    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > 11) {
+    if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > SCHEMA_VERSION) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
     const scenario = ArenaScenario.fromJSON(
@@ -9820,6 +9973,7 @@ export class Simulation {
       recordingSchema === 9
       || recordingSchema === 10
       || recordingSchema === 11
+      || recordingSchema === 12
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -9873,7 +10027,7 @@ export class Simulation {
           );
         }
       }
-      if (recordingSchema === 11) {
+      if (recordingSchema >= 11) {
         movementSoundProfile = String(
           recording.configuration?.movementSoundProfile ?? "",
         );

@@ -750,6 +750,12 @@ const probe = Object.freeze({
       recentEvents: structuredClone(snapshot.recentHoleEvents ?? []),
     };
   },
+  pressurePlates() {
+    return structuredClone(simulation.snapshot().pressurePlates ?? []);
+  },
+  pressurePlateEvents() {
+    return structuredClone(simulation.snapshot().recentPressurePlateEvents ?? []);
+  },
   verticalBody(kind, id) {
     return simulation.resolveSelection({ kind: String(kind), id: Number(id) });
   },

@@ -199,6 +199,7 @@ export class ThreePresentation {
     this.torchPoleMesh = null;
     this.torchLampMesh = null;
     this.tableMesh = null;
+    this.pressurePlateMesh = null;
     this.authoringOverlayMesh = null;
     this.elevatorPlatformMesh = null;
     this.elevatorApertureMesh = null;
@@ -398,6 +399,13 @@ export class ThreePresentation {
       color: 0x7b5b3f,
       roughness: 0.82,
       metalness: 0,
+    }));
+    this.pressurePlateGeometry = new THREE.BoxGeometry(0.9, 0.03, 0.9);
+    this.pressurePlateMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
+      color: 0x858b92,
+      roughness: 0.72,
+      metalness: 0.2,
+      vertexColors: true,
     }));
     this.authoringOverlayGeometry = new THREE.BoxGeometry(0.94, 0.025, 0.94);
     this.authoringOverlayMaterial = new THREE.MeshBasicNodeMaterial({
@@ -800,7 +808,7 @@ export class ThreePresentation {
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
-    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? []);
+    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
     this.#updateWallOcclusion(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
     this.#updateKineticFragments(snapshot, alpha);
@@ -984,7 +992,7 @@ export class ThreePresentation {
     this.#setActiveBaseY(snapshot.map.baseY);
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
-    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? []);
+    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
     this.#updateWallOcclusion(snapshot.player, 0);
     this.#updateKineticFragments(snapshot, 0);
     this.#updateObelisk(snapshot.obelisks ?? []);
@@ -1452,6 +1460,7 @@ export class ThreePresentation {
   #replaceAuthoringMeshes(capacity) {
     if (this.pillarMesh) this.worldRoot.remove(this.pillarMesh);
     if (this.tableMesh) this.worldRoot.remove(this.tableMesh);
+    if (this.pressurePlateMesh) this.worldRoot.remove(this.pressurePlateMesh);
     if (this.authoringOverlayMesh) this.worldRoot.remove(this.authoringOverlayMesh);
     this.pillarMesh = createDynamicInstancedPool(
       this.pillarGeometry,
@@ -1469,6 +1478,15 @@ export class ThreePresentation {
     );
     this.tableMesh.castShadow = true;
     this.tableMesh.receiveShadow = true;
+    this.pressurePlateMesh = createDynamicInstancedPool(
+      this.pressurePlateGeometry,
+      this.pressurePlateMaterial,
+      capacity,
+      "pressure-plates",
+      { instanceColors: true },
+    );
+    this.pressurePlateMesh.castShadow = true;
+    this.pressurePlateMesh.receiveShadow = true;
     this.authoringOverlayMesh = createDynamicInstancedPool(
       this.authoringOverlayGeometry,
       this.authoringOverlayMaterial,
@@ -1481,21 +1499,26 @@ export class ThreePresentation {
     this.worldRoot.add(
       this.pillarMesh,
       this.tableMesh,
+      this.pressurePlateMesh,
       this.authoringOverlayMesh,
     );
     this.authoringInstanceHash = -1;
   }
 
   /** @param {Array<Record<string, any>>} instances */
-  #updateAuthoringInstances(instances) {
-    const nextHash = hashAuthoringInstances(instances);
+  #updateAuthoringInstances(instances, pressurePlates = []) {
+    let nextHash = hashAuthoringInstances(instances);
+    for (const plate of pressurePlates) {
+      nextHash = Math.imul(nextHash ^ (plate.pressed ? 1 : 0), 16_777_619);
+    }
     if (nextHash === this.authoringInstanceHash) return;
     this.authoringInstanceHash = nextHash;
-    if (!this.pillarMesh || !this.tableMesh) {
+    if (!this.pillarMesh || !this.tableMesh || !this.pressurePlateMesh) {
       this.#replaceAuthoringMeshes(Math.max(1, this.mapWidth * this.mapHeight));
     }
     let pillarCount = 0;
     let tableCount = 0;
+    let plateCount = 0;
     for (const instance of instances) {
       const definition = getPlaceableDefinition(instance.definitionId);
       if (isDynamicBodyDefinition(definition)) continue;
@@ -1505,10 +1528,20 @@ export class ThreePresentation {
         this._matrix.compose(this._position, this._quaternion, this._scale);
         this.pillarMesh.setMatrixAt(pillarCount, this._matrix);
         pillarCount += 1;
+      } else if (definition?.traits.runtimeKind === "pressure-plate") {
+        const pressed = pressurePlates.find((plate) => plate.id === instance.id)?.pressed === true;
+        this._position.set(instance.x, pressed ? 0.004 : 0.03, instance.z);
+        this._scale.set(1, 1, 1);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.pressurePlateMesh.setMatrixAt(plateCount, this._matrix);
+        this._color.set(pressed ? 0x535960 : 0x858b92);
+        this.pressurePlateMesh.setColorAt(plateCount, this._color);
+        plateCount += 1;
       }
     }
     publishInstancedPool(this.pillarMesh, pillarCount);
     publishInstancedPool(this.tableMesh, tableCount);
+    publishInstancedPool(this.pressurePlateMesh, plateCount, { instanceColors: true });
   }
 
   /** @param {Record<string, any>} player @param {number} alpha */

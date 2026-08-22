@@ -65,6 +65,8 @@ function compileLayer(document, layer, layerIndex) {
   const structureCodes = Uint16Array.from(layer.structure.cells);
   /** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
   const holes = [];
+  /** @type {Array<{id:string,layerId:string,x:number,z:number,cx:number,cz:number}>} */
+  const pressurePlates = [];
   const authoredDynamicBodyCount = layer.instances.reduce((count, instance) => {
     const definition = getPlaceableDefinition(instance.definitionId);
     return count + (isDynamicBodyDefinition(definition) ? 1 : 0);
@@ -122,6 +124,24 @@ function compileLayer(document, layer, layerIndex) {
     });
     if (!placement.valid) fail(instancePath, placement.code, placement.message, layer.id);
     const footprintCells = getOccupiedCells(definition, instance);
+    if (definition.traits.runtimeKind === "pressure-plate") {
+      if (footprintCells.length !== 1) {
+        fail(instancePath, "plate-footprint", "Pressure plates require one cell.", layer.id);
+      }
+      const cell = footprintCells[0];
+      const surface = getPlaceableDefinition(layer.surface.legend[surfaceCodes[cell.cz * layer.width + cell.cx]]);
+      const endpoint = document.connectors.some((connector) => (
+        (connector.lowerLayerId === layer.id || connector.upperLayerId === layer.id)
+        && Math.floor(connector.x) === cell.cx && Math.floor(connector.z) === cell.cz
+      ));
+      if (surface?.traits.runtimeKind === "floor-hole" || endpoint) {
+        fail(instancePath, "plate-no-floor-support", "Pressure plates require an ordinary floor cell.", layer.id);
+      }
+      if (pressurePlates.some((plate) => plate.cx === cell.cx && plate.cz === cell.cz)) {
+        fail(instancePath, "duplicate-pressure-plate", "Only one pressure plate may occupy a cell.", layer.id);
+      }
+      pressurePlates.push({ id: instance.id, layerId: layer.id, x: cell.cx + 0.5, z: cell.cz + 0.5, cx: cell.cx, cz: cell.cz });
+    }
     if (isDynamicBodyDefinition(definition)) continue;
     collisionCellsByInstance.set(instance.id, footprintCells);
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
@@ -262,6 +282,7 @@ function compileLayer(document, layer, layerIndex) {
     entities,
     runtimeMappings,
     holes,
+    pressurePlates,
     connectorEndpoints: document.connectors
       .filter((connector) => (
         connector.lowerLayerId === layer.id || connector.upperLayerId === layer.id
@@ -300,6 +321,7 @@ function compatibilityProjection(layer) {
     entities: layer.entities,
     runtimeMappings: layer.runtimeMappings,
     holes: layer.holes,
+    pressurePlates: layer.pressurePlates,
   };
 }
 

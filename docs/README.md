@@ -21,7 +21,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
 - [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v4, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, and map-level connector authoring.
-- [M1B.1–M1B.2 vertical bodies, elevator, and holes](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, and single-cell multi-floor falls.
+- [M1B.1–M1B.3 vertical bodies, elevator, holes, and jumping](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, and grounded plates.
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.

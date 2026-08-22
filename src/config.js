@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.0";
@@ -272,6 +272,14 @@ export const VERTICAL_PHYSICS = Object.freeze({
   playerFallingMaximumSpeedMetersPerSecond: 3.4,
   maximumFloorPlanesPerStep: 32,
   voidRescueDepthMeters: 24,
+  // M1B.3's deliberately committed, Nox-style hop. These values describe a
+  // same-height 2m jump under the shared vertical gravity solver.
+  playerJumpDistanceMeters: 2,
+  playerJumpDurationSeconds: 0.55,
+  playerJumpHorizontalSpeedMetersPerSecond: 2 / 0.55,
+  playerJumpTakeoffVelocityMetersPerSecond: (9.81 * 0.55) / 2,
+  pressurePlateCapacity: 128,
+  pressurePlateEventCapacity: 128,
 });
 
 export const EXPLOSION = Object.freeze({

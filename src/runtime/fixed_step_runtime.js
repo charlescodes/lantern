@@ -132,6 +132,7 @@ export class FixedStepRuntime {
       if (!injected) break;
       if (injected.move) base.move = injected.move;
       if (injected.cast) base.cast = injected.cast;
+      base.jump ||= injected.jump === true;
       base.actions.push(...injected.actions);
     }
     return base;

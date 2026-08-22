@@ -17,6 +17,8 @@ export function groupPaletteDefinitions(definitions) {
     }
     group.definitions.push(definition);
   }
+  const order = ["surface", "structure", "object", "connector"];
+  groups.sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id));
   return groups;
 }
 

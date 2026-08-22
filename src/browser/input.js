@@ -35,6 +35,7 @@ export class InputController {
     this.mouseInside = false;
     this.rightHeld = false;
     this.pendingCast = null;
+    this.pendingJump = false;
     this.editorButton = -1;
     this.panning = false;
     this.lastPointer = { x: 0, y: 0 };
@@ -45,10 +46,13 @@ export class InputController {
   sampleCommand() {
     this.refreshPointerWorld();
     const cast = this.pendingCast;
+    const jump = this.pendingJump;
     this.pendingCast = null;
+    this.pendingJump = false;
     return {
       move: this.mode === "play" && this.rightHeld ? { ...this.mouseWorld } : null,
       cast: this.mode === "play" ? cast : null,
+      ...(this.mode === "play" && jump ? { jump: true } : {}),
     };
   }
 
@@ -56,6 +60,7 @@ export class InputController {
   setMode(mode) {
     this.mode = mode;
     this.rightHeld = false;
+    this.pendingJump = false;
     this.panning = false;
     this.editorButton = -1;
     this.pointerDown.button = -1;
@@ -267,10 +272,15 @@ export class InputController {
       }
     }
     if (isInstance("HTMLButtonElement", target)) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      if (this.mode === "play" && !event.repeat) this.pendingJump = true;
+      return;
+    }
     if (this.actions.developerToolsOpen && !this.actions.developerToolsOpen()) {
       return;
     }
-    if (event.code === "Space") {
+    if (key === "p") {
       event.preventDefault();
       this.actions.togglePause();
     } else if (event.key === ".") {

@@ -432,6 +432,15 @@ export class DebugRenderer {
         context.strokeStyle = definition.debug.stroke;
         context.lineWidth = line;
         context.stroke();
+      } else if (definition.traits.runtimeKind === "pressure-plate") {
+        const plate = (snapshot.pressurePlates ?? []).find((candidate) => candidate.id === instance.id);
+        const pressed = plate?.pressed === true;
+        const inset = 0.05;
+        context.fillStyle = pressed ? "#535960" : "#858b92";
+        context.fillRect(-0.5 + inset, -0.5 + inset, 1 - inset * 2, 1 - inset * 2);
+        context.strokeStyle = pressed ? "#d0d6dc" : "#30363d";
+        context.lineWidth = line * 1.4;
+        context.strokeRect(-0.5 + inset, -0.5 + inset, 1 - inset * 2, 1 - inset * 2);
       }
       if (definition.debug.glyph) {
         const size = this.camera.viewportLengthToWorld(9);
