@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.0` is the current application release. The development runtime is now at snapshot/recording schema v11. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.1` is the current application release. The development runtime is now at snapshot/recording schema v12 and authoring-map v5. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -40,6 +40,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 - [0.8.1 Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) — clean full-viewport boot, one semicolon-gated developer workspace, parked authoring windows, and presentation-only diagnostic suppression without a schema change.
 - [0.8.2 Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) — exact local render-pose following in play, free camera authoring in edit, and pointer-stable camera input without a schema change.
 - [0.9.0 Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) — anonymous projectile and explosion clues, deterministic priority arbitration and search, schema-v9 replay, and frozen schema-v8 perception.
+- [0.9.1 Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) — multi-layer map authoring, semantic history, holes, elevators, falling, jumping, pressure plates, schema-v12 replay, and authoring-map v5.
 - [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
 
 ## Open defects
@@ -67,19 +68,20 @@ These documents preserve future intent and candidate experiments. They are mutab
 | 0.8.1 | [Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) | Clean playtest boot, semicolon-gated developer chrome and diagnostics, parked Spell Lab, no schema change |
 | 0.8.2 | [Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) | Exact play-camera lock, free edit camera, centered play zoom, no schema change |
 | 0.9.0 | [Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) | Anonymous Fireball sight/hearing clues, priority arbitration, deterministic investigation, and schema v9 |
+| 0.9.1 | [Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) | Map-authoring v5, multi-floor vertical bodies, holes, autonomous elevators, jumping, plates, and schema v12 |
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.9.0`.
-- Snapshot and command-recording schema: v11.
+- Application/package release: `0.9.1`.
+- Snapshot and command-recording schema: v12.
 - Authoring-map schema: `lantern-authoring-map` v5; v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
-- Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the schema-v11 recording compatibility projection.
+- Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the schema-v12 recording compatibility projection.
 - Fireball definition format: v1.
 - Performance-report schema: v4.
 - Default particle behavior profile: `m0.2.5-balanced`.
 - Historical replay particle profile: `m0.2`.
 - Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
 
-Release numbering must not rename a frozen profile or increment a serialization schema unless that compatibility contract changes. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.
+Release numbering does not rename frozen profiles. Schema v12 adds the replayed committed-jump edge and current authoring-map projection; schemas v2-v11 retain their existing command and simulation branches. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.

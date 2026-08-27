@@ -1,7 +1,7 @@
 # Lantern: Lay of the Land in Pseudocode
 
-> **Descriptive snapshot:** Lantern 0.9.0 development runtime,
-> snapshot/recording schema v11.
+> **Descriptive snapshot:** Lantern 0.9.1 development runtime,
+> snapshot/recording schema v12 and authoring-map v5.
 >
 > This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.
 
@@ -63,7 +63,7 @@ TrueSight never gives knowledge to AI
 
 ```text
 FUNCTION boot()
-    simulation      := new Simulation(default scenario, schema-v11 profiles)
+    simulation      := new Simulation(default scenario, schema-v12 profiles)
     initialSnapshot := simulation.snapshot()
 
     options   := parse renderer/backend/visual flags from URL
@@ -165,8 +165,11 @@ FUNCTION Simulation.tick(rawInput)
     IF enemy profile uses facing perception
         facingSystem(nextTick)
     elevatorSupportAndMotionSystem()            // acquire, step once, carry exact delta Y
+    jumpSystem(command.jump, target)            // supported takeoff, committed X/Z direction
+    holeRimAttractionSystem()                   // fitting grounded bodies only
     bodyPhysicsSystem()                         // normal X/Z control, pushing, per-layer grid
-    verticalResolutionSystem()                  // support loss, gravity, landing, handoff/ejection
+    verticalResolutionSystem()                  // release, hole capture, gravity, landing/handoff
+    pressurePlateSystem()                       // grounded floor contacts only
     movementSoundSystem(nextTick)               // running cadence; walking is silent
 
     decrease cooldowns
@@ -208,7 +211,6 @@ FOR each eligible player/enemy/prop/body
 
 elevatorSupportAndMotionSystem(dt):
     acquire platform contact by center/support-point and feet-plane tolerance
-    count only capable actor activators       // props may ride without calling
     step each unstoppable elevator once
     add that exact platform delta Y to every supported body
 
@@ -218,14 +220,14 @@ bodyPhysicsSystem(dt):
 
 verticalResolutionSystem(dt):
     after X/Z motion, detach bodies that left their support footprint
-    apply bounded gravity and terminal velocity to unsupported bodies
+    capture swept, full-footprint hole or shaft entries
+    apply bounded gravity and terminal velocity to falling/jumping bodies
     sweep downward through real elevator/floor support planes
-    at upper frame:
-        IF complete footprint fits square aperture with positive clearance
-            transfer that body to the upper layer exactly once
-        ELSE
-            detach and try deterministic bounded lateral ejection
-            increment diagnostics if only best-effort separation is possible
+    at every crossed floor plane:
+        IF complete footprint fits that individual aperture with positive clearance
+            preserve Y velocity and continue to lower plane
+        ELSE land on that floor and restore grounded collision
+    at an upper elevator frame, reject oversized supported loads with bounded ejection
     on floor landing, reenable low-clutter contact and bounded depenetration
     update visible map only when the player changes layer
 ```

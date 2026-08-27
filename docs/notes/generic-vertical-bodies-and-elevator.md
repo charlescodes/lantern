@@ -1,6 +1,6 @@
-# M1B.1–M1B.2 Generic vertical bodies, elevator, and floor holes
+# M1B.1–M1B.3 Generic vertical bodies, elevator, holes, jumping, and plates
 
-> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** unchanged at v11
+> **Status:** current 0.9.1 implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** v12
 
 M1B.1 keeps Lantern's authoritative X/Z collision model and adds one bounded
 world-Y degree of freedom. It is not a general 3D rigid-body system. Floors and
@@ -16,7 +16,7 @@ pools expose equivalent vertical fields:
 - mode (`SUPPORTED` or `FALLING`, with reserved codes for later modes);
 - support kind (`FLOOR`, `ELEVATOR`, or `NONE`) and stable runtime support ID;
 - stable layer index plus connector/transit context;
-- capability bits for gravity, elevator riding, and elevator activation;
+- capability bits for gravity, elevator riding, jumping, and pressure plates;
 - the latest aperture-fit diagnostic.
 
 Pool rows remain bounded SoA storage and swap-and-pop indices remain temporary.

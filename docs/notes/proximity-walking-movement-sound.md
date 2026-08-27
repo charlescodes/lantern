@@ -2,7 +2,7 @@
 
 > **Status:** implemented development checkpoint after Lantern 0.9.0
 >
-> **Compatibility:** application/package version remains `0.9.0`; snapshot and
+> **Compatibility:** incorporated into application/package `0.9.1`; snapshot and
 > recording schema advances to v11; performance-report schema advances to v4;
 > scenario v3, map v1, Fireball definition v1, and schemas v2-v10 remain frozen.
 
