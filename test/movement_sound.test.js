@@ -98,7 +98,7 @@ test("RMB movement promotes walking to a latched run until release", () => {
   let snapshot = value.snapshot();
   assert.equal(snapshot.player.movement.mode, "walking");
   assert.equal(snapshot.player.desiredVx, MOVEMENT_SOUND.walkSpeedMetersPerSecond);
-  assert.equal(snapshot.player.movement.targetDistanceMeters, 0.75);
+  assert.equal(snapshot.player.movement.targetDistanceMeters, MOVEMENT_SOUND.walkTargetRadiusMeters);
 
   const locomotionBeforePromotion = value.player.locomotionVx;
   value.tick({

@@ -133,7 +133,7 @@ export function setPlayerStartLayer(input, layerId) {
  * @param {unknown} input
  * @param {number} x
  * @param {number} z
- * @param {{lowerLayerId:string,upperLayerId:string,platformWidth?:number,apertureWidth?:number,travelSpeed?:number,dwellSeconds?:number,initialStop?:"lower"|"upper",activationPolicy?:"occupancy"|"manual"}} options
+ * @param {{lowerLayerId:string,upperLayerId:string,platformWidth?:number,apertureWidth?:number,travelDurationSeconds?:number,dwellSeconds?:number,initialStop?:"lower"|"upper"}} options
  */
 export function placeElevatorConnector(input, x, z, options) {
   const document = cloneAuthoringMap(input);
@@ -162,12 +162,11 @@ export function placeElevatorConnector(input, x, z, options) {
     apertureWidth: Number(
       options.apertureWidth ?? VERTICAL_PHYSICS.defaultApertureWidthMeters,
     ),
-    travelSpeed: Number(
-      options.travelSpeed ?? VERTICAL_PHYSICS.defaultTravelSpeedMetersPerSecond,
+    travelDurationSeconds: Number(
+      options.travelDurationSeconds ?? VERTICAL_PHYSICS.defaultTravelDurationSeconds,
     ),
     dwellSeconds: Number(options.dwellSeconds ?? VERTICAL_PHYSICS.defaultDwellSeconds),
     initialStop: options.initialStop ?? "lower",
-    activationPolicy: options.activationPolicy ?? "occupancy",
   };
   document.connectors.push(connector);
   document.nextConnectorOrdinal = ordinal + 1;
@@ -195,10 +194,9 @@ export function updateConnector(input, connectorId, changes) {
     "z",
     "platformWidth",
     "apertureWidth",
-    "travelSpeed",
+    "travelDurationSeconds",
     "dwellSeconds",
     "initialStop",
-    "activationPolicy",
   ]) {
     if (changes[field] !== undefined) connector[field] = changes[field];
   }

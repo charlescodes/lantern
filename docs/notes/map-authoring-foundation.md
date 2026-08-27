@@ -1,6 +1,6 @@
 # M1A.1–M1A.4 Map-authoring kit
 
-> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v4 · **Runtime recording schema:** unchanged at v11
+> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** unchanged at v11
 
 M1A.1 separates friendly saved source from the compact grid and bounded pools used by the live simulation. M1A.2 adds deterministic selection, inspection, previews, and practical sparse-instance edits. M1A.3 wraps those edits in bounded undo/redo and saved-revision tracking. M1A.4 makes the same kit multi-layer, validates complete documents with structured diagnostics, and makes replacement atomic. The editor still changes authoritative state only through fixed-tick commands, and its palette and compiler resolve stable catalog IDs instead of treating HTML button names as gameplay data.
 
@@ -104,7 +104,7 @@ Load/import parses into a candidate, detects and migrates its supported version,
 
 ## Legacy loading and recordings
 
-Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, current markers, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. Saving after any migration emits authoring-map v4 only.
+Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, current markers, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. Saving after any migration emits authoring-map v5 only.
 
 Snapshot/recording schema remains v11. Recordings keep their compiled scenario-v3 field for frozen compatibility and add `initialAuthoringMap` for current authoring data. Replay prefers that field only for the current schema, so older schema fixtures retain their existing loader and gameplay branches.
 

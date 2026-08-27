@@ -354,21 +354,17 @@ export class AuthoringInspector {
     const z = addNumber("Z", "z", connector.z, "0.1");
     const platformWidth = addNumber("Platform width", "platformWidth", connector.platformWidth, "0.01");
     const apertureWidth = addNumber("Aperture width", "apertureWidth", connector.apertureWidth, "0.01");
-    const travelSpeed = addNumber("Travel speed", "travelSpeed", connector.travelSpeed, "0.1");
+    const travelDurationSeconds = addNumber(
+      "Travel duration (seconds)",
+      "travelDurationSeconds",
+      connector.travelDurationSeconds,
+      "0.1",
+    );
     const dwellSeconds = addNumber("Dwell seconds", "dwellSeconds", connector.dwellSeconds, "0.05");
     const initialStop = addSelect("Initial stop", "initialStop", connector.initialStop, [
       { value: "lower", label: "Lower" },
       { value: "upper", label: "Upper" },
     ]);
-    const activationPolicy = addSelect(
-      "Activation",
-      "activationPolicy",
-      connector.activationPolicy,
-      [
-        { value: "occupancy", label: "Occupancy" },
-        { value: "manual", label: "Manual / debug command" },
-      ],
-    );
     const apply = document.createElement("button");
     apply.type = "submit";
     apply.className = "accent-button";
@@ -383,13 +379,12 @@ export class AuthoringInspector {
         z: Number(z.value),
         platformWidth: Number(platformWidth.value),
         apertureWidth: Number(apertureWidth.value),
-        travelSpeed: Number(travelSpeed.value),
+        travelDurationSeconds: Number(travelDurationSeconds.value),
         dwellSeconds: Number(dwellSeconds.value),
         initialStop: initialStop.value,
-        activationPolicy: activationPolicy.value,
       };
       if ([changes.x, changes.z, changes.platformWidth, changes.apertureWidth,
-        changes.travelSpeed, changes.dwellSeconds].some((value) => !Number.isFinite(value))) {
+        changes.travelDurationSeconds, changes.dwellSeconds].some((value) => !Number.isFinite(value))) {
         this.showStatus("Connector numeric values must be finite", false);
         return;
       }

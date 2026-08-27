@@ -23,7 +23,7 @@ import {
   sweptFootprintEntrySquareAperture,
 } from "../src/sim/aperture_fit.js";
 import { GridMap } from "../src/sim/grid_map.js";
-import { ArenaScenario } from "../src/sim/scenario.js";
+import { ArenaScenario, createHoleDebugArenaScenario } from "../src/sim/scenario.js";
 import { Simulation } from "../src/sim/simulation.js";
 import {
   COMBAT,
@@ -92,13 +92,33 @@ test("catalog-backed hole paint round-trips and is one reversible authoring comm
   assert.equal(compileAuthoringMap(painted).layers[0].holes.length, 1);
 });
 
-test("M1B.1 v3 documents migrate to v4 unchanged when they contain no holes", () => {
+test("M1B.1 v3 documents migrate to the current schema when they contain no holes", () => {
   const source = new ArenaScenario(borderedMap()).toAuthoringJSON();
   const v3 = structuredClone(source);
   v3.version = 3;
   const migrated = loadAuthoringMap(v3);
   assert.equal(migrated.version, AUTHORING_MAP_VERSION);
   assert.equal(compileAuthoringMap(migrated).layers[0].holes.length, 0);
+});
+
+test("holes arena provides a four-floor clock-driven elevator route", () => {
+  const document = createHoleDebugArenaScenario().toAuthoringJSON();
+  assert.equal(document.layers.length, 4);
+  assert.equal(document.connectors.length, 3);
+  assert.deepEqual(
+    document.connectors.map((connector) => [
+      connector.lowerLayerId,
+      connector.upperLayerId,
+      connector.travelDurationSeconds,
+      connector.dwellSeconds,
+    ]),
+    [
+      ["ground", "layer-0002", 2, 1],
+      ["layer-0002", "layer-0003", 2, 1],
+      ["layer-0003", "layer-0004", 2, 1],
+    ],
+  );
+  assert.deepEqual(document.playerStart, { layerId: "ground", x: 2.5, z: 18.5 });
 });
 
 test("adjacent holes remain separate apertures and cannot share an elevator cell", () => {

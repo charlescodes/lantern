@@ -34,6 +34,49 @@ export function projectedFootprintHalfExtents(footprint, out) {
 }
 
 /**
+ * Returns true when an authoritative footprint has positive-area overlap with
+ * an axis-aligned rectangle.  This is intentionally a contact query rather
+ * than containment: a wide table may press more than one pressure plate.
+ * Supported rectangles retain Lantern's quarter-turn orientation rule.
+ * Unsupported shapes are rejected conservatively.
+ * @param {Record<string, any>} footprint
+ * @param {{x:number,z:number,halfWidth:number,halfDepth:number}} rectangle
+ * @param {{halfX:number,halfZ:number}} [scratchExtents]
+ */
+export function footprintOverlapsAxisAlignedRectangle(footprint, rectangle, scratchExtents) {
+  const centerX = Number(footprint?.x);
+  const centerZ = Number(footprint?.z);
+  const rectangleX = Number(rectangle?.x);
+  const rectangleZ = Number(rectangle?.z);
+  const halfWidth = Number(rectangle?.halfWidth);
+  const halfDepth = Number(rectangle?.halfDepth);
+  if (
+    !Number.isFinite(centerX)
+    || !Number.isFinite(centerZ)
+    || !Number.isFinite(rectangleX)
+    || !Number.isFinite(rectangleZ)
+    || !(halfWidth > 0)
+    || !(halfDepth > 0)
+  ) return false;
+  if (footprint?.type === "circle") {
+    const radius = Number(footprint.radius);
+    if (!(radius > 0) || !Number.isFinite(radius)) return false;
+    const nearestX = Math.max(rectangleX - halfWidth, Math.min(centerX, rectangleX + halfWidth));
+    const nearestZ = Math.max(rectangleZ - halfDepth, Math.min(centerZ, rectangleZ + halfDepth));
+    const dx = centerX - nearestX;
+    const dz = centerZ - nearestZ;
+    // Strictly less than means a tangent edge does not chatter a plate.
+    return dx * dx + dz * dz < radius * radius - 1e-12;
+  }
+  const extents = projectedFootprintHalfExtents(footprint, scratchExtents);
+  return Boolean(
+    extents
+    && Math.abs(centerX - rectangleX) < extents.halfX + halfWidth
+    && Math.abs(centerZ - rectangleZ) < extents.halfZ + halfDepth
+  );
+}
+
+/**
  * Pure full-footprint containment test for a square aperture. The footprint
  * center may be off-center, but every projected edge must retain positive
  * configured clearance. Unsupported shapes are rejected conservatively.

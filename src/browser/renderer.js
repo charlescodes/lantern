@@ -1,6 +1,6 @@
 // @ts-check
 
-import { EXPLOSION, SIMULATION } from "../config.js";
+import { EXPLOSION, SIMULATION, VERTICAL_PHYSICS } from "../config.js";
 import {
   getPlaceableDefinition,
   isDynamicBodyDefinition,
@@ -17,6 +17,10 @@ import {
 import { enemyFacingTriangle } from "../presentation/enemy_facing.js";
 import { enemyDeadBodyPose } from "../presentation/dead_body_pose.js";
 import { interpolateRenderValue } from "../presentation/player_camera.js";
+import {
+  bodyVisibleOnRuntimeLayer,
+  elevatorVisibleOnRuntimeLayer,
+} from "../presentation/layer_visibility.js";
 import {
   KINETIC_FRAGMENT_STYLE,
   writeKineticFragmentTriangle,
@@ -360,6 +364,31 @@ export class DebugRenderer {
       }
     }
 
+    // The upper endpoint of a connector is a real shaft opening. Its moving
+    // platform is drawn later, so this remains visible whenever the platform
+    // is away and communicates that a fitting body can deliberately step in
+    // and fall to a platform below.
+    const runtimeLayerId = map.layerId ?? snapshot.runtimeLayerId;
+    for (const elevator of snapshot.elevators ?? []) {
+      if (elevator.upperLayerId !== runtimeLayerId) continue;
+      const halfAperture = elevator.apertureWidth / 2;
+      context.fillStyle = "#10171b";
+      context.fillRect(
+        elevator.x - halfAperture,
+        elevator.z - halfAperture,
+        elevator.apertureWidth,
+        elevator.apertureWidth,
+      );
+      context.strokeStyle = "rgba(185, 243, 255, 0.8)";
+      context.lineWidth = line * 1.4;
+      context.strokeRect(
+        elevator.x - halfAperture,
+        elevator.z - halfAperture,
+        elevator.apertureWidth,
+        elevator.apertureWidth,
+      );
+    }
+
     context.beginPath();
     for (let x = minX; x <= maxX + 1; x += 1) {
       context.moveTo(x, minZ);
@@ -435,12 +464,12 @@ export class DebugRenderer {
       } else if (definition.traits.runtimeKind === "pressure-plate") {
         const plate = (snapshot.pressurePlates ?? []).find((candidate) => candidate.id === instance.id);
         const pressed = plate?.pressed === true;
-        const inset = 0.05;
+        const width = Number(plate?.width ?? definition.traits.contactWidth ?? VERTICAL_PHYSICS.pressurePlateWidthMeters);
         context.fillStyle = pressed ? "#535960" : "#858b92";
-        context.fillRect(-0.5 + inset, -0.5 + inset, 1 - inset * 2, 1 - inset * 2);
+        context.fillRect(-width / 2, -width / 2, width, width);
         context.strokeStyle = pressed ? "#d0d6dc" : "#30363d";
         context.lineWidth = line * 1.4;
-        context.strokeRect(-0.5 + inset, -0.5 + inset, 1 - inset * 2, 1 - inset * 2);
+        context.strokeRect(-width / 2, -width / 2, width, width);
       }
       if (definition.debug.glyph) {
         const size = this.camera.viewportLengthToWorld(9);
@@ -650,13 +679,13 @@ export class DebugRenderer {
     const line = this.camera.viewportLengthToWorld(1.5);
     const runtimeLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     for (const elevator of snapshot.elevators ?? []) {
-      if (
-        elevator.lowerLayerId !== runtimeLayerId
-        && elevator.upperLayerId !== runtimeLayerId
-        && elevator.supportedBodyCount === 0
-      ) continue;
+      if (!elevatorVisibleOnRuntimeLayer(
+        elevator,
+        runtimeLayerId,
+        snapshot.player,
+        VERTICAL_PHYSICS.upperElevatorPresentationBandMeters,
+      )) continue;
       const halfPlatform = elevator.platformWidth / 2;
-      const halfAperture = elevator.apertureWidth / 2;
       context.save();
       context.fillStyle = "rgba(76, 143, 159, 0.34)";
       context.strokeStyle = "rgba(185, 243, 255, 0.96)";
@@ -673,6 +702,19 @@ export class DebugRenderer {
         elevator.platformWidth,
         elevator.platformWidth,
       );
+      if (
+        elevator.lowerLayerId === runtimeLayerId
+        && elevator.currentY > elevator.lowerY
+          + VERTICAL_PHYSICS.landingSeparationEpsilonMeters
+      ) {
+        context.beginPath();
+        context.arc(elevator.x, elevator.z, halfPlatform * 0.58, 0, Math.PI * 2);
+        context.fillStyle = "rgba(31, 51, 57, 0.92)";
+        context.fill();
+        context.strokeStyle = "rgba(139, 241, 255, 0.76)";
+        context.stroke();
+      }
+      const halfAperture = elevator.apertureWidth / 2;
       context.setLineDash([line * 4, line * 3]);
       context.strokeStyle = "rgba(255, 211, 119, 0.9)";
       context.strokeRect(
@@ -684,7 +726,7 @@ export class DebugRenderer {
       context.setLineDash([]);
       context.beginPath();
       context.arc(elevator.x, elevator.z, line * 2.2, 0, Math.PI * 2);
-      context.fillStyle = elevator.motionState === "moving"
+      context.fillStyle = elevator.motionState !== "dwelling"
         ? "#8bf1ff"
         : "#ffd377";
       context.fill();
@@ -694,9 +736,15 @@ export class DebugRenderer {
         context.textBaseline = "bottom";
         context.fillStyle = "rgba(231, 249, 252, 0.96)";
         context.fillText(
-          `${elevator.connectorId} · y ${elevator.currentY.toFixed(2)}`,
+          `${elevator.connectorId}: ${elevator.lowerLayerName} ↔ ${elevator.upperLayerName}`,
           elevator.x,
           elevator.z - halfPlatform - 0.06,
+        );
+        context.textBaseline = "top";
+        context.fillText(
+          `${elevator.motionState} · ${elevator.currentY.toFixed(2)}m`,
+          elevator.x,
+          elevator.z - halfPlatform + 0.02,
         );
       }
       context.restore();
@@ -830,8 +878,9 @@ export class DebugRenderer {
   #drawRocks(snapshot, alpha, developerToolsOpen) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     for (const rock of snapshot.rocks) {
-      if (rock.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
+      if (!bodyVisibleOnRuntimeLayer(rock, visibleLayerId, snapshot.elevators)) continue;
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
       if (rock.kind === "table") {
@@ -1255,15 +1304,37 @@ export class DebugRenderer {
     for (const entity of [hover, selected]) {
       if (!entity || entity.kind === "cell" || !entity.position) continue;
       const position = /** @type {{x:number,z:number}} */ (entity.position);
-      const radius = Number(entity.radius) || 0.16;
       const context = this.context;
-      context.beginPath();
-      context.arc(position.x, position.z, radius + 0.1, 0, Math.PI * 2);
+      const footprint = entity.footprint ?? entity.vertical?.footprint;
+      const rectangle = footprint?.type === "rectangle" ? footprint : null;
+      const pad = 0.08;
+      context.save();
       context.strokeStyle = entity === selected ? COLORS.selected : COLORS.hover;
       context.lineWidth = this.camera.viewportLengthToWorld(
         entity === selected ? 2.5 : 1.5,
       );
+      if (rectangle) {
+        const halfWidth = Number(rectangle.halfWidth);
+        const halfDepth = Number(rectangle.halfDepth);
+        const rotation = Number(rectangle.rotation ?? 0);
+        if (Number.isFinite(halfWidth) && Number.isFinite(halfDepth) && halfWidth > 0 && halfDepth > 0) {
+          context.translate(position.x, position.z);
+          context.rotate(rotation * Math.PI / 2);
+          context.strokeRect(
+            -halfWidth - pad,
+            -halfDepth - pad,
+            (halfWidth + pad) * 2,
+            (halfDepth + pad) * 2,
+          );
+          context.restore();
+          continue;
+        }
+      }
+      const radius = Number(footprint?.radius ?? entity.radius) || 0.16;
+      context.beginPath();
+      context.arc(position.x, position.z, radius + 0.1, 0, Math.PI * 2);
       context.stroke();
+      context.restore();
     }
   }
 

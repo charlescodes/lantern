@@ -41,6 +41,10 @@ import { applyLightPool } from "./light_pool.js";
 import { mergeCatalogPropLights } from "./catalog_lights.js";
 import { PresentationFlags } from "./options.js";
 import { interpolateRenderValue } from "./player_camera.js";
+import {
+  bodyVisibleOnRuntimeLayer,
+  elevatorVisibleOnRuntimeLayer,
+} from "./layer_visibility.js";
 import { PresentationProfiler } from "./profiler.js";
 import {
   SCORCH_CORE_TRIANGLE_COUNT,
@@ -202,7 +206,8 @@ export class ThreePresentation {
     this.pressurePlateMesh = null;
     this.authoringOverlayMesh = null;
     this.elevatorPlatformMesh = null;
-    this.elevatorApertureMesh = null;
+    this.elevatorShaftMesh = null;
+    this.elevatorPistonMesh = null;
     this.rockMesh = null;
     this.projectileMesh = null;
     this.particleMesh = null;
@@ -400,7 +405,11 @@ export class ThreePresentation {
       roughness: 0.82,
       metalness: 0,
     }));
-    this.pressurePlateGeometry = new THREE.BoxGeometry(0.9, 0.03, 0.9);
+    this.pressurePlateGeometry = new THREE.BoxGeometry(
+      VERTICAL_PHYSICS.pressurePlateWidthMeters,
+      0.03,
+      VERTICAL_PHYSICS.pressurePlateWidthMeters,
+    );
     this.pressurePlateMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0x858b92,
       roughness: 0.72,
@@ -416,20 +425,33 @@ export class ThreePresentation {
       depthTest: false,
       depthWrite: false,
     });
-    this.elevatorPlatformGeometry = new THREE.BoxGeometry(1, 0.08, 1);
+    this.elevatorPlatformGeometry = new THREE.BoxGeometry(
+      1,
+      VERTICAL_PHYSICS.elevatorPlatformThicknessMeters,
+      1,
+    );
     this.elevatorPlatformMaterial = new THREE.MeshStandardNodeMaterial({
-      color: 0x4c8f9f,
-      emissive: 0x0b3139,
-      emissiveIntensity: 0.55,
-      roughness: 0.54,
-      metalness: 0.42,
+      color: 0x8b5a32,
+      emissive: 0x1c0c04,
+      emissiveIntensity: 0.18,
+      roughness: 0.78,
+      metalness: 0.04,
     });
-    this.elevatorApertureGeometry = new THREE.BoxGeometry(1, 0.018, 1);
-    this.elevatorApertureMaterial = new THREE.MeshBasicNodeMaterial({
-      color: 0xffd377,
-      transparent: true,
-      opacity: 0.26,
-      depthWrite: false,
+    this.elevatorShaftGeometry = new THREE.BoxGeometry(
+      1,
+      VERTICAL_PHYSICS.elevatorShaftSurfaceThicknessMeters,
+      1,
+    );
+    this.elevatorShaftMaterial = new THREE.MeshStandardNodeMaterial({
+      color: 0x10171b,
+      roughness: 0.96,
+      metalness: 0,
+    });
+    this.elevatorPistonGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 20);
+    this.elevatorPistonMaterial = new THREE.MeshStandardNodeMaterial({
+      color: 0x34474d,
+      roughness: 0.6,
+      metalness: 0.46,
     });
     this.elevatorPlatformMesh = createDynamicInstancedPool(
       this.elevatorPlatformGeometry,
@@ -437,14 +459,23 @@ export class ThreePresentation {
       VERTICAL_PHYSICS.elevatorCapacity,
       "elevator-platforms",
     );
-    this.elevatorApertureMesh = createDynamicInstancedPool(
-      this.elevatorApertureGeometry,
-      this.elevatorApertureMaterial,
+    this.elevatorShaftMesh = createDynamicInstancedPool(
+      this.elevatorShaftGeometry,
+      this.elevatorShaftMaterial,
       VERTICAL_PHYSICS.elevatorCapacity,
-      "elevator-apertures",
+      "elevator-shafts",
     );
-    this.elevatorApertureMesh.renderOrder = 8;
-    this.scene.add(this.elevatorPlatformMesh, this.elevatorApertureMesh);
+    this.elevatorPistonMesh = createDynamicInstancedPool(
+      this.elevatorPistonGeometry,
+      this.elevatorPistonMaterial,
+      VERTICAL_PHYSICS.elevatorCapacity,
+      "elevator-pistons",
+    );
+    this.scene.add(
+      this.elevatorPlatformMesh,
+      this.elevatorShaftMesh,
+      this.elevatorPistonMesh,
+    );
     this.rockGeometry = new THREE.IcosahedronGeometry(1, 1);
     this.rockMaterial = this.#configureSightMaterial(new THREE.MeshStandardNodeMaterial({
       color: 0xffffff,
@@ -611,6 +642,8 @@ export class ThreePresentation {
     this.cursorMarker = this.#createGroundRing(0x69d4b3, 0.07, 0.095, 0.88);
     this.hoverMarker = this.#createGroundRing(0x69d4b3, 0.88, 1, 0.82);
     this.selectedMarker = this.#createGroundRing(0xfff1b0, 0.86, 1, 0.96);
+    this.hoverBoxMarker = this.#createGroundBoxMarker(0x69d4b3, 0.82);
+    this.selectedBoxMarker = this.#createGroundBoxMarker(0xfff1b0, 0.96);
     this.editCellPreview = new THREE.Mesh(
       new THREE.BoxGeometry(1, 0.035, 1),
       this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
@@ -1019,6 +1052,8 @@ export class ThreePresentation {
       this.cursorMarker,
       this.hoverMarker,
       this.selectedMarker,
+      this.hoverBoxMarker,
+      this.selectedBoxMarker,
       this.editCellPreview,
       this.editRockPreview,
       ...(this.authoringOverlayMesh ? [this.authoringOverlayMesh] : []),
@@ -1853,7 +1888,7 @@ export class ThreePresentation {
     const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     for (let index = 0; index < snapshot.rocks.length; index += 1) {
       const rock = snapshot.rocks[index];
-      if (rock.layerId !== visibleLayerId) continue;
+      if (!bodyVisibleOnRuntimeLayer(rock, visibleLayerId, snapshot.elevators)) continue;
       const x = rock.previousX + (rock.x - rock.previousX) * alpha;
       const z = rock.previousZ + (rock.z - rock.previousZ) * alpha;
       const worldY = interpolateRenderValue(
@@ -1910,25 +1945,73 @@ export class ThreePresentation {
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #updateElevators(snapshot, alpha) {
     let count = 0;
+    let shaftCount = 0;
+    let pistonCount = 0;
+    const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     for (const elevator of snapshot.elevators ?? []) {
-      if (
-        elevator.lowerLayerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)
-        && elevator.upperLayerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)
-        && elevator.supportedBodyCount === 0
-      ) continue;
       const worldY = interpolateRenderValue(elevator.previousY, elevator.currentY, alpha);
-      this._position.set(elevator.x, worldY - this.activeBaseY - 0.04, elevator.z);
+      if (elevator.upperLayerId === visibleLayerId) {
+        // This is the persistent dark opening below the deck, not a second
+        // physical floor. It stays visible while the lift is away and is just
+        // beneath the raised wood deck while the lift reaches the upper stop.
+        this._position.set(
+          elevator.x,
+          elevator.upperY - this.activeBaseY
+            + VERTICAL_PHYSICS.elevatorPlatformVisualTopOffsetMeters / 2,
+          elevator.z,
+        );
+        this._scale.set(elevator.apertureWidth, 1, elevator.apertureWidth);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.elevatorShaftMesh.setMatrixAt(shaftCount, this._matrix);
+        shaftCount += 1;
+      }
+      if (
+        elevator.lowerLayerId === visibleLayerId
+        && worldY > elevator.lowerY + VERTICAL_PHYSICS.landingSeparationEpsilonMeters
+      ) {
+        // Terminate the shaft at the underside of the deck, rather than
+        // through its coplanar top. The small radial inset leaves a stable
+        // visual gap and avoids the flashing intersection at travel heights.
+        const pistonHeight = worldY - elevator.lowerY
+          + VERTICAL_PHYSICS.elevatorPlatformVisualTopOffsetMeters
+          - VERTICAL_PHYSICS.elevatorPlatformThicknessMeters;
+        if (pistonHeight > VERTICAL_PHYSICS.landingSeparationEpsilonMeters) {
+          const pistonWidth = Math.max(
+            VERTICAL_PHYSICS.landingSeparationEpsilonMeters,
+            elevator.platformWidth - VERTICAL_PHYSICS.elevatorPistonInsetMeters * 2,
+          );
+          this._position.set(
+            elevator.x,
+            elevator.lowerY - this.activeBaseY + pistonHeight / 2,
+            elevator.z,
+          );
+          this._scale.set(pistonWidth, pistonHeight, pistonWidth);
+          this._matrix.compose(this._position, this._quaternion, this._scale);
+          this.elevatorPistonMesh.setMatrixAt(pistonCount, this._matrix);
+          pistonCount += 1;
+        }
+      }
+      if (!elevatorVisibleOnRuntimeLayer(
+        elevator,
+        visibleLayerId,
+        snapshot.player,
+        VERTICAL_PHYSICS.upperElevatorPresentationBandMeters,
+      )) continue;
+      this._position.set(
+        elevator.x,
+        worldY - this.activeBaseY
+          + VERTICAL_PHYSICS.elevatorPlatformVisualTopOffsetMeters
+          - VERTICAL_PHYSICS.elevatorPlatformThicknessMeters / 2,
+        elevator.z,
+      );
       this._scale.set(elevator.platformWidth, 1, elevator.platformWidth);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.elevatorPlatformMesh.setMatrixAt(count, this._matrix);
-      this._position.y = worldY - this.activeBaseY + 0.012;
-      this._scale.set(elevator.apertureWidth, 1, elevator.apertureWidth);
-      this._matrix.compose(this._position, this._quaternion, this._scale);
-      this.elevatorApertureMesh.setMatrixAt(count, this._matrix);
       count += 1;
     }
     publishInstancedPool(this.elevatorPlatformMesh, count);
-    publishInstancedPool(this.elevatorApertureMesh, count);
+    publishInstancedPool(this.elevatorShaftMesh, shaftCount);
+    publishInstancedPool(this.elevatorPistonMesh, pistonCount);
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
@@ -2049,7 +2132,11 @@ export class ThreePresentation {
     );
     const assignments = mergeCatalogPropLights(
       transientAssignments,
-      snapshot.rocks.filter((body) => body.layerId === (snapshot.map.layerId ?? snapshot.runtimeLayerId)),
+      snapshot.rocks.filter((body) => bodyVisibleOnRuntimeLayer(
+        body,
+        snapshot.map.layerId ?? snapshot.runtimeLayerId,
+        snapshot.elevators,
+      )),
       this.lightBudget.capacity,
       this.activeBaseY,
     );
@@ -2067,8 +2154,8 @@ export class ThreePresentation {
     if (this.cursorMarker.visible) {
       this.cursorMarker.position.set(view.mouseWorld.x, 0.018, view.mouseWorld.z);
     }
-    this.#positionInspectionMarker(this.hoverMarker, view.hover);
-    this.#positionInspectionMarker(this.selectedMarker, view.selected);
+    this.#positionInspectionMarker(this.hoverMarker, this.hoverBoxMarker, view.hover);
+    this.#positionInspectionMarker(this.selectedMarker, this.selectedBoxMarker, view.selected);
 
     const editor = view.authoringEditor ?? null;
     this.#updateAuthoringOverlays(
@@ -2188,17 +2275,53 @@ export class ThreePresentation {
     });
   }
 
-  /** @param {THREE.Mesh} marker @param {Record<string,unknown>|null} entity */
-  #positionInspectionMarker(marker, entity) {
+  /** @param {THREE.Mesh} marker @param {THREE.Mesh} boxMarker @param {Record<string,unknown>|null} entity */
+  #positionInspectionMarker(marker, boxMarker, entity) {
     if (!entity || !entity.position) {
       marker.visible = false;
+      boxMarker.visible = false;
       return;
     }
     const position = /** @type {{x:number,z:number}} */ (entity.position);
-    const radius = entity.kind === "cell" ? 0.48 : Math.max(0.08, Number(entity.radius) || 0.16);
+    const footprint = entity.footprint ?? entity.vertical?.footprint;
+    if (footprint?.type === "rectangle") {
+      const halfWidth = Number(footprint.halfWidth);
+      const halfDepth = Number(footprint.halfDepth);
+      const rotation = Number(footprint.rotation ?? 0);
+      if (Number.isFinite(halfWidth) && Number.isFinite(halfDepth) && halfWidth > 0 && halfDepth > 0) {
+        const pad = 0.08;
+        marker.visible = false;
+        boxMarker.visible = true;
+        boxMarker.position.set(position.x, 0.024, position.z);
+        boxMarker.rotation.set(0, rotation * Math.PI / 2, 0);
+        boxMarker.scale.set((halfWidth + pad) * 2, 1, (halfDepth + pad) * 2);
+        return;
+      }
+    }
+    boxMarker.visible = false;
+    const radius = entity.kind === "cell" ? 0.48 : Math.max(0.08, Number(footprint?.radius ?? entity.radius) || 0.16);
     marker.visible = true;
     marker.position.set(position.x, 0.024, position.z);
     marker.scale.setScalar(radius + 0.12);
+  }
+
+  /** @param {number} color @param {number} opacity */
+  #createGroundBoxMarker(color, opacity) {
+    const marker = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 0.018, 1),
+      this.#configureSightMaterial(new THREE.MeshBasicNodeMaterial({
+        color,
+        wireframe: true,
+        transparent: true,
+        opacity,
+        depthTest: false,
+        depthWrite: false,
+      })),
+    );
+    marker.renderOrder = 20;
+    marker.visible = false;
+    this.scene.add(marker);
+    return marker;
   }
 
   #applyShadowFlag() {

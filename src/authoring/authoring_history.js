@@ -868,10 +868,11 @@ export function commandFromAuthoringAction(documentInput, action) {
         upperLayerId: String(action.upperLayerId),
         ...(action.platformWidth === undefined ? {} : { platformWidth: Number(action.platformWidth) }),
         ...(action.apertureWidth === undefined ? {} : { apertureWidth: Number(action.apertureWidth) }),
-        ...(action.travelSpeed === undefined ? {} : { travelSpeed: Number(action.travelSpeed) }),
+        ...(action.travelDurationSeconds === undefined
+          ? {}
+          : { travelDurationSeconds: Number(action.travelDurationSeconds) }),
         ...(action.dwellSeconds === undefined ? {} : { dwellSeconds: Number(action.dwellSeconds) }),
         ...(action.initialStop === undefined ? {} : { initialStop: action.initialStop }),
-        ...(action.activationPolicy === undefined ? {} : { activationPolicy: action.activationPolicy }),
       });
       after = result.document;
       label = "Place Two-stop Elevator";

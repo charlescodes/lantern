@@ -36,6 +36,7 @@ export class InputController {
     this.rightHeld = false;
     this.pendingCast = null;
     this.pendingJump = false;
+    this.pendingJumpTarget = null;
     this.editorButton = -1;
     this.panning = false;
     this.lastPointer = { x: 0, y: 0 };
@@ -47,12 +48,15 @@ export class InputController {
     this.refreshPointerWorld();
     const cast = this.pendingCast;
     const jump = this.pendingJump;
+    const jumpTarget = this.pendingJumpTarget;
     this.pendingCast = null;
     this.pendingJump = false;
+    this.pendingJumpTarget = null;
     return {
       move: this.mode === "play" && this.rightHeld ? { ...this.mouseWorld } : null,
       cast: this.mode === "play" ? cast : null,
       ...(this.mode === "play" && jump ? { jump: true } : {}),
+      ...(this.mode === "play" && jumpTarget ? { jumpTarget } : {}),
     };
   }
 
@@ -61,6 +65,7 @@ export class InputController {
     this.mode = mode;
     this.rightHeld = false;
     this.pendingJump = false;
+    this.pendingJumpTarget = null;
     this.panning = false;
     this.editorButton = -1;
     this.pointerDown.button = -1;
@@ -108,6 +113,8 @@ export class InputController {
     window.addEventListener("mouseup", (event) => this.#onMouseUp(event));
     window.addEventListener("blur", () => {
       this.rightHeld = false;
+      this.pendingJump = false;
+      this.pendingJumpTarget = null;
       this.editorButton = -1;
       this.panning = false;
       this.pointerDown.button = -1;
@@ -274,7 +281,11 @@ export class InputController {
     if (isInstance("HTMLButtonElement", target)) return;
     if (event.code === "Space") {
       event.preventDefault();
-      if (this.mode === "play" && !event.repeat) this.pendingJump = true;
+      if (this.mode === "play" && !event.repeat) {
+        this.refreshPointerWorld();
+        this.pendingJump = true;
+        this.pendingJumpTarget = { ...this.mouseWorld };
+      }
       return;
     }
     if (this.actions.developerToolsOpen && !this.actions.developerToolsOpen()) {

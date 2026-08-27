@@ -103,6 +103,7 @@ import { computeExplosionResponse } from "./explosion.js";
 import {
   footprintCanFitSquareAperture,
   footprintFitsSquareAperture,
+  footprintOverlapsAxisAlignedRectangle,
   sweptFootprintEntrySquareAperture,
 } from "./aperture_fit.js";
 import { DestinationFieldCache } from "./destination_field_cache.js";
@@ -280,9 +281,6 @@ function catalogVerticalCapabilities(traits) {
   if (traits.canRideElevator === true) {
     capabilities |= VERTICAL_CAPABILITY.ELEVATOR_SUPPORT
       | VERTICAL_CAPABILITY.CAN_RIDE_ELEVATOR;
-  }
-  if (traits.canActivateElevator === true) {
-    capabilities |= VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR;
   }
   if (traits.canPressPlate !== false) capabilities |= VERTICAL_CAPABILITY.CAN_PRESS_PLATE;
   return capabilities;
@@ -580,12 +578,13 @@ function canonicalAction(value) {
   }
 }
 
-/** @param {{move:{x:number,z:number}|null,cast:{x:number,z:number}|null,jump:boolean,actions:Array<Record<string,unknown>>}} command */
+/** @param {{move:{x:number,z:number}|null,cast:{x:number,z:number}|null,jump:boolean,jumpTarget?:{x:number,z:number}|null,actions:Array<Record<string,unknown>>}} command */
 function cloneCanonicalCommand(command) {
   return {
     move: command.move ? { ...command.move } : null,
     cast: command.cast ? { ...command.cast } : null,
     jump: command.jump === true,
+    jumpTarget: command.jumpTarget ? { ...command.jumpTarget } : null,
     actions: command.actions.map((action) => cloneUnknown(action)),
   };
 }
@@ -655,7 +654,7 @@ export function canonicalizeCommand(input) {
     const action = canonicalAction(source);
     if (action) actions.push(action);
   }
-  return { move, cast, jump: source.jump === true, actions };
+  return { move, cast, jump: source.jump === true, jumpTarget: pointFrom(source.jumpTarget), actions };
 }
 
 /** @param {number} current @param {number} target @param {number} maximumDelta */
@@ -1101,6 +1100,7 @@ export class Simulation {
     this._particleSpawnPoint = { x: 0, z: 0, cx: 0, cz: 0, passes: 0 };
     this._sampleColor = { r: 0, g: 0, b: 0 };
     this._aperture = { x: 0, z: 0, width: 0 };
+    this._plateContact = { x: 0, z: 0, halfWidth: 0, halfDepth: 0 };
     this._apertureExtents = { halfX: 0, halfZ: 0 };
     this._apertureFootprint = {
       type: "circle",
@@ -1114,6 +1114,12 @@ export class Simulation {
     this._holeSweep = { t: 0, x: 0, z: 0 };
     this._holeBestSweep = { t: 0, x: 0, z: 0 };
     this._holeCandidate = null;
+    // A floor aperture is either an authored hole or the upper endpoint of an
+    // elevator shaft.  Keep the selected owner as bounded scalar state rather
+    // than allocating a candidate record in the vertical hot path.
+    this._floorApertureKind = 0;
+    this._floorApertureHoleIndex = -1;
+    this._floorApertureElevatorIndex = -1;
     this._rimAttraction = { x: 0, z: 0 };
     this.holeEvents = new RingBuffer(128);
     this.holeEventDropped = 0;
@@ -1276,10 +1282,9 @@ export class Simulation {
         apertureWidth: connector.apertureWidth,
         lowerY: connector.lowerY,
         upperY: connector.upperY,
-        travelSpeed: connector.travelSpeed,
+        travelDurationSeconds: connector.travelDurationSeconds,
         dwellTicks: connector.dwellTicks,
         initialStop: connector.initialStop,
-        activationPolicy: connector.activationPolicy === "occupancy" ? 1 : 0,
       });
     }
   }
@@ -1320,7 +1325,7 @@ export class Simulation {
       this.#facingSystem(simulationTick);
     }
     this.#elevatorSupportAndMotionSystem(SIMULATION.dt);
-    this.#jumpSystem(command.jump, command.move);
+    this.#jumpSystem(command.jump, command.jumpTarget ?? command.move);
     this.#holeRimAttractionSystem(SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
     this.#verticalResolutionSystem(SIMULATION.dt);
@@ -4647,13 +4652,131 @@ export class Simulation {
 
   /** @param {number} kind @param {number} index @param {number} elevatorIndex */
   #bodyOverElevator(kind, index, elevatorIndex) {
-    const half = this.elevators.platformWidth[elevatorIndex] / 2;
-    return Math.abs(this.#bodyValue(kind, index, "x") - this.elevators.x[elevatorIndex]) <= half
-      && Math.abs(this.#bodyValue(kind, index, "z") - this.elevators.z[elevatorIndex]) <= half;
+    const halfWidth = this.elevators.platformWidth[elevatorIndex] / 2;
+    const dx = this.#bodyValue(kind, index, "x") - this.elevators.x[elevatorIndex];
+    const dz = this.#bodyValue(kind, index, "z") - this.elevators.z[elevatorIndex];
+    // The authored platform is a square. Support deliberately uses its
+    // square X/Z footprint so the visible deck and its usable edge agree.
+    return Math.abs(dx) <= halfWidth && Math.abs(dz) <= halfWidth;
+  }
+
+  /**
+   * The elevator is a circular platform on a circular piston/shaft. The lower
+   * stopped position is boardable. During travel and at the upper stop, its
+   * full column blocks bodies at or below the platform. Existing riders are
+   * exempt because their support already owns the platform.
+   * @param {number} kind @param {number} index
+   */
+  #resolveMovingElevatorShaftBody(kind, index) {
+    const x = this.#bodyValue(kind, index, "x");
+    const z = this.#bodyValue(kind, index, "z");
+    const supportId = this.#bodyValue(kind, index, "supportId");
+    const supportKind = this.#bodyValue(kind, index, "supportKind");
+    const worldY = this.#bodyValue(kind, index, "worldY");
+    const layerIndex = this.#bodyValue(kind, index, "layerIndex");
+    const map = this.layerMaps[layerIndex] ?? this.map;
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      if (
+        this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+        && this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.LOWER
+      ) continue;
+      if (
+        supportKind === SUPPORT_KIND.ELEVATOR
+        && supportId === this.elevators.id[elevatorIndex]
+      ) continue;
+      // A platform blocks bodies at or below its current elevation, but must
+      // not become an invisible 2D wall on an upper floor while it travels in
+      // the shaft beneath that floor. This also permits a body that has just
+      // entered the upper opening to fall straight down and be caught later.
+      if (
+        worldY > this.elevators.worldY[elevatorIndex]
+          + VERTICAL_PHYSICS.supportContactToleranceMeters
+      ) continue;
+      // An upper-floor body is never below the shaft merely because a
+      // departing deck has moved a few centimetres beneath the floor plane.
+      // It must resolve as ordinary upper-floor/hole contact, rather than be
+      // ejected sideways during that one-tick handoff. Bodies actually on the
+      // deck are already skipped above as elevator-supported riders.
+      if (
+        layerIndex === this.elevators.upperLayerIndex[elevatorIndex]
+        && Math.abs(worldY - this.elevators.upperY[elevatorIndex])
+          <= VERTICAL_PHYSICS.supportContactToleranceMeters
+      ) continue;
+      const shaftRadius = this.elevators.platformWidth[elevatorIndex] / 2;
+      const contact = kind === BODY_ROCK && this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
+        ? circleBoxContact(
+          this.elevators.x[elevatorIndex],
+          this.elevators.z[elevatorIndex],
+          shaftRadius,
+          x,
+          z,
+          this.#dynamicBodyHalfX(index),
+          this.#dynamicBodyHalfZ(index),
+          this._bodyContact,
+        )
+        : circleCircleContact(
+          this.elevators.x[elevatorIndex],
+          this.elevators.z[elevatorIndex],
+          shaftRadius,
+          x,
+          z,
+          this.#bodyValue(kind, index, "radius"),
+          this._bodyContact,
+        );
+      if (!contact) continue;
+      const dx = x - this.elevators.x[elevatorIndex];
+      const dz = z - this.elevators.z[elevatorIndex];
+      const firstDirection = Math.abs(dz) > Math.abs(dx)
+        ? (dz >= 0 ? 2 : 3)
+        : (dx >= 0 ? 0 : 1);
+      let direction = -1;
+      let nx = this._bodyContact.nx;
+      let nz = this._bodyContact.nz;
+      let candidateX = x + nx * (
+        this._bodyContact.penetration + VERTICAL_PHYSICS.landingSeparationEpsilonMeters
+      );
+      let candidateZ = z + nz * (
+        this._bodyContact.penetration + VERTICAL_PHYSICS.landingSeparationEpsilonMeters
+      );
+      let placed = !this.#bodyBlockedAt(kind, index, map, candidateX, candidateZ);
+      for (let attempt = 0; attempt < 4 && !placed; attempt += 1) {
+        direction = (firstDirection + attempt) & 3;
+        const extent = kind === BODY_ROCK
+          ? (direction < 2 ? this.#dynamicBodyHalfX(index) : this.#dynamicBodyHalfZ(index))
+          : this.#bodyValue(kind, index, "radius");
+        const distance = shaftRadius + extent + VERTICAL_PHYSICS.landingSeparationEpsilonMeters;
+        candidateX = this.elevators.x[elevatorIndex]
+          + (direction === 0 ? distance : direction === 1 ? -distance : 0);
+        candidateZ = this.elevators.z[elevatorIndex]
+          + (direction === 2 ? distance : direction === 3 ? -distance : 0);
+        placed = !this.#bodyBlockedAt(kind, index, map, candidateX, candidateZ);
+      }
+      this.#setBodyValue(kind, index, "x", candidateX);
+      this.#setBodyValue(kind, index, "z", candidateZ);
+      if (direction >= 0) {
+        nx = direction === 0 ? 1 : direction === 1 ? -1 : 0;
+        nz = direction === 2 ? 1 : direction === 3 ? -1 : 0;
+      }
+      if (kind === BODY_PLAYER) this.#removeInwardPlayerVelocity(nx, nz);
+      else if (kind === BODY_ENEMY_WIZARD) this.#removeInwardEnemyVelocity(index, nx, nz);
+      else if (kind === BODY_ROCK) {
+        const inward = this.rocks.vx[index] * nx + this.rocks.vz[index] * nz;
+        if (inward < 0) {
+          this.rocks.vx[index] -= inward * nx;
+          this.rocks.vz[index] -= inward * nz;
+        }
+      } else {
+        const inward = this.dynamicDeadBodies.vx[index] * nx + this.dynamicDeadBodies.vz[index] * nz;
+        if (inward < 0) {
+          this.dynamicDeadBodies.vx[index] -= inward * nx;
+          this.dynamicDeadBodies.vz[index] -= inward * nz;
+        }
+      }
+    }
   }
 
   /** Writes the authoritative collision footprint into reusable scratch. */
-  #writeBodyApertureFootprint(kind, index, x, z) {
+  #writeBodyFootprint(kind, index, x, z) {
     const footprint = this._apertureFootprint;
     footprint.x = x;
     footprint.z = z;
@@ -4674,17 +4797,19 @@ export class Simulation {
   }
 
   /** @param {number} kind @param {number} index @param {number} elevatorIndex */
-  #bodyFitsElevatorAperture(kind, index, elevatorIndex) {
-    const footprint = this.#writeBodyApertureFootprint(
+  #bodyCanPassElevatorAperture(kind, index, elevatorIndex) {
+    const footprint = this.#writeBodyFootprint(
       kind,
       index,
       this.#bodyValue(kind, index, "x"),
       this.#bodyValue(kind, index, "z"),
     );
-    this._aperture.x = this.elevators.x[elevatorIndex];
-    this._aperture.z = this.elevators.z[elevatorIndex];
-    this._aperture.width = this.elevators.apertureWidth[elevatorIndex];
-    return footprintFitsSquareAperture(
+    this.#writeElevatorAperture(elevatorIndex);
+    // An elevator is a moving support through an aperture, not a floor hole.
+    // Once a body's center is supported by the platform, only its complete
+    // *shape* must fit the shaft. Requiring its edges to remain inside a tiny
+    // 0.9m opening made ordinary player disembarkation unrealistically exact.
+    return footprintCanFitSquareAperture(
       footprint,
       this._aperture,
       VERTICAL_PHYSICS.apertureClearanceMeters,
@@ -4708,7 +4833,7 @@ export class Simulation {
     if (
       this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.UPPER
       && this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
-      && !this.#bodyFitsElevatorAperture(kind, index, elevatorIndex)
+      && !this.#bodyCanPassElevatorAperture(kind, index, elevatorIndex)
     ) {
       this.#setBodyValue(kind, index, "latestApertureFit", -1);
       return false;
@@ -4764,7 +4889,6 @@ export class Simulation {
       this.dynamicDeadBodies.previousWorldY[index] = this.dynamicDeadBodies.worldY[index];
     }
     for (let index = 0; index < this.elevators.activeCount; index += 1) {
-      this.elevators.activatorCount[index] = 0;
       this.elevators.supportedBodyCount[index] = 0;
     }
     this.#acquireElevatorSupportForBody(BODY_PLAYER, 0);
@@ -4776,36 +4900,6 @@ export class Simulation {
     }
     for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
       this.#acquireElevatorSupportForBody(BODY_ENEMY_WIZARD_BODY, index);
-    }
-    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
-      if (this.elevators.activationPolicy[elevatorIndex] !== 1) continue;
-      const supportId = this.elevators.id[elevatorIndex];
-      if (
-        this.player.supportKind === SUPPORT_KIND.ELEVATOR
-        && this.player.supportId === supportId
-        && hasVerticalCapability(
-          this.player.verticalCapabilities,
-          VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR,
-        )
-      ) this.elevators.activatorCount[elevatorIndex] += 1;
-      for (let index = 0; index < this.enemies.activeCount; index += 1) {
-        if (
-          this.enemies.supportKind[index] === SUPPORT_KIND.ELEVATOR
-          && this.enemies.supportId[index] === supportId
-          && hasVerticalCapability(
-            this.enemies.verticalCapabilities[index],
-            VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR,
-          )
-        ) this.elevators.activatorCount[elevatorIndex] += 1;
-      }
-      if (this.elevators.activatorCount[elevatorIndex] > 0) {
-        this.elevators.request(
-          elevatorIndex,
-          this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.LOWER
-            ? ELEVATOR_STOP.UPPER
-            : ELEVATOR_STOP.LOWER,
-        );
-      }
     }
     this.elevators.step(dt);
     this.#carryElevatorSupportedBody(BODY_PLAYER, 0);
@@ -4931,7 +5025,7 @@ export class Simulation {
     if (this.elevators.motion[elevatorIndex] !== ELEVATOR_MOTION.DWELLING) return;
     const stop = this.elevators.currentStop[elevatorIndex];
     if (stop === ELEVATOR_STOP.UPPER) {
-      const fits = this.#bodyFitsElevatorAperture(kind, index, elevatorIndex);
+      const fits = this.#bodyCanPassElevatorAperture(kind, index, elevatorIndex);
       this.#setBodyValue(kind, index, "latestApertureFit", fits ? 1 : -1);
       if (!fits) {
         this.#ejectOversizedBody(kind, index, elevatorIndex);
@@ -4944,16 +5038,42 @@ export class Simulation {
     }
   }
 
-  /** @param {number} layerIndex @param {number} x @param {number} z */
-  #floorHasElevatorAperture(layerIndex, x, z) {
-    for (let index = 0; index < this.elevators.activeCount; index += 1) {
-      if (this.elevators.upperLayerIndex[index] !== layerIndex) continue;
-      const half = this.elevators.apertureWidth[index] / 2;
+  /** @param {number} elevatorIndex */
+  #writeElevatorAperture(elevatorIndex) {
+    this._aperture.x = this.elevators.x[elevatorIndex];
+    this._aperture.z = this.elevators.z[elevatorIndex];
+    this._aperture.width = this.elevators.apertureWidth[elevatorIndex];
+    return this._aperture;
+  }
+
+  /**
+   * True only when the full body footprint fits an upper elevator shaft at a
+   * floor plane. Unlike a stopped platform handoff, walking into a shaft is a
+   * real fall-through opening and therefore uses the exact hole contract.
+   * @param {number} kind @param {number} index @param {number} layerIndex @param {number} x @param {number} z
+   */
+  #bodyFitsElevatorShaftAt(kind, index, layerIndex, x, z) {
+    const footprint = this.#writeBodyFootprint(kind, index, x, z);
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      if (this.elevators.upperLayerIndex[elevatorIndex] !== layerIndex) continue;
+      // A platform dwelling at this endpoint is a solid deck, not a
+      // fall-through shaft. This avoids a floor-body being captured during
+      // the exact arrival tick before the next support-acquisition pass.
       if (
-        Math.abs(x - this.elevators.x[index]) < half
-        && Math.abs(z - this.elevators.z[index]) < half
-      ) return true;
+        this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+        && this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.UPPER
+      ) continue;
+      if (footprintFitsSquareAperture(
+        footprint,
+        this.#writeElevatorAperture(elevatorIndex),
+        VERTICAL_PHYSICS.apertureClearanceMeters,
+        this._apertureExtents,
+      )) {
+        this._floorApertureElevatorIndex = elevatorIndex;
+        return true;
+      }
     }
+    this._floorApertureElevatorIndex = -1;
     return false;
   }
 
@@ -4970,7 +5090,7 @@ export class Simulation {
   /** @param {number} kind @param {number} index @param {number} layerIndex @param {number} x @param {number} z */
   #bodyFitsHoleAt(kind, index, layerIndex, x, z) {
     const holes = this.layerHoles[layerIndex] ?? [];
-    const footprint = this.#writeBodyApertureFootprint(kind, index, x, z);
+    const footprint = this.#writeBodyFootprint(kind, index, x, z);
     for (let holeIndex = 0; holeIndex < holes.length; holeIndex += 1) {
       const hole = holes[holeIndex];
       if (footprintFitsSquareAperture(footprint, hole, hole.clearance, this._apertureExtents)) {
@@ -4982,14 +5102,21 @@ export class Simulation {
     return null;
   }
 
-  /** Deterministic first hole entered by this tick's center sweep. */
-  #sweptHoleCapture(kind, index, layerIndex, fromX, fromZ, toX, toZ) {
+  /**
+   * Deterministic first floor aperture entered by this tick's center sweep.
+   * Authored holes and upper elevator shafts intentionally remain independent
+   * apertures: this never combines neighbouring openings into a larger shape.
+   */
+  #sweptFloorApertureCapture(kind, index, layerIndex, fromX, fromZ, toX, toZ) {
     const holes = this.layerHoles[layerIndex] ?? [];
-    let best = null;
+    let bestHole = null;
+    let bestHoleIndex = -1;
+    let bestElevatorIndex = -1;
     let bestT = Infinity;
+    let bestKind = 0;
+    const footprint = this.#writeBodyFootprint(kind, index, fromX, fromZ);
     for (let holeIndex = 0; holeIndex < holes.length; holeIndex += 1) {
       const hole = holes[holeIndex];
-      const footprint = this.#writeBodyApertureFootprint(kind, index, fromX, fromZ);
       const result = sweptFootprintEntrySquareAperture(
         footprint,
         fromX,
@@ -5004,17 +5131,55 @@ export class Simulation {
       if (!result) continue;
       if (
         result.t < bestT - 1e-9
-        || (Math.abs(result.t - bestT) <= 1e-9 && best && hole.id.localeCompare(best.id) < 0)
+        || (Math.abs(result.t - bestT) <= 1e-9 && bestHole && hole.id.localeCompare(bestHole.id) < 0)
       ) {
-        best = hole;
+        bestHole = hole;
+        bestHoleIndex = holeIndex;
+        bestElevatorIndex = -1;
         bestT = result.t;
+        bestKind = 1;
         // Preserve the result before the next candidate reuses the scratch.
         this._holeBestSweep.t = result.t;
         this._holeBestSweep.x = result.x;
         this._holeBestSweep.z = result.z;
       }
     }
-    return best;
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      if (this.elevators.upperLayerIndex[elevatorIndex] !== layerIndex) continue;
+      const aperture = this.#writeElevatorAperture(elevatorIndex);
+      const result = sweptFootprintEntrySquareAperture(
+        footprint,
+        fromX,
+        fromZ,
+        toX,
+        toZ,
+        aperture,
+        VERTICAL_PHYSICS.apertureClearanceMeters,
+        this._apertureExtents,
+        this._holeSweep,
+      );
+      if (!result) continue;
+      const sameEntry = Math.abs(result.t - bestT) <= 1e-9;
+      const winsTie = sameEntry && (
+        bestKind === 0
+        || (bestKind === 2
+          && this.elevators.authoringId[elevatorIndex]
+            .localeCompare(this.elevators.authoringId[bestElevatorIndex]) < 0)
+      );
+      if (result.t >= bestT - 1e-9 && !winsTie) continue;
+      bestHole = null;
+      bestHoleIndex = -1;
+      bestElevatorIndex = elevatorIndex;
+      bestT = result.t;
+      bestKind = 2;
+      this._holeBestSweep.t = result.t;
+      this._holeBestSweep.x = result.x;
+      this._holeBestSweep.z = result.z;
+    }
+    this._floorApertureKind = bestKind;
+    this._floorApertureHoleIndex = bestKind === 1 ? bestHoleIndex : -1;
+    this._floorApertureElevatorIndex = bestKind === 2 ? bestElevatorIndex : -1;
+    return bestKind !== 0;
   }
 
   /** @param {number} kind @param {number} index @param {number} dt */
@@ -5025,10 +5190,9 @@ export class Simulation {
     ) return;
     const layerIndex = this.#bodyValue(kind, index, "layerIndex");
     const holes = this.layerHoles[layerIndex] ?? [];
-    if (holes.length === 0) return;
     const x = this.#bodyValue(kind, index, "x");
     const z = this.#bodyValue(kind, index, "z");
-    const footprint = this.#writeBodyApertureFootprint(kind, index, x, z);
+    const footprint = this.#writeBodyFootprint(kind, index, x, z);
     let ax = 0;
     let az = 0;
     for (let holeIndex = 0; holeIndex < holes.length; holeIndex += 1) {
@@ -5038,6 +5202,33 @@ export class Simulation {
       const dz = hole.z - z;
       const distance = Math.hypot(dx, dz);
       const outer = hole.width / 2 + VERTICAL_PHYSICS.holeRimAttractionBandMeters;
+      if (distance <= 1e-9 || distance >= outer) continue;
+      const strength = (1 - distance / outer)
+        * VERTICAL_PHYSICS.holeRimAttractionAccelerationMetersPerSecondSquared;
+      ax += (dx / distance) * strength;
+      az += (dz / distance) * strength;
+    }
+    // An upper elevator endpoint is the same kind of single square aperture
+    // as an authored hole while the platform is away. It therefore uses the
+    // same fit and rim-attraction contract, but a deck dwelling at this upper
+    // stop deliberately suppresses the pull so boarding remains stable.
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      if (this.elevators.upperLayerIndex[elevatorIndex] !== layerIndex) continue;
+      if (
+        this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+        && this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.UPPER
+      ) continue;
+      const aperture = this.#writeElevatorAperture(elevatorIndex);
+      if (!footprintCanFitSquareAperture(
+        footprint,
+        aperture,
+        VERTICAL_PHYSICS.apertureClearanceMeters,
+        this._apertureExtents,
+      )) continue;
+      const dx = aperture.x - x;
+      const dz = aperture.z - z;
+      const distance = Math.hypot(dx, dz);
+      const outer = aperture.width / 2 + VERTICAL_PHYSICS.holeRimAttractionBandMeters;
       if (distance <= 1e-9 || distance >= outer) continue;
       const strength = (1 - distance / outer)
         * VERTICAL_PHYSICS.holeRimAttractionAccelerationMetersPerSecondSquared;
@@ -5101,7 +5292,7 @@ export class Simulation {
       || this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.FLOOR
     ) return;
     const layerIndex = this.#bodyValue(kind, index, "layerIndex");
-    const hole = this.#sweptHoleCapture(
+    const captured = this.#sweptFloorApertureCapture(
       kind,
       index,
       layerIndex,
@@ -5110,7 +5301,15 @@ export class Simulation {
       this.#bodyValue(kind, index, "x"),
       this.#bodyValue(kind, index, "z"),
     );
-    if (!hole) return;
+    if (!captured) return;
+    const hole = this._floorApertureKind === 1
+      ? (this.layerHoles[layerIndex] ?? [])[this._floorApertureHoleIndex]
+      : null;
+    const elevatorIndex = this._floorApertureKind === 2
+      ? this._floorApertureElevatorIndex
+      : -1;
+    const aperture = hole ?? this.#writeElevatorAperture(elevatorIndex);
+    const clearance = hole?.clearance ?? VERTICAL_PHYSICS.apertureClearanceMeters;
     // Prefer the resolved endpoint when it is fully contained (ordinary
     // deliberate walking). A fast sweep that exits again still captures at
     // its deterministic first entry. In either case, its X/Z history becomes
@@ -5119,9 +5318,9 @@ export class Simulation {
     const endX = this.#bodyValue(kind, index, "x");
     const endZ = this.#bodyValue(kind, index, "z");
     const endpointFits = footprintFitsSquareAperture(
-      this.#writeBodyApertureFootprint(kind, index, endX, endZ),
-      hole,
-      hole.clearance,
+      this.#writeBodyFootprint(kind, index, endX, endZ),
+      aperture,
+      clearance,
       this._apertureExtents,
     );
     const captureX = endpointFits ? endX : this._holeBestSweep.x;
@@ -5136,7 +5335,16 @@ export class Simulation {
     this.#setBodyValue(kind, index, "verticalVelocityY", 0);
     this.#setBodyValue(kind, index, "latestApertureFit", 1);
     this.holeMetrics.captured += 1;
-    this.#recordHoleEvent("HOLE_CAPTURED", kind, index, { holeId: hole.id, entryFraction: this._holeBestSweep.t });
+    this.#recordHoleEvent(
+      hole ? "HOLE_CAPTURED" : "ELEVATOR_SHAFT_CAPTURED",
+      kind,
+      index,
+      {
+        holeId: hole?.id ?? null,
+        connectorId: elevatorIndex >= 0 ? this.elevators.authoringId[elevatorIndex] : null,
+        entryFraction: this._holeBestSweep.t,
+      },
+    );
   }
 
   /** @param {number} kind @param {number} index @param {number} dt */
@@ -5220,10 +5428,13 @@ export class Simulation {
       const map = this.layerMaps[floorLayer];
       const inBounds = x >= 0 && z >= 0 && x < map.width && z < map.height;
       const hole = inBounds ? this.#bodyFitsHoleAt(kind, index, floorLayer, x, z) : null;
+      const elevatorShaft = inBounds && !hole
+        ? this.#bodyFitsElevatorShaftAt(kind, index, floorLayer, x, z)
+        : false;
       const rejectedByFrame = this.#bodyRejectedByUpperAperture(kind, index, floorLayer);
-      if (hole || (!rejectedByFrame && this.#floorHasElevatorAperture(floorLayer, x, z))) {
+      if (hole || (!rejectedByFrame && elevatorShaft)) {
         this.#setBodyValue(kind, index, "layerIndex", floorLayer);
-        this.#setBodyValue(kind, index, "latestApertureFit", hole ? 1 : 0);
+        this.#setBodyValue(kind, index, "latestApertureFit", 1);
         if (mode === VERTICAL_MODE.JUMPING) {
           this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
           if (kind === BODY_PLAYER) this.player.jumpTicks = 0;
@@ -5232,6 +5443,9 @@ export class Simulation {
         this.holeMetrics.floorPlanePassed += 1;
         this.#recordHoleEvent("FLOOR_PLANE_PASSED", kind, index, {
           holeId: hole?.id ?? null,
+          connectorId: elevatorShaft
+            ? this.elevators.authoringId[this._floorApertureElevatorIndex]
+            : null,
           crossingFraction: fraction,
         });
         ceiling = planeY;
@@ -5440,8 +5654,22 @@ export class Simulation {
         VERTICAL_CAPABILITY.CAN_PRESS_PLATE,
       )
     ) return false;
-    return Math.abs(this.#bodyValue(kind, index, "x") - plate.x) <= 0.5
-      && Math.abs(this.#bodyValue(kind, index, "z") - plate.z) <= 0.5;
+    const footprint = this.#writeBodyFootprint(
+      kind,
+      index,
+      this.#bodyValue(kind, index, "x"),
+      this.#bodyValue(kind, index, "z"),
+    );
+    const half = Number(plate.width ?? VERTICAL_PHYSICS.pressurePlateWidthMeters) / 2;
+    this._plateContact.x = plate.x;
+    this._plateContact.z = plate.z;
+    this._plateContact.halfWidth = half;
+    this._plateContact.halfDepth = half;
+    return footprintOverlapsAxisAlignedRectangle(
+      footprint,
+      this._plateContact,
+      this._apertureExtents,
+    );
   }
 
   /** @param {number} dt */
@@ -5549,6 +5777,26 @@ export class Simulation {
       }
       for (let index = 0; index < deadBodies.activeCount; index += 1) {
         this.#resolveDeadBodyGrid(index, substep === 0);
+      }
+      this.#resolveMovingElevatorShaftBody(BODY_PLAYER, 0);
+      for (let index = 0; index < enemies.activeCount; index += 1) {
+        this.#resolveMovingElevatorShaftBody(BODY_ENEMY_WIZARD, index);
+      }
+      for (let index = 0; index < this.rocks.activeCount; index += 1) {
+        this.#resolveMovingElevatorShaftBody(BODY_ROCK, index);
+      }
+      for (let index = 0; index < deadBodies.activeCount; index += 1) {
+        this.#resolveMovingElevatorShaftBody(BODY_ENEMY_WIZARD_BODY, index);
+      }
+      this.#resolvePlayerGrid(false);
+      for (let index = 0; index < enemies.activeCount; index += 1) {
+        this.#resolveEnemyGrid(index, false);
+      }
+      for (let index = 0; index < this.rocks.activeCount; index += 1) {
+        this.#resolveRockGrid(index, false);
+      }
+      for (let index = 0; index < deadBodies.activeCount; index += 1) {
+        this.#resolveDeadBodyGrid(index, false);
       }
       for (let pass = 0; pass < DYNAMIC_PHYSICS.solverIterations; pass += 1) {
         const record = substep === 0 && pass === 0;
@@ -8515,10 +8763,6 @@ export class Simulation {
           this.rocks.verticalCapabilities[index],
           VERTICAL_CAPABILITY.CAN_RIDE_ELEVATOR,
         ),
-        canActivateElevator: hasVerticalCapability(
-          this.rocks.verticalCapabilities[index],
-          VERTICAL_CAPABILITY.CAN_ACTIVATE_ELEVATOR,
-        ),
         footprint: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
           ? {
             type: "rectangle",
@@ -8809,6 +9053,8 @@ export class Simulation {
       .map(cloneUnknown);
     const elevators = new Array(this.elevators.activeCount);
     for (let index = 0; index < elevators.length; index += 1) {
+      const lowerLayerIndex = this.elevators.lowerLayerIndex[index];
+      const upperLayerIndex = this.elevators.upperLayerIndex[index];
       elevators[index] = {
         kind: "elevator",
         id: this.elevators.id[index],
@@ -8820,15 +9066,20 @@ export class Simulation {
         velocityY: this.elevators.velocityY[index],
         lowerY: this.elevators.lowerY[index],
         upperY: this.elevators.upperY[index],
-        lowerLayerId: this.layerIds[this.elevators.lowerLayerIndex[index]],
-        upperLayerId: this.layerIds[this.elevators.upperLayerIndex[index]],
+        lowerLayerId: this.layerIds[lowerLayerIndex],
+        upperLayerId: this.layerIds[upperLayerIndex],
+        lowerLayerName: this.scenario.authoringMap.layers[lowerLayerIndex]?.name ?? "Lower",
+        upperLayerName: this.scenario.authoringMap.layers[upperLayerIndex]?.name ?? "Upper",
         platformWidth: this.elevators.platformWidth[index],
         apertureWidth: this.elevators.apertureWidth[index],
+        travelDurationSeconds: this.elevators.travelDurationSeconds[index],
         currentStop: ELEVATOR_STOP_NAMES[this.elevators.currentStop[index]],
         requestedStop: ELEVATOR_STOP_NAMES[this.elevators.requestedStop[index]],
         motionState: ELEVATOR_MOTION_NAMES[this.elevators.motion[index]],
         dwellTicksRemaining: this.elevators.dwellRemaining[index],
-        activatorCount: this.elevators.activatorCount[index],
+        debugRequest: this.elevators.hasDebugRequest[index]
+          ? ELEVATOR_STOP_NAMES[this.elevators.debugRequestedStop[index]]
+          : null,
         supportedBodyCount: this.elevators.supportedBodyCount[index],
         rejectedLoadCount: this.elevators.rejectedLoadCount[index],
         failedEjectionCount: this.elevators.failedEjectionCount[index],

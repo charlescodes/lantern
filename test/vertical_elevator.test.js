@@ -68,10 +68,9 @@ function elevatorDocument(options = {}) {
     upperLayerId: created.layerId,
     platformWidth: options.platformWidth ?? 0.9,
     apertureWidth: options.apertureWidth ?? 0.9,
-    travelSpeed: options.travelSpeed ?? 3,
+    travelDurationSeconds: options.travelDurationSeconds ?? 1,
     dwellSeconds: options.dwellSeconds ?? 0,
     initialStop: options.initialStop ?? "lower",
-    activationPolicy: options.activationPolicy ?? "manual",
   });
   return {
     document: connector.document,
@@ -125,13 +124,27 @@ test("authoring-map v2 migrates without connectors and elevator connector histor
     upperLayerId: source.upperLayerId,
     x: 4,
     z: 4.5,
-    travelSpeed: 2,
+    travelDurationSeconds: 2,
   });
   const applied = applyAuthoringCommand(baseline, command, "forward");
   const connectorId = applied.connectors[0].id;
   assert.deepEqual(loadAuthoringMap(JSON.stringify(applied)), applied);
   assert.deepEqual(applyAuthoringCommand(applied, command, "reverse"), baseline);
   assert.equal(applyAuthoringCommand(baseline, command, "forward").connectors[0].id, connectorId);
+});
+
+test("v4 elevator maps migrate speed and obsolete policy into clock timing", () => {
+  const source = elevatorDocument({ travelDurationSeconds: 2, dwellSeconds: 1 });
+  const v4 = structuredClone(source.document);
+  v4.version = 4;
+  const connector = v4.connectors[0];
+  connector.travelSpeed = 3 / connector.travelDurationSeconds;
+  delete connector.travelDurationSeconds;
+  connector.activationPolicy = "occupancy";
+  const migrated = loadAuthoringMap(v4);
+  assert.equal(migrated.version, AUTHORING_MAP_VERSION);
+  assert.equal(migrated.connectors[0].travelDurationSeconds, 2);
+  assert.equal(Object.hasOwn(migrated.connectors[0], "activationPolicy"), false);
 });
 
 test("malformed elevator connectors produce structured validation diagnostics", () => {
@@ -141,7 +154,7 @@ test("malformed elevator connectors produce structured validation diagnostics", 
     ...malformed.connectors[0],
     upperLayerId: "missing-floor",
     platformWidth: 1.25,
-    travelSpeed: 0,
+    travelDurationSeconds: 0,
   });
   assert.throws(
     () => loadAuthoringMap(malformed),
@@ -150,16 +163,14 @@ test("malformed elevator connectors produce structured validation diagnostics", 
       return codes.has("duplicate-connector-id")
         && codes.has("missing-connector-layer")
         && codes.has("connector-cell-fit")
-        && codes.has("connector-travel-speed");
+        && codes.has("connector-travel-duration");
     },
   );
+  const obsolete = structuredClone(source.document);
+  obsolete.connectors[0].activationPolicy = "occupancy";
   assert.throws(
-    () => placeElevatorConnector(source.document, 4, 4.5, {
-      lowerLayerId: source.lowerLayerId,
-      upperLayerId: source.upperLayerId,
-      activationPolicy: "not-a-policy",
-    }),
-    (error) => error.issues?.some((issue) => issue.code === "connector-activation-policy"),
+    () => loadAuthoringMap(obsolete),
+    (error) => error.issues?.some((issue) => issue.code === "unknown-field"),
   );
 });
 
@@ -210,20 +221,267 @@ test("bounded fixed-step elevator travel reaches both stops without drift", () =
     apertureWidth: 0.9,
     lowerY: -2,
     upperY: 3,
-    travelSpeed: 1.3,
+    travelDurationSeconds: 5 / 1.3,
     dwellTicks: 0,
     initialStop: "lower",
-    activationPolicy: 0,
   });
   for (let cycle = 0; cycle < 8; cycle += 1) {
     const target = cycle % 2 === 0 ? ELEVATOR_STOP.UPPER : ELEVATOR_STOP.LOWER;
-    pool.request(0, target);
-    for (let tick = 0; tick < 600 && pool.currentStop[0] !== target; tick += 1) {
-      pool.step(SIMULATION.dt);
-    }
+    for (let tick = 0; tick < 600 && pool.currentStop[0] !== target; tick += 1) pool.step(SIMULATION.dt);
     assert.equal(pool.motion[0], ELEVATOR_MOTION.DWELLING);
     assert.equal(pool.worldY[0], target === ELEVATOR_STOP.UPPER ? 3 : -2);
   }
+});
+
+test("clock-driven elevators dwell, travel in authored duration, and never require a rider", () => {
+  const pool = new ElevatorPool(1);
+  pool.spawn({
+    id: 1,
+    authoringId: "clock-lift",
+    lowerLayerIndex: 0,
+    upperLayerIndex: 1,
+    x: 2,
+    z: 2,
+    platformWidth: 0.9,
+    apertureWidth: 0.9,
+    lowerY: 0,
+    upperY: 3,
+    travelDurationSeconds: 2,
+    dwellTicks: 60,
+    initialStop: "lower",
+  });
+  for (let tick = 0; tick < 59; tick += 1) pool.step(SIMULATION.dt);
+  assert.equal(pool.motion[0], ELEVATOR_MOTION.DWELLING);
+  assert.equal(pool.worldY[0], 0);
+  pool.step(SIMULATION.dt);
+  assert.equal(pool.motion[0], ELEVATOR_MOTION.ASCENDING);
+  for (let tick = 0; tick < 119; tick += 1) pool.step(SIMULATION.dt);
+  assert.equal(pool.worldY[0], 3);
+  assert.equal(pool.motion[0], ELEVATOR_MOTION.DWELLING);
+  for (let tick = 0; tick < 60; tick += 1) pool.step(SIMULATION.dt);
+  assert.equal(pool.motion[0], ELEVATOR_MOTION.DESCENDING);
+});
+
+test("a supported player remains aboard through an autonomous return leg", () => {
+  const source = elevatorDocument({
+    spawn: { x: 4, z: 4.5 },
+    travelDurationSeconds: 1,
+    dwellSeconds: 0.25,
+  });
+  const simulation = simulationFor(source.document);
+  let visitedUpper = false;
+  let returnedLower = false;
+  for (let tick = 0; tick < 240; tick += 1) {
+    simulation.tick(null);
+    const snapshot = simulation.snapshot();
+    visitedUpper ||= snapshot.player.layerId === source.upperLayerId;
+    returnedLower ||= visitedUpper && snapshot.player.layerId === source.lowerLayerId;
+    assert.equal(snapshot.player.supportKind, "elevator");
+  }
+  assert.equal(visitedUpper, true);
+  assert.equal(returnedLower, true);
+});
+
+test("a normally fitting rider may stand off-center and walk onto the upper floor", () => {
+  const source = elevatorDocument({
+    spawn: { x: 4.35, z: 4.5 },
+    travelDurationSeconds: 1,
+    dwellSeconds: 1,
+  });
+  const simulation = simulationFor(source.document);
+  for (let tick = 0; tick < 180; tick += 1) {
+    simulation.tick(null);
+    const elevator = simulation.snapshot().elevators[0];
+    if (elevator.currentStop === "upper" && elevator.motionState === "dwelling") break;
+  }
+  assert.equal(simulation.snapshot().player.layerId, source.upperLayerId);
+  assert.equal(simulation.snapshot().player.latestApertureFit, true);
+  for (let tick = 0; tick < 20; tick += 1) simulation.tick({ move: { x: 7, z: 4.5 } });
+  const player = simulation.snapshot().player;
+  assert.ok(player.x > 5, "ordinary movement should leave the platform");
+  assert.equal(player.layerId, source.upperLayerId);
+  assert.equal(player.supportKind, "floor");
+});
+
+test("the square platform supports a rider at a visible deck corner", () => {
+  const source = elevatorDocument({
+    // This point is within the 0.90m square deck but just outside its former
+    // circular support footprint.
+    spawn: { x: 4.32, z: 4.82 },
+    dwellSeconds: 60,
+  });
+  const simulation = simulationFor(source.document);
+  simulation.tick(null);
+  assert.equal(simulation.snapshot().player.supportKind, "elevator");
+});
+
+test("an upper elevator shaft attracts a fitting grounded body while its deck is away", () => {
+  const source = elevatorDocument({
+    spawn: { x: 3.3, z: 4.5 },
+    initialStop: "lower",
+    dwellSeconds: 60,
+  });
+  source.document.playerStart = {
+    layerId: source.upperLayerId,
+    x: 3.3,
+    z: 4.5,
+  };
+  const simulation = simulationFor(source.document);
+  simulation.tick(null);
+  const snapshot = simulation.snapshot();
+  assert.equal(snapshot.holeMetrics.rimAttractionApplied, 1);
+  assert.ok(simulation.player.externalVx > 0, "shaft pull should point toward the endpoint");
+});
+
+test("a grounded upper-floor body is not shaft-ejected while the deck is flush", () => {
+  const source = elevatorDocument({
+    spawn: { x: 4.52, z: 4.5 },
+    initialStop: "upper",
+    dwellSeconds: 60,
+  });
+  source.document.playerStart = {
+    layerId: source.upperLayerId,
+    x: 4.52,
+    z: 4.5,
+  };
+  const simulation = simulationFor(source.document);
+  simulation.tick(null);
+  assert.ok(Math.abs(simulation.player.x - 4.52) < 0.01);
+  assert.equal(simulation.snapshot().player.supportKind, "floor");
+});
+
+test("an upper-floor edge body is not shaft-ejected as the deck begins descending", () => {
+  const source = elevatorDocument({
+    spawn: { x: 4.52, z: 4.5 },
+    initialStop: "upper",
+    dwellSeconds: 1,
+  });
+  source.document.playerStart = {
+    layerId: source.upperLayerId,
+    x: 4.52,
+    z: 4.5,
+  };
+  const simulation = simulationFor(source.document);
+  for (let tick = 0; tick < 62; tick += 1) simulation.tick(null);
+  assert.equal(simulation.snapshot().elevators[0].motionState, "descending");
+  assert.ok(Math.abs(simulation.player.x - 4.52) < 0.01);
+  assert.equal(simulation.snapshot().player.supportKind, "floor");
+});
+
+test("the upper endpoint is a strict shaft opening while the lower boarding pad stays solid", () => {
+  const source = elevatorDocument({
+    spawn: { x: 3, z: 4.5 },
+    travelDurationSeconds: 8,
+    dwellSeconds: 0,
+  });
+  source.document.playerStart = {
+    layerId: source.upperLayerId,
+    x: 3,
+    z: 4.5,
+  };
+  const simulation = simulationFor(source.document);
+  let captured = false;
+  for (let tick = 0; tick < 120; tick += 1) {
+    simulation.tick({ move: { x: 5.5, z: 4.5 } });
+    captured ||= simulation.snapshot().recentHoleEvents.some(
+      (event) => event.kind === "ELEVATOR_SHAFT_CAPTURED",
+    );
+    if (captured) break;
+  }
+  assert.equal(captured, true, "a fitting player can deliberately enter the upper shaft");
+  assert.equal(simulation.player.verticalMode, VERTICAL_MODE.FALLING);
+  assert.equal(simulation.player.supportKind, SUPPORT_KIND.NONE);
+
+  const lower = simulationFor(elevatorDocument({
+    spawn: { x: 4, z: 4.5 },
+    travelDurationSeconds: 8,
+    dwellSeconds: 60,
+  }).document);
+  for (let tick = 0; tick < 12; tick += 1) lower.tick(null);
+  assert.equal(lower.player.verticalMode, VERTICAL_MODE.SUPPORTED);
+  assert.equal(lower.player.supportKind, SUPPORT_KIND.ELEVATOR);
+  assert.equal(lower.player.worldY, 0);
+});
+
+test("an oversized body bridges an upper elevator shaft rather than falling through it", () => {
+  let source = elevatorDocument({
+    spawn: { x: 2.5, z: 2.5 },
+    travelDurationSeconds: 8,
+    dwellSeconds: 60,
+  });
+  const placed = placeInstance(source.document, "object.table", 3.5, 4.5, {
+    layerId: source.upperLayerId,
+  });
+  source = { ...source, document: placed.document };
+  const simulation = simulationFor(source.document);
+  for (let tick = 0; tick < 20; tick += 1) simulation.tick(null);
+  assert.equal(simulation.rocks.verticalMode[0], VERTICAL_MODE.SUPPORTED);
+  assert.equal(simulation.rocks.supportKind[0], SUPPORT_KIND.FLOOR);
+  assert.equal(simulation.rocks.layerIndex[0], 1);
+});
+
+test("a centered fall through the upper shaft can land on the rising platform", () => {
+  const source = elevatorDocument({
+    spawn: { x: 2.5, z: 2.5 },
+    travelDurationSeconds: 2,
+    dwellSeconds: 0,
+  });
+  const simulation = simulationFor(source.document);
+  Object.assign(simulation.player, {
+    x: 4,
+    z: 4.5,
+    previousX: 4,
+    previousZ: 4.5,
+    worldY: 3,
+    previousWorldY: 3,
+    layerIndex: 1,
+    supportKind: SUPPORT_KIND.FLOOR,
+    verticalMode: VERTICAL_MODE.SUPPORTED,
+  });
+  let caughtMovingPlatform = false;
+  for (let tick = 0; tick < 120; tick += 1) {
+    simulation.tick(null);
+    const snapshot = simulation.snapshot();
+    caughtMovingPlatform ||= snapshot.player.supportKind === "elevator"
+      && snapshot.elevators[0].motionState === "ascending";
+    if (caughtMovingPlatform) break;
+  }
+  assert.equal(caughtMovingPlatform, true);
+  assert.equal(simulation.player.supportId, simulation.elevators.id[0]);
+  assert.equal(simulation.player.worldY, simulation.elevators.worldY[0]);
+});
+
+test("a non-rider cannot walk through a moving elevator shaft", () => {
+  const source = elevatorDocument({
+    spawn: { x: 6, z: 4.5 },
+    travelDurationSeconds: 2,
+    dwellSeconds: 0,
+  });
+  const simulation = simulationFor(source.document);
+  for (let tick = 0; tick < 30; tick += 1) simulation.tick(null);
+  assert.equal(simulation.snapshot().elevators[0].motionState, "ascending");
+  for (let tick = 0; tick < 60; tick += 1) simulation.tick({ move: { x: 2, z: 4.5 } });
+  assert.ok(
+    simulation.snapshot().player.x >= 4.75 - 1e-3,
+    "moving platform shaft should block the player outside its support footprint",
+  );
+});
+
+test("the raised elevator piston blocks the lower floor during its upper dwell", () => {
+  const source = elevatorDocument({
+    spawn: { x: 6, z: 4.5 },
+    initialStop: "upper",
+    dwellSeconds: 60,
+  });
+  const simulation = simulationFor(source.document);
+  for (let tick = 0; tick < 90; tick += 1) {
+    simulation.tick({ move: { x: 2, z: 4.5 } });
+  }
+  assert.equal(simulation.snapshot().elevators[0].currentStop, "upper");
+  assert.ok(
+    simulation.snapshot().player.x >= 4.75 - 1e-3,
+    "the raised piston must block walking beneath the parked upper platform",
+  );
 });
 
 test("player, enemy, and fitting clutter can share a ride without centering or controller lock", () => {
@@ -292,7 +550,7 @@ test("an enemy preserves stable physical and AI identity through a fitting ride"
 });
 
 test("walking off a moving elevator detaches the player and begins a real fall", () => {
-  const source = elevatorDocument({ travelSpeed: 1, spawn: { x: 4, z: 4.5 } });
+  const source = elevatorDocument({ travelDurationSeconds: 3, spawn: { x: 4, z: 4.5 } });
   const simulation = simulationFor(source.document);
   simulation.tick({ type: "cycleElevator", connectorId: source.connectorId });
   for (let tick = 0; tick < 70; tick += 1) simulation.tick(null);
@@ -412,7 +670,7 @@ test("floor landing re-enables low-clutter collision and reset restores authored
 });
 
 test("the same elevator command stream is deterministic", () => {
-  const source = elevatorDocument({ spawn: { x: 3.8, z: 4.5 }, travelSpeed: 1.7 });
+  const source = elevatorDocument({ spawn: { x: 3.8, z: 4.5 }, travelDurationSeconds: 3 / 1.7 });
   const run = () => {
     const simulation = simulationFor(source.document);
     for (let tick = 0; tick < 160; tick += 1) {

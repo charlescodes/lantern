@@ -13,7 +13,9 @@ import {
 import { validateInstancePlacement } from "./placement_validation.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 4;
+export const AUTHORING_MAP_VERSION = 5;
+/** M1B.1-M1B.3 connector maps using speed and activation policies. */
+export const CLOCK_ELEVATOR_AUTHORING_MAP_VERSION = 4;
 /** M1B.1 connector maps. */
 export const LEGACY_AUTHORING_MAP_VERSION = 3;
 /** M1A.4 multi-layer maps. */
@@ -529,10 +531,9 @@ function normalizeCurrentDocument(input) {
           "z",
           "platformWidth",
           "apertureWidth",
-          "travelSpeed",
+          "travelDurationSeconds",
           "dwellSeconds",
           "initialStop",
-          "activationPolicy",
         ]),
         path,
       );
@@ -584,9 +585,12 @@ function normalizeCurrentDocument(input) {
       };
       const platformWidth = positiveWidth(connector.platformWidth, "platformWidth");
       const apertureWidth = positiveWidth(connector.apertureWidth, "apertureWidth");
-      const travelSpeed = finiteValue(connector.travelSpeed, `${path}.travelSpeed`);
-      if (!(travelSpeed > 0 && travelSpeed <= 20)) {
-        issue("error", `${path}.travelSpeed`, "connector-travel-speed", "Travel speed must be greater than zero and at most 20 m/s.");
+      const travelDurationSeconds = finiteValue(
+        connector.travelDurationSeconds,
+        `${path}.travelDurationSeconds`,
+      );
+      if (!(travelDurationSeconds > 0 && travelDurationSeconds <= 60)) {
+        issue("error", `${path}.travelDurationSeconds`, "connector-travel-duration", "Travel duration must be greater than zero and at most 60 seconds.");
       }
       const dwellSeconds = finiteValue(connector.dwellSeconds, `${path}.dwellSeconds`);
       if (!(dwellSeconds >= 0 && dwellSeconds <= 60)) {
@@ -595,14 +599,6 @@ function normalizeCurrentDocument(input) {
       const initialStop = connector.initialStop === "upper" ? "upper" : "lower";
       if (connector.initialStop !== "lower" && connector.initialStop !== "upper") {
         issue("error", `${path}.initialStop`, "connector-initial-stop", "Initial stop must be lower or upper.");
-      }
-      const activationPolicy = connector.activationPolicy === "occupancy"
-        ? "occupancy"
-        : connector.activationPolicy === "manual"
-          ? "manual"
-          : "";
-      if (!activationPolicy) {
-        issue("error", `${path}.activationPolicy`, "connector-activation-policy", "Activation policy must be occupancy or manual.");
       }
       return {
         id,
@@ -613,10 +609,9 @@ function normalizeCurrentDocument(input) {
         z,
         platformWidth,
         apertureWidth,
-        travelSpeed,
+        travelDurationSeconds,
         dwellSeconds,
         initialStop,
-        activationPolicy,
       };
     });
 
@@ -792,6 +787,32 @@ export function migrateAuthoringMapV2(input) {
   });
 }
 
+/** @param {Record<string, any>} source */
+function migrateClockDrivenConnectors(source) {
+  const heights = new Map(
+    Array.isArray(source.layers)
+      ? source.layers.filter(isRecord).map((layer) => [layer.id, Number(layer.baseY)])
+      : [],
+  );
+  const connectors = Array.isArray(source.connectors) ? source.connectors.map((connector) => {
+    if (!isRecord(connector)) return connector;
+    const lowerY = heights.get(connector.lowerLayerId);
+    const upperY = heights.get(connector.upperLayerId);
+    const speed = Number(connector.travelSpeed);
+    const distance = Math.abs(Number(upperY) - Number(lowerY));
+    const travelDurationSeconds = Number.isFinite(speed) && speed > 0 && Number.isFinite(distance)
+      ? distance / speed
+      : VERTICAL_PHYSICS.defaultTravelDurationSeconds;
+    const { travelSpeed, activationPolicy, ...rest } = connector;
+    return { ...rest, travelDurationSeconds };
+  }) : source.connectors;
+  return validateAuthoringMap({
+    ...source,
+    version: AUTHORING_MAP_VERSION,
+    connectors,
+  });
+}
+
 /** M1B.2 adds a catalog-backed surface-hole terrain value; v3 grids need no reshape. @param {unknown} input */
 export function migrateAuthoringMapV3(input) {
   if (!isRecord(input)) fail("map", "object", "Map must be an object.");
@@ -799,7 +820,17 @@ export function migrateAuthoringMapV3(input) {
   if (source.format !== AUTHORING_MAP_FORMAT || source.version !== LEGACY_AUTHORING_MAP_VERSION) {
     fail("version", "unsupported-schema-version", `Expected authoring-map version ${LEGACY_AUTHORING_MAP_VERSION}.`);
   }
-  return validateAuthoringMap({ ...source, version: AUTHORING_MAP_VERSION });
+  return migrateClockDrivenConnectors(source);
+}
+
+/** M1B.1-M1B.3 used connector speed and activation-policy fields. @param {unknown} input */
+export function migrateAuthoringMapV4(input) {
+  if (!isRecord(input)) fail("map", "object", "Map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== CLOCK_ELEVATOR_AUTHORING_MAP_VERSION) {
+    fail("version", "unsupported-schema-version", `Expected authoring-map version ${CLOCK_ELEVATOR_AUTHORING_MAP_VERSION}.`);
+  }
+  return migrateClockDrivenConnectors(source);
 }
 
 /**
@@ -923,6 +954,7 @@ export function loadAuthoringMap(input) {
   if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
   const version = /** @type {Record<string,any>} */ (value).version;
   if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
+  if (version === CLOCK_ELEVATOR_AUTHORING_MAP_VERSION) return migrateAuthoringMapV4(value);
   if (version === LEGACY_AUTHORING_MAP_VERSION) return migrateAuthoringMapV3(value);
   if (version === M1A_AUTHORING_MAP_VERSION) return migrateAuthoringMapV2(value);
   if (version === ORIGINAL_AUTHORING_MAP_VERSION) return migrateAuthoringMapV1(value);

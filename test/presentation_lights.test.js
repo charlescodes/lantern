@@ -14,6 +14,10 @@ import {
 } from "../src/presentation/light_budget.js";
 import { applyLightPool } from "../src/presentation/light_pool.js";
 import { mergeCatalogPropLights } from "../src/presentation/catalog_lights.js";
+import {
+  bodyVisibleOnRuntimeLayer,
+  elevatorVisibleOnRuntimeLayer,
+} from "../src/presentation/layer_visibility.js";
 
 /** @param {number} id @param {number} x @param {number} z @param {number} [size] @param {number} [age] */
 function particle(id, x, z, size = 0.06, age = 0.1) {
@@ -104,6 +108,45 @@ test("catalog prop lights lease bounded resident slots and follow runtime torch 
   assert.equal(propLights[0].y, 1.82);
   assert.equal(propLights[0].intensity, 18);
   assert.equal(assignments.some((light) => light.key === "transient:15"), false);
+});
+
+test("an elevator-supported torch remains visible and lit through a floor handoff", () => {
+  const torch = {
+    id: 7,
+    authoringId: "torch-lift",
+    definitionId: "object.torch",
+    x: 4,
+    z: 5,
+    worldY: 1.5,
+    layerId: "upper",
+    supportKind: "elevator",
+    supportId: 91,
+  };
+  const elevators = [{ id: 91, lowerLayerId: "lower", upperLayerId: "upper" }];
+  assert.equal(bodyVisibleOnRuntimeLayer(torch, "lower", elevators), true);
+  const assignments = mergeCatalogPropLights([], [torch], 16, 0);
+  assert.equal(assignments.length, 1);
+  assert.ok(Math.abs(assignments[0].y - 3.32) < 1e-9);
+  assert.equal(bodyVisibleOnRuntimeLayer({ ...torch, supportKind: "floor" }, "lower", elevators), false);
+});
+
+test("an upper-floor observer sees a descending elevator only near the floor plane", () => {
+  const elevator = {
+    id: 7,
+    lowerLayerId: "ground",
+    upperLayerId: "upper",
+    lowerY: 0,
+    upperY: 3,
+    currentY: 3,
+  };
+  assert.equal(elevatorVisibleOnRuntimeLayer(elevator, "ground", null, 0.15), true);
+  assert.equal(elevatorVisibleOnRuntimeLayer(elevator, "upper", null, 0.15), true);
+  elevator.currentY = 2.8;
+  assert.equal(elevatorVisibleOnRuntimeLayer(elevator, "upper", null, 0.15), false);
+  assert.equal(elevatorVisibleOnRuntimeLayer(elevator, "upper", {
+    supportKind: "elevator",
+    supportId: 7,
+  }, 0.15), true);
 });
 
 test("default topology is two atomic eight-slot effect groups", () => {

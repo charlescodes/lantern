@@ -33,12 +33,13 @@ test("nearby walls fade only when the player is on their screen-top side", () =>
 });
 
 test("wall fading keeps the proximity boundary inclusive and follows camera yaw", () => {
+  const boundaryX = 3 + WALL_FADE_RADIUS_METERS;
   assert.equal(
-    shouldFadeWall(3.75, 3.5, 2, 3, DIAGONAL, DIAGONAL),
+    shouldFadeWall(boundaryX, 3.5, 2, 3, DIAGONAL, DIAGONAL),
     true,
   );
   assert.equal(
-    shouldFadeWall(3.750_001, 3.5, 2, 3, DIAGONAL, DIAGONAL),
+    shouldFadeWall(boundaryX + 0.000_001, 3.5, 2, 3, DIAGONAL, DIAGONAL),
     false,
   );
   assert.equal(shouldFadeWall(1.7, 3.5, 2, 3, -1, 0), true);

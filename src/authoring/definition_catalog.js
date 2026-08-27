@@ -43,6 +43,7 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
     traits: {
       runtimeKind: "pressure-plate",
       snap: "cell-center",
+      contactWidth: VERTICAL_PHYSICS.pressurePlateWidthMeters,
       blocksMovement: false,
       blocksSight: false,
       requiresFloorSupport: true,
@@ -127,7 +128,6 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       dynamic: true,
       airbornePassable: true,
       canRideElevator: true,
-      canActivateElevator: false,
       snap: "tenth",
       blocksMovement: true,
       blocksSight: false,
@@ -173,7 +173,6 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       upright: true,
       airbornePassable: false,
       canRideElevator: true,
-      canActivateElevator: false,
       blocksMovement: true,
       blocksSight: false,
       presentationLight: {
@@ -203,7 +202,6 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       dynamic: true,
       airbornePassable: true,
       canRideElevator: true,
-      canActivateElevator: false,
       collider: "box",
       halfWidth: 0.9,
       halfDepth: 0.36,

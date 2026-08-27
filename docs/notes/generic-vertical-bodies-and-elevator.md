@@ -1,6 +1,6 @@
 # M1B.1–M1B.2 Generic vertical bodies, elevator, and floor holes
 
-> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v4 · **Runtime recording schema:** unchanged at v11
+> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** unchanged at v11
 
 M1B.1 keeps Lantern's authoritative X/Z collision model and adds one bounded
 world-Y degree of freedom. It is not a general 3D rigid-body system. Floors and
@@ -48,26 +48,50 @@ of height or layer handoff state.
 
 ## Elevator connector and aperture
 
-Authoring-map v3 adds one deterministic, map-level `connectors` collection and a
-`nextConnectorOrdinal`. `connector.elevator.two-stop` stores a stable connector
-ID, two distinct stable layer IDs, one aligned X/Z endpoint, platform and square
-aperture widths, speed, dwell, initial stop, and `manual` or `occupancy`
-activation. Lower and upper Y are derived from the referenced layers' signed
-`baseY` values. The connector is stored once; compilation adds endpoint recipes
-to both layers and one bounded elevator spawn recipe.
+Authoring-map v5 stores one deterministic, map-level `connectors` collection
+and a `nextConnectorOrdinal`. `connector.elevator.two-stop` stores a stable
+connector ID, two distinct stable layer IDs, one aligned X/Z endpoint, platform
+and square aperture widths, travel duration, dwell, and initial stop. Lower and
+upper Y are derived from the referenced layers' signed `baseY` values. The
+connector is stored once; compilation adds endpoint recipes to both layers and
+one bounded elevator spawn recipe.
 
-The platform is an unstoppable kinematic support. Payload mass, crowding, and
-failed clearance never change its speed, reverse it, or stall it. Occupancy
-activation counts capable actors only; rocks, tables, torches, and corpses may
-ride without selecting the next stop. Debug commands can summon either stop or
-cycle the request explicitly.
+The platform is an unstoppable kinematic support. Every lift follows its own
+clock: dwell at each stop, travel to the other stop, and repeat. Payload mass,
+crowding, and failed clearance never change its speed, reverse it, or stall it.
+Riders are only supported bodies—players, enemies, rocks, tables, torches, and
+corpses never choose the next stop. A supported body remains aboard at a stop
+until it walks or is pushed off. Debug commands may shorten a dwell or queue a
+later destination, but never reverse a moving lift.
 
-Upper passage uses the reusable pure `footprintFitsSquareAperture()` utility.
-Circles must fit inside the aperture inset by radius plus positive clearance.
-Oriented rectangles use rotation-projected half extents. Unknown footprint
-shapes conservatively fail. A nominal 0.90m-diameter body therefore does not fit
-a 0.90m aperture. A wide table may overhang and ride upward, but it is rejected
-at the upper frame.
+The platform uses its authored square X/Z footprint for support and rider
+retention. Ordinary boarding is allowed only while the platform is dwelling at
+its lower stop. During either travel leg and while dwelling at the upper stop,
+the separate circular shaft collider blocks non-riders at or below the
+platform, so nothing can walk under a raised lift. A grounded body on the upper
+floor is exempt from that blocker while the platform is flush at the upper stop,
+so merely brushing the deck edge cannot kick it sideways. Existing riders
+retain ordinary X/Z control. A falling body may still cross the upper shaft and
+acquire the moving platform as a swept support from above.
+
+Presentation treats an elevator-supported body as visible from either linked
+floor until it disembarks. This keeps a transported torch and its one attached
+light continuous while its authored/runtime layer handoff changes at a stop. A
+non-riding upper-floor observer sees the platform only within a narrow 0.15m
+transition band below that floor; after it descends farther, the endpoint is
+rendered as an open hole. The lower-floor 3D view renders the extending piston.
+
+Standalone holes and an upper connector shaft whose platform is away use the reusable full-position
+`footprintFitsSquareAperture()` utility. The upper connector endpoint is also
+a visible, deliberate shaft opening: stepping into it uses that same strict
+full-position test and begins an ordinary fall, which may land on the moving
+platform below. The lower endpoint remains a solid boarding pad. Elevator
+transfer uses the companion shape-fit query only once a body's center is
+already supported by the platform, so a normal rider may stand anywhere on
+that support without needing to balance in the exact center of the shaft.
+Circles and oriented rectangles still require positive-clearance dimensional
+fit, so a nominal 0.90m-diameter body does not fit a 0.90m aperture. A wide
+table may overhang and ride upward, but it is rejected at the upper frame.
 
 Rejected ascending loads retain their old layer, detach, and receive the minimum
 ordered cardinal X/Z displacement that clears the aperture and the upper layer's
@@ -109,7 +133,7 @@ with the remaining cell area acting as a supporting frame. Adjacent hole cells
 remain independent apertures and retain a seam; they never merge. A standalone
 hole cannot share the same layer/cell as an elevator endpoint.
 
-Holes and elevator frames call the same pure full-footprint containment helper.
+Holes and elevator shaft openings call the same pure full-footprint containment helper.
 Circles and quarter-turn rectangles are inset by their projected radius/extent
 plus positive clearance, so nominally equal dimensions fail. Unsupported
 shapes fail conservatively. A table can therefore bridge a hole indefinitely;
@@ -136,11 +160,12 @@ is diagnostic-only rather than a damage/death system.
 After command-boundary actions, encounter/perception/navigation, and actor
 controller preparation, the relevant order is:
 
-1. acquire support contacts, count capable activators, step every elevator once,
+1. acquire support contacts, step every elevator once,
    and carry existing riders by that tick's platform delta;
 2. sum applicable hole rim attraction, then resolve ordinary X/Z actor and
    dynamic-body physics while controllers remain active;
-3. release invalid platform contacts, capture swept floor holes, apply gravity,
+3. release invalid platform contacts, capture swept floor apertures (holes or
+   upper elevator shafts), apply gravity,
    sweep all crossed support planes, land or pass apertures, perform aperture
    rejection/layer handoff, then synchronize the player's visible layer;
 4. continue movement sound, spell cooldown/casts, layer-scoped projectiles,
@@ -155,19 +180,20 @@ simulation tick.
 The generated Connectors palette entry places an endpoint between the active
 layer and the deterministic nearest layer at a different height. Either linked
 floor displays and can pick the same connector. The fixed inspector edits linked
-layers, X/Z, widths, speed, dwell, initial stop, and activation policy. Placement,
+layers, X/Z, widths, travel duration, dwell, and initial stop. Placement,
 inspection changes, and deletion use the existing semantic history, stable IDs,
 dirty checkpoint, atomic validation/compilation, and undo/redo path. Elevator
 motion is never historical state.
 
 Validation rejects missing/equal/reversed linked layers, duplicate IDs, unknown
 connector definitions, non-finite or misaligned endpoints, out-of-bounds
-positions, invalid widths, speeds, dwell values, stops, policies, and capacity
+positions, invalid widths, durations, dwell values, stops, and capacity
 overflow. It also rejects invalid catalog hole dimensions/clearance and a
-standalone hole sharing a connector endpoint cell. Authoring-map v3 migrates
-deterministically to v4 because holes are a catalog surface value and do not
-need a grid reshape; v2, v1, and legacy scenario/map documents continue through
-the existing migrations. Saving emits v4 only.
+standalone hole sharing a connector endpoint cell. Authoring-map v4 migrates
+deterministically to v5 by converting travel speed to the equivalent duration
+and discarding the obsolete activation policy; v3, v2, v1, and legacy
+scenario/map documents continue through the existing migrations. Saving emits
+v5 only.
 
 `window.__lantern` adds detached elevator and vertical-body diagnostics plus
 `cycleElevator(connectorId)` and `summonElevator(connectorId, "lower" | "upper")`.
@@ -185,8 +211,9 @@ floors three meters apart, one two-stop elevator at `(8, 18.5)`, player/enemy
 access, a fitting rock, a lit movable torch, and an oversized table with clear
 upper ejection space.
 
-- Occupancy policy sends the lift when a capable actor boards. Normal RMB X/Z
-  movement remains active during the ride, so walking off demonstrates falling.
+- Every lift follows its visible clock: dwell for one second, travel for two,
+  and repeat. Normal RMB X/Z movement remains active during the ride, so
+  walking off demonstrates falling.
 - Open the toolbox with `;`; use `E` for authoring. Select **Two-stop elevator**
   in Connectors to place one, then use the inspector and ordinary Undo/Redo.
 - In the console, inspect `__lantern.elevators()` and
@@ -198,10 +225,11 @@ upper ejection space.
   the table with its center over the platform and verify it rides upward, is
   displaced at the frame, never changes layer, and never stalls the lift.
 
-For holes, use `?arena=holes` (optionally `&renderer=3d`). It starts atop four
-3m-separated floors with a vertical hole column, a no-hole bottom catcher, an
-intermediate landing deck, adjacent seam holes, an adjacent wall, fitting rock/
-torch, table, and nominally aperture-sized boulder. In edit mode paint or erase
+For holes, use `?arena=holes` (optionally `&renderer=3d`). It starts on the
+bottom catcher of four 3m-separated floors. Three staggered clock-driven lifts
+link the route; the arena also keeps a vertical hole column, an intermediate
+landing deck, adjacent seam holes, an adjacent wall, fitting rock/torch, table,
+and nominally aperture-sized boulder. In edit mode paint or erase
 **Floor hole** exactly like Moss. Save/reload and Undo/Redo use ordinary surface
 history. In play, keep the player centered to fall through every aligned hole,
 or steer sideways while falling to land on an intermediate frame. Inspect
@@ -224,16 +252,18 @@ still respects walls and other full-height blockers. The shared support solver
 lands on floors or elevators and restores ordinary grounded collision.
 
 **Pressure plate** is a catalog-backed sparse one-cell instance. It is momentary:
-it is pressed only while a player, living enemy, or eligible dynamic prop is
-supported by the same ordinary floor and has its center over the plate cell.
-Airborne bodies, elevator riders, and corpses do not activate it. Compiled plate
-state is bounded runtime data; authoring IDs, history, save/load, selection, and
-the inspector remain generic. Plates cannot be placed on holes or elevator
-apertures. `__lantern.pressurePlates()` and `__lantern.pressurePlateEvents()`
-return detached diagnostics.
+it is pressed only while an eligible player, living enemy, or dynamic prop is
+supported by the same ordinary floor and its authoritative circle or quarter-turn
+box footprint has positive overlap with the plate's contained 0.9m square.
+One wide body may press neighboring plates at once; tangent-only contact does
+not count. Airborne bodies, elevator riders, and corpses do not activate it.
+Compiled plate state is bounded runtime data; authoring IDs, history, save/load,
+selection, and the inspector remain generic. Plates cannot be placed on holes or
+elevator apertures. `__lantern.pressurePlates()` and
+`__lantern.pressurePlateEvents()` return detached diagnostics.
 
 The current replay/snapshot schema is v12. v2–v11 commands have no jump edge
-and retain their frozen behavior. Authoring-map v4 is unchanged because pressure
+and retain their frozen behavior. Authoring-map v5 is unchanged because pressure
 plates use the existing sparse-instance format.
 
 ## Deferred

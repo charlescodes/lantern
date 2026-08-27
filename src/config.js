@@ -48,7 +48,7 @@ export const PLAYER = Object.freeze({
 });
 
 export const MOVEMENT_SOUND = Object.freeze({
-  walkTargetRadiusMeters: 0.75,
+  walkTargetRadiusMeters: 1.5,
   walkSpeedMetersPerSecond: 2.25,
   firstFootstepMeters: 0.75,
   runningStrideMeters: 1.5,
@@ -257,8 +257,22 @@ export const VERTICAL_PHYSICS = Object.freeze({
   elevatorCapacity: 16,
   defaultPlatformWidthMeters: 0.9,
   defaultApertureWidthMeters: 0.9,
-  defaultTravelSpeedMetersPerSecond: 1.5,
-  defaultDwellSeconds: 0.75,
+  // Presentation-only dimensions. Keep the platform top at the authoritative
+  // support Y while leaving a visible gap around the narrower lifting piston.
+  elevatorPlatformThicknessMeters: 0.08,
+  elevatorPistonInsetMeters: 0.02,
+  // The deck sits just above the rendered floor/shaft surface. This is visual
+  // only: authoritative support remains at the connector's exact world Y.
+  elevatorPlatformVisualTopOffsetMeters: 0.012,
+  elevatorShaftSurfaceThicknessMeters: 0.004,
+  // Elevators are simple clock-driven two-stop mechanisms.  Their speed is
+  // derived per connector so differently spaced floors still take this long.
+  defaultTravelDurationSeconds: 2,
+  defaultDwellSeconds: 1,
+  // On an upper floor, show the platform only briefly as it crosses the floor
+  // plane. After this distance it reads as an open shaft unless the local
+  // player is riding it.
+  upperElevatorPresentationBandMeters: 0.15,
   ejectionStepMeters: 0.08,
   // Standalone floor apertures deliberately use the same positive-clearance
   // geometry contract as elevator openings.  They stay individual cells;
@@ -278,6 +292,9 @@ export const VERTICAL_PHYSICS = Object.freeze({
   playerJumpDurationSeconds: 0.55,
   playerJumpHorizontalSpeedMetersPerSecond: 2 / 0.55,
   playerJumpTakeoffVelocityMetersPerSecond: (9.81 * 0.55) / 2,
+  // Pressure-plate contact and presentation share this contained square.
+  // The remainder of the 1m grid cell is a visible floor frame.
+  pressurePlateWidthMeters: 0.9,
   pressurePlateCapacity: 128,
   pressurePlateEventCapacity: 128,
 });

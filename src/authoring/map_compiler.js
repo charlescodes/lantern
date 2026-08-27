@@ -140,7 +140,19 @@ function compileLayer(document, layer, layerIndex) {
       if (pressurePlates.some((plate) => plate.cx === cell.cx && plate.cz === cell.cz)) {
         fail(instancePath, "duplicate-pressure-plate", "Only one pressure plate may occupy a cell.", layer.id);
       }
-      pressurePlates.push({ id: instance.id, layerId: layer.id, x: cell.cx + 0.5, z: cell.cz + 0.5, cx: cell.cx, cz: cell.cz });
+      const width = Number(definition.traits.contactWidth ?? VERTICAL_PHYSICS.pressurePlateWidthMeters);
+      if (!Number.isFinite(width) || !(width > 0) || width > 1) {
+        fail(instancePath, "plate-contact-width", "Pressure plate contact width must be greater than zero and fit its cell.", layer.id);
+      }
+      pressurePlates.push({
+        id: instance.id,
+        layerId: layer.id,
+        x: cell.cx + 0.5,
+        z: cell.cz + 0.5,
+        cx: cell.cx,
+        cz: cell.cz,
+        width,
+      });
     }
     if (isDynamicBodyDefinition(definition)) continue;
     collisionCellsByInstance.set(instance.id, footprintCells);
@@ -361,11 +373,10 @@ export function compileAuthoringMap(input) {
       apertureWidth: connector.apertureWidth,
       lowerY: lower.baseY,
       upperY: upper.baseY,
-      travelSpeed: connector.travelSpeed,
+      travelDurationSeconds: connector.travelDurationSeconds,
       dwellSeconds: connector.dwellSeconds,
       dwellTicks: Math.max(0, Math.round(connector.dwellSeconds * SIMULATION.tickHz)),
       initialStop: connector.initialStop,
-      activationPolicy: connector.activationPolicy,
     };
   });
   return {

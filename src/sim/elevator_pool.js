@@ -38,13 +38,14 @@ export class ElevatorPool {
     this.previousWorldY = new Float32Array(capacity);
     this.velocityY = new Float32Array(capacity);
     this.speed = new Float32Array(capacity);
+    this.travelDurationSeconds = new Float32Array(capacity);
     this.dwellTicks = new Uint16Array(capacity);
     this.dwellRemaining = new Uint16Array(capacity);
     this.currentStop = new Uint8Array(capacity);
     this.requestedStop = new Uint8Array(capacity);
+    this.debugRequestedStop = new Uint8Array(capacity);
+    this.hasDebugRequest = new Uint8Array(capacity);
     this.motion = new Uint8Array(capacity);
-    this.activationPolicy = new Uint8Array(capacity);
-    this.activatorCount = new Uint16Array(capacity);
     this.supportedBodyCount = new Uint16Array(capacity);
     this.rejectedLoadCount = new Uint32Array(capacity);
     this.failedEjectionCount = new Uint32Array(capacity);
@@ -78,14 +79,16 @@ export class ElevatorPool {
     this.worldY[index] = initialY;
     this.previousWorldY[index] = initialY;
     this.velocityY[index] = 0;
-    this.speed[index] = Number(value.travelSpeed);
+    this.travelDurationSeconds[index] = Number(value.travelDurationSeconds);
+    this.speed[index] = Math.abs(Number(value.upperY) - Number(value.lowerY))
+      / this.travelDurationSeconds[index];
     this.dwellTicks[index] = Number(value.dwellTicks);
     this.dwellRemaining[index] = Number(value.dwellTicks);
     this.currentStop[index] = initialStop;
     this.requestedStop[index] = initialStop;
+    this.debugRequestedStop[index] = initialStop;
+    this.hasDebugRequest[index] = 0;
     this.motion[index] = ELEVATOR_MOTION.DWELLING;
-    this.activationPolicy[index] = Number(value.activationPolicy ?? 0);
-    this.activatorCount[index] = 0;
     this.supportedBodyCount[index] = 0;
     this.rejectedLoadCount[index] = 0;
     this.failedEjectionCount[index] = 0;
@@ -110,8 +113,8 @@ export class ElevatorPool {
   }
 
   /**
-   * Advances every unstoppable platform exactly once. Occupancy requests are
-   * supplied separately by the support system and never alter travel speed.
+   * Advances every unstoppable platform exactly once. Every elevator follows
+   * its own authored clock; supported bodies never influence this schedule.
    * @param {number} dt
    */
   step(dt) {
@@ -121,7 +124,15 @@ export class ElevatorPool {
         this.velocityY[index] = 0;
         if (this.dwellRemaining[index] > 0) {
           this.dwellRemaining[index] -= 1;
-          continue;
+          if (this.dwellRemaining[index] > 0) continue;
+        }
+        if (this.hasDebugRequest[index]) {
+          this.requestedStop[index] = this.debugRequestedStop[index];
+          this.hasDebugRequest[index] = 0;
+        } else {
+          this.requestedStop[index] = this.currentStop[index] === ELEVATOR_STOP.LOWER
+            ? ELEVATOR_STOP.UPPER
+            : ELEVATOR_STOP.LOWER;
         }
         if (this.requestedStop[index] === this.currentStop[index]) continue;
         this.motion[index] = this.requestedStop[index] === ELEVATOR_STOP.UPPER
@@ -149,17 +160,25 @@ export class ElevatorPool {
   request(index, stop) {
     if (index < 0 || index >= this.activeCount) return false;
     if (stop !== ELEVATOR_STOP.LOWER && stop !== ELEVATOR_STOP.UPPER) return false;
-    this.requestedStop[index] = stop;
+    if (this.motion[index] === ELEVATOR_MOTION.DWELLING) {
+      this.debugRequestedStop[index] = stop;
+      this.hasDebugRequest[index] = 1;
+      this.dwellRemaining[index] = 0;
+    } else if (stop !== this.requestedStop[index]) {
+      // Diagnostic requests never reverse an in-flight unstoppable platform.
+      this.debugRequestedStop[index] = stop;
+      this.hasDebugRequest[index] = 1;
+    }
     return true;
   }
 
   /** @param {number} index */
   cycle(index) {
     if (index < 0 || index >= this.activeCount) return false;
-    this.requestedStop[index] = this.requestedStop[index] === ELEVATOR_STOP.LOWER
+    if (this.motion[index] === ELEVATOR_MOTION.DWELLING) this.dwellRemaining[index] = 0;
+    else this.request(index, this.requestedStop[index] === ELEVATOR_STOP.LOWER
       ? ELEVATOR_STOP.UPPER
-      : ELEVATOR_STOP.LOWER;
-    this.dwellRemaining[index] = 0;
+      : ELEVATOR_STOP.LOWER);
     return true;
   }
 }

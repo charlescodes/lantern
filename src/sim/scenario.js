@@ -467,7 +467,8 @@ export function createVerticalDebugArenaScenario() {
     lowerLayerId,
     upperLayerId,
     initialStop: "lower",
-    activationPolicy: "occupancy",
+    travelDurationSeconds: 2,
+    dwellSeconds: 1,
   }).document;
   document = placeAuthoringInstance(document, "object.rock.small", 9.2, 18.5, {
     layerId: lowerLayerId,
@@ -509,7 +510,38 @@ export function createHoleDebugArenaScenario() {
   document = paintAuthoringStructure(document, 14, 12, "structure.wall", deck);
   // Start beside—not over—the shaft so the arena can be inspected before the
   // player deliberately steps into the first aperture.
-  document.playerStart = { layerId: crown, x: 9.5, z: 18.5 };
+  // The floor route deliberately staggers three autonomous lifts.  The player
+  // begins on the catching ground floor, so the hole column is opt-in.
+  document.playerStart = { layerId: ground, x: 2.5, z: 18.5 };
+  for (const [lowerLayerId, upperLayerId, x, z] of [
+    [ground, deck, 4.5, 18.5],
+    [deck, gallery, 18.5, 12.5],
+    [gallery, crown, 4.5, 5.5],
+  ]) {
+    document = placeElevatorConnector(document, x, z, {
+      lowerLayerId,
+      upperLayerId,
+      travelDurationSeconds: 2,
+      dwellSeconds: 1,
+      initialStop: "lower",
+    }).document;
+  }
+  // Leave a clear route at each upper aperture while making the shafts easy
+  // to see during human testing.
+  for (const [layerId, x, z, openX, openZ] of [
+    [deck, 4, 18, 5, 18],
+    [gallery, 18, 12, 17, 12],
+    [crown, 4, 5, 5, 5],
+  ]) {
+    for (const [wallX, wallZ] of [[x - 1, z], [x, z - 1], [x, z + 1]]) {
+      if (wallX === openX && wallZ === openZ) continue;
+      document = paintAuthoringStructure(document, wallX, wallZ, "structure.wall", layerId);
+    }
+  }
+  document = placeAuthoringInstance(document, "object.torch", 4.5, 18.5, { layerId: ground }).document;
+  document = placeAuthoringInstance(document, "object.rock.small", 5.2, 18.5, { layerId: ground }).document;
+  document = placeAuthoringInstance(document, "object.table", 7.5, 18.5, { layerId: ground }).document;
+  document = placeAuthoringInstance(document, "object.rock.large", 2.5, 2.5, { layerId: ground }).document;
   document = placeAuthoringInstance(document, "object.rock.small", 8.5, 17.5, { layerId: crown }).document;
   document = placeAuthoringInstance(document, "object.torch", 7.5, 18.5, { layerId: crown }).document;
   document = placeAuthoringInstance(document, "object.table", 14.5, 18.5, { layerId: crown }).document;
