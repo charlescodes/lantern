@@ -81,7 +81,7 @@ test("contact-heavy command recording replays to identical current-build state",
 
   const recording = simulation.exportCommandLog();
   const replayed = Simulation.replay(recording);
-  assert.equal(recording.schemaVersion, 12);
+  assert.equal(recording.schemaVersion, 13);
   assert.ok(contactTicks >= 120, `expected sustained contact, received ${contactTicks} ticks`);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
@@ -130,7 +130,7 @@ test("snapshots and exported recordings cannot mutate simulation history", () =>
   assert.equal(simulation.commandLog.toArray()[0].command.move.x, 5);
 });
 
-test("snapshot, runtime, and recording schema are v12 while scenarios remain v3", () => {
+test("snapshot, runtime, and recording schema are v13 while scenarios remain v3", () => {
   const simulation = new Simulation({
     particleBounce: false,
     particleWallCollision: false,
@@ -138,12 +138,12 @@ test("snapshot, runtime, and recording schema are v12 while scenarios remain v3"
   const runtime = new FixedStepRuntime({ simulation });
   const snapshot = simulation.snapshot();
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 12);
-  assert.equal(snapshot.schemaVersion, 12);
-  assert.equal(runtime.metrics().schemaVersion, 12);
+  assert.equal(SCHEMA_VERSION, 13);
+  assert.equal(snapshot.schemaVersion, 13);
+  assert.equal(runtime.metrics().schemaVersion, 13);
   assert.deepEqual(Object.keys(runtime.metrics().snapshotMs), ["p50", "p95", "p99"]);
   assert.ok(runtime.metrics().snapshotMs.p99 >= 0);
-  assert.equal(recording.schemaVersion, 12);
+  assert.equal(recording.schemaVersion, 13);
   assert.equal(recording.configuration.spells.length, 1);
   assert.equal(recording.configuration.spells[0].id, "fireball");
   assert.equal(recording.configuration.spells[0].currentRevision, 1);

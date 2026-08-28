@@ -1,9 +1,9 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
-export const APPLICATION_VERSION = "0.9.1";
+export const APPLICATION_VERSION = "0.9.2";
 
 export const GAMEPLAY_PROFILE_OBELISK_DUEL = "obelisk-duel-v1";
 export const GAMEPLAY_PROFILE_PRE_COMBAT = "pre-combat-v1";
@@ -16,6 +16,8 @@ export const DEAD_BODY_PROFILE_V1 = "enemy-dead-body-v1";
 export const DEAD_BODY_PROFILE_NONE = "none";
 export const MOVEMENT_SOUND_PROFILE_V1 = "proximity-walk-footsteps-v1";
 export const MOVEMENT_SOUND_PROFILE_NONE = "none";
+export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1 = "elevator-projectile-collision-v1";
+export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
   player: 1,

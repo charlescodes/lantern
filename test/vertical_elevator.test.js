@@ -484,6 +484,50 @@ test("the raised elevator piston blocks the lower floor during its upper dwell",
   );
 });
 
+test("a Fireball explodes on an elevator deck instead of passing through its shaft", () => {
+  const source = elevatorDocument({
+    spawn: { x: 2.5, z: 2.5 },
+    dwellSeconds: 60,
+  });
+  const simulation = simulationFor(source.document);
+  simulation.projectiles.spawn({
+    x: 3,
+    z: 4.5,
+    vx: 120,
+    vz: 0,
+    lifetime: 2,
+    radius: 0.12,
+    ownerId: simulation.player.id,
+    layerIndex: 0,
+  });
+
+  simulation.tick(null);
+
+  assert.equal(simulation.projectiles.activeCount, 0);
+  const [event] = simulation.impactEvents.toArray();
+  assert.equal(event.hit.kind, "elevator");
+  assert.equal(event.hit.connectorId, source.connectorId);
+  assert.equal(event.hit.id, simulation.elevators.id[0]);
+});
+
+test("schema-v12 replays retain the pre-elevator-projectile collision behavior", () => {
+  const source = elevatorDocument({
+    spawn: { x: 3, z: 4.5 },
+    dwellSeconds: 60,
+  });
+  const live = simulationFor(source.document);
+  live.tick({ cast: { x: 6, z: 4.5 } });
+  assert.equal(live.impactEvents.toArray()[0].hit.kind, "elevator");
+  const recording = live.exportCommandLog();
+  recording.schemaVersion = 12;
+  delete recording.configuration.elevatorProjectileCollisionProfile;
+
+  const replayed = Simulation.replay(recording);
+
+  assert.equal(replayed.impactEvents.length, 0);
+  assert.equal(replayed.projectiles.activeCount, 1);
+});
+
 test("player, enemy, and fitting clutter can share a ride without centering or controller lock", () => {
   let source = elevatorDocument({ spawn: { x: 3.7, z: 4.5 } });
   const rock = placeInstance(source.document, "object.rock.small", 4, 4.1, {

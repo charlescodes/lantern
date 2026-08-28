@@ -62,6 +62,14 @@ story and leave the unrelated ideas here.
   able to opt into the relevant ranged interactions instead of inheriting them
   from `blocksMovement`. Exact trait names, projectile classes, and whether
   height or trajectory should matter remain open for that later content pass.
+- **Height-aware projectile blockers.** Capture one later story for Fireballs
+  meeting dynamic objects at different heights: a low table or lowered elevator
+  should let a chest-height Fireball pass over, while an elevator rising through
+  that path should be hit at the crossing height. It is still open whether the
+  smallest useful rule is an authoritative Fireball height, a fixed projectile
+  band compared with catalog surface heights, or another bounded vertical
+  contact model. This must not be solved by treating every movement blocker as
+  a ranged blocker.
 - **Lighted projectile trails.** Fireballs and arrows leave visible trails.
   This feels especially right for MoM, *Missiles of Magic*.
 - **Bouncing spells.** A spell ricochets off walls for a fixed number of

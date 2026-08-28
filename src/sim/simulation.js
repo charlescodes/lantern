@@ -9,6 +9,8 @@ import {
   DEFAULT_DEBUG_FLAGS,
   DEFAULT_PARTICLE_PROFILE,
   DYNAMIC_PHYSICS,
+  ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE,
+  ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1,
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_NONE,
@@ -756,6 +758,7 @@ export class Simulation {
    * enemyAiProfile?:string,
    * deadBodyProfile?:string,
    * movementSoundProfile?:string,
+   * elevatorProjectileCollisionProfile?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -833,6 +836,19 @@ export class Simulation {
     ) {
       throw new RangeError(
         `Unsupported movement-sound profile: ${this.movementSoundProfile}`,
+      );
+    }
+    this.elevatorProjectileCollisionProfile = options.elevatorProjectileCollisionProfile
+      ?? ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1;
+    if (
+      this.elevatorProjectileCollisionProfile
+        !== ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1
+      && this.elevatorProjectileCollisionProfile
+        !== ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE
+    ) {
+      throw new RangeError(
+        "Unsupported elevator projectile collision profile: "
+          + this.elevatorProjectileCollisionProfile,
       );
     }
     const rockCapacity = options.rockCapacity ?? ROCK.capacity;
@@ -990,6 +1006,7 @@ export class Simulation {
     this.commandLogEnemyAiProfile = this.enemyAiProfile;
     this.commandLogDeadBodyProfile = this.deadBodyProfile;
     this.commandLogMovementSoundProfile = this.movementSoundProfile;
+    this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
     this.commandLogSoundEventCapacity = this.soundEvents.capacity;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1174,6 +1191,7 @@ export class Simulation {
       this.commandLogEnemyAiProfile = this.enemyAiProfile;
       this.commandLogDeadBodyProfile = this.deadBodyProfile;
       this.commandLogMovementSoundProfile = this.movementSoundProfile;
+      this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -6859,6 +6877,54 @@ export class Simulation {
     return definition;
   }
 
+  /**
+   * Returns the contacted elevator index, or -1 when this projectile's layer
+   * has no blocking elevator surface. Projectiles are layer-bound 2D bodies:
+   * they meet the lower deck/piston and the upper deck, but never the piston
+   * travelling beneath the upper floor.
+   * @param {number} x @param {number} z @param {number} radius @param {number} layerIndex
+   */
+  #projectileElevatorContact(x, z, radius, layerIndex) {
+    if (
+      this.elevatorProjectileCollisionProfile
+        !== ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1
+    ) return -1;
+    for (let elevatorIndex = 0; elevatorIndex < this.elevators.activeCount; elevatorIndex += 1) {
+      const isLowerLayer = layerIndex === this.elevators.lowerLayerIndex[elevatorIndex];
+      const isUpperLayer = layerIndex === this.elevators.upperLayerIndex[elevatorIndex];
+      const isLowerDeck = isLowerLayer
+        && this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+        && this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.LOWER;
+      const isUpperDeck = isUpperLayer
+        && this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+        && this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.UPPER;
+      const isLowerShaft = isLowerLayer && !isLowerDeck;
+      if (!isLowerDeck && !isUpperDeck && !isLowerShaft) continue;
+      const hit = (isLowerDeck || isUpperDeck)
+        ? circleBoxContact(
+          x,
+          z,
+          radius,
+          this.elevators.x[elevatorIndex],
+          this.elevators.z[elevatorIndex],
+          this.elevators.platformWidth[elevatorIndex] / 2,
+          this.elevators.platformWidth[elevatorIndex] / 2,
+          this._bodyContact,
+        )
+        : circleCircleContact(
+          x,
+          z,
+          radius,
+          this.elevators.x[elevatorIndex],
+          this.elevators.z[elevatorIndex],
+          this.elevators.platformWidth[elevatorIndex] / 2,
+          this._bodyContact,
+        );
+      if (hit) return elevatorIndex;
+    }
+    return -1;
+  }
+
   /** @param {number} dt */
   #projectileSystem(dt) {
     const pool = this.projectiles;
@@ -6912,6 +6978,7 @@ export class Simulation {
       );
       let hitKind = "";
       let hitRockIndex = -1;
+      let hitElevatorIndex = -1;
       let hitActorIndex = -1;
       let hitDeadBodyIndex = -1;
       let hitX = startX;
@@ -6922,6 +6989,18 @@ export class Simulation {
         const testZ = startZ + deltaZ * alpha;
         if (firstSolidContact(projectileMap, testX, testZ, pool.radius[index], this._gridContact)) {
           hitKind = "cell";
+          hitX = testX;
+          hitZ = testZ;
+          break;
+        }
+        hitElevatorIndex = this.#projectileElevatorContact(
+          testX,
+          testZ,
+          pool.radius[index],
+          projectileLayerIndex,
+        );
+        if (hitElevatorIndex >= 0) {
+          hitKind = "elevator";
           hitX = testX;
           hitZ = testZ;
           break;
@@ -6998,6 +7077,7 @@ export class Simulation {
           index,
           hitKind,
           hitRockIndex,
+          hitElevatorIndex,
           hitActorIndex,
           hitDeadBodyIndex,
           hitX,
@@ -7166,6 +7246,7 @@ export class Simulation {
    * @param {number} projectileIndex
    * @param {string} hitKind
    * @param {number} rockIndex
+   * @param {number} elevatorIndex
    * @param {number} actorIndex
    * @param {number} deadBodyIndex
    * @param {number} hitX
@@ -7175,6 +7256,7 @@ export class Simulation {
     projectileIndex,
     hitKind,
     rockIndex,
+    elevatorIndex,
     actorIndex,
     deadBodyIndex,
     hitX,
@@ -7227,6 +7309,16 @@ export class Simulation {
         contactZ = this.rocks.z[rockIndex] + nz * this.rocks.radius[rockIndex];
       }
       hit = { kind: "rock", id: this.rocks.id[rockIndex] };
+    } else if (hitKind === "elevator") {
+      nx = this._bodyContact.nx;
+      nz = this._bodyContact.nz;
+      contactX = this._bodyContact.x;
+      contactZ = this._bodyContact.z;
+      hit = {
+        kind: "elevator",
+        id: this.elevators.id[elevatorIndex],
+        connectorId: this.elevators.authoringId[elevatorIndex],
+      };
     } else if (
       hitKind === "player"
       || hitKind === "enemyWizard"
@@ -10126,6 +10218,8 @@ export class Simulation {
         enemyAiProfile: this.commandLogEnemyAiProfile,
         deadBodyProfile: this.commandLogDeadBodyProfile,
         movementSoundProfile: this.commandLogMovementSoundProfile,
+        elevatorProjectileCollisionProfile:
+          this.commandLogElevatorProjectileCollisionProfile,
         soundEventCapacity: this.commandLogSoundEventCapacity,
         dynamicDeadBodyCapacity: this.commandLogDynamicDeadBodyCapacity,
         inertDeadBodyCapacity: this.commandLogInertDeadBodyCapacity,
@@ -10145,7 +10239,7 @@ export class Simulation {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
     }
     const scenario = ArenaScenario.fromJSON(
-      recordingSchema === SCHEMA_VERSION && recording.initialAuthoringMap
+      recordingSchema >= 12 && recording.initialAuthoringMap
         ? recording.initialAuthoringMap
         : recording.initialScenario ?? recording.initialMap,
     );
@@ -10168,6 +10262,7 @@ export class Simulation {
     let enemyAiProfile = ENEMY_AI_PROFILE_NONE;
     let deadBodyProfile = DEAD_BODY_PROFILE_NONE;
     let movementSoundProfile = MOVEMENT_SOUND_PROFILE_NONE;
+    let elevatorProjectileCollisionProfile = ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE;
     let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
@@ -10225,6 +10320,7 @@ export class Simulation {
       || recordingSchema === 10
       || recordingSchema === 11
       || recordingSchema === 12
+      || recordingSchema === 13
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -10295,6 +10391,19 @@ export class Simulation {
           throw new TypeError("Schema-v11 recording has invalid sound-event capacity");
         }
       }
+      if (recordingSchema >= 13) {
+        elevatorProjectileCollisionProfile = String(
+          recording.configuration?.elevatorProjectileCollisionProfile ?? "",
+        );
+        if (
+          elevatorProjectileCollisionProfile
+            !== ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1
+        ) {
+          throw new TypeError(
+            "Schema-v13 recording has invalid or missing elevator projectile collision profile",
+          );
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -10325,6 +10434,7 @@ export class Simulation {
       enemyAiProfile,
       deadBodyProfile,
       movementSoundProfile,
+      elevatorProjectileCollisionProfile,
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

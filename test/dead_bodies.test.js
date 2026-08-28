@@ -366,7 +366,7 @@ test("schema 11 captures body configuration while schema 9 forces corpse-free be
     source.tick({ move: target, cast: target });
   }
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 12);
+  assert.equal(recording.schemaVersion, 13);
   assert.equal(recording.configuration.deadBodyProfile, DEAD_BODY_PROFILE_V1);
   assert.equal(recording.configuration.dynamicDeadBodyCapacity, 3);
   assert.equal(recording.configuration.inertDeadBodyCapacity, 7);
