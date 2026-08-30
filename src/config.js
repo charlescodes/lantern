@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.2";
@@ -18,6 +18,8 @@ export const MOVEMENT_SOUND_PROFILE_V1 = "proximity-walk-footsteps-v1";
 export const MOVEMENT_SOUND_PROFILE_NONE = "none";
 export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1 = "elevator-projectile-collision-v1";
 export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE = "none";
+export const BREAKAWAY_FLOOR_PROFILE_V1 = "breakaway-floor-v1";
+export const BREAKAWAY_FLOOR_PROFILE_NONE = "none";
 
 export const ACTOR_TEAM = Object.freeze({
   player: 1,
@@ -299,6 +301,9 @@ export const VERTICAL_PHYSICS = Object.freeze({
   pressurePlateWidthMeters: 0.9,
   pressurePlateCapacity: 128,
   pressurePlateEventCapacity: 128,
+  breakawayFloorCapacity: 128,
+  breakawayCountdownTicks: 18,
+  breakawayEventCapacity: 128,
 });
 
 export const EXPLOSION = Object.freeze({

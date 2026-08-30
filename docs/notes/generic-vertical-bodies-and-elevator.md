@@ -1,6 +1,6 @@
-# M1B.1–M1B.3 Generic vertical bodies, elevator, holes, jumping, and plates
+# M1B.1–M1B.4 Generic vertical bodies, elevator, holes, jumping, plates, and breakaways
 
-> **Status:** current 0.9.2 implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** v13
+> **Status:** current 0.9.2 implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** v14
 
 M1B.1 keeps Lantern's authoritative X/Z collision model and adds one bounded
 world-Y degree of freedom. It is not a general 3D rigid-body system. Floors and
@@ -74,7 +74,7 @@ so merely brushing the deck edge cannot kick it sideways. Existing riders
 retain ordinary X/Z control. A falling body may still cross the upper shaft and
 acquire the moving platform as a swept support from above.
 
-Schema-v13 Fireballs use the same layer-local blocker interpretation. They
+Schema-v13-and-later Fireballs use the same layer-local blocker interpretation. They
 explode on the square deck at either stop and on the circular lower-floor
 piston/shaft while it travels or dwells at the upper stop. A projectile on the
 upper layer does not collide with a shaft travelling below that floor. Schema
@@ -162,13 +162,39 @@ control; enemies keep their existing controllers and props retain momentum.
 The bottom test floor catches all normal M1B.2 fixtures. A bounded void rescue
 is diagnostic-only rather than a damage/death system.
 
+## M1B.4 editor integration and breakaway floors
+
+The Connectors palette derives a new elevator from the active editor floor to
+the nearest strictly higher authored floor. The top floor deliberately offers
+no placement pair. Connector placement, undo, redo, moves, and deletion
+reconcile the bounded live elevator pool immediately; a connector cannot be
+changed or removed while a supported body is riding it. This preserves the
+existing autonomous clock, rather than adding passenger activation, call
+plates, or an enabled/disabled trigger policy.
+
+`surface.breakaway` is an authored solid floor cell with an independent runtime
+state. Any supported, pressure-plate-capable player, enemy, or dynamic prop
+overlapping it latches an 18-tick (0.3 second) countdown. The latch does not
+cancel when that body departs. On expiry the cell installs the ordinary square
+hole aperture and the standard support/gravity/fall pipeline takes over; large
+bodies can trigger it but still bridge it when their full footprint cannot fit.
+The Canvas and Three.js views darken the tile across the countdown, then render
+the standard square opening. Reset and Restore positions reconstruct the
+intact authored tile. The mechanic intentionally adds no special debris,
+animation, sound, trigger graph, or alternate falling path.
+
+Runtime player-layer presentation and the editor's active layer are separate.
+Play follows the player's current layer, while edit mode renders the selected
+editor layer without snapping the selection back on the next fixed tick.
+
 ## Fixed-step order
 
 After command-boundary actions, encounter/perception/navigation, and actor
 controller preparation, the relevant order is:
 
 1. acquire support contacts, step every elevator once,
-   and carry existing riders by that tick's platform delta;
+   carry existing riders by that tick's platform delta, and advance any
+   previously latched breakaway countdowns;
 2. sum applicable hole rim attraction, then resolve ordinary X/Z actor and
    dynamic-body physics while controllers remain active;
 3. release invalid platform contacts, capture swept floor apertures (holes or
@@ -185,7 +211,7 @@ simulation tick.
 ## Authoring, validation, and probes
 
 The generated Connectors palette entry places an endpoint between the active
-layer and the deterministic nearest layer at a different height. Either linked
+layer and the deterministic nearest strictly higher layer. Either linked
 floor displays and can pick the same connector. The fixed inspector edits linked
 layers, X/Z, widths, travel duration, dwell, and initial stop. Placement,
 inspection changes, and deletion use the existing semantic history, stable IDs,
@@ -202,7 +228,7 @@ and discarding the obsolete activation policy; v3, v2, v1, and legacy
 scenario/map documents continue through the existing migrations. Saving emits
 v5 only.
 
-`window.__lantern` adds detached elevator and vertical-body diagnostics plus
+`window.__lantern` adds detached elevator, breakaway-floor, and vertical-body diagnostics plus
 `cycleElevator(connectorId)` and `summonElevator(connectorId, "lower" | "upper")`.
 The authoring probes can inspect, place, update, or remove connectors while in
 edit mode. Snapshot/inspector records expose world Y, vertical mode/velocity,
@@ -242,6 +268,11 @@ history. In play, keep the player centered to fall through every aligned hole,
 or steer sideways while falling to land on an intermediate frame. Inspect
 `__lantern.holes()` and `__lantern.holeDiagnostics()` for detached recipes and
 bounded events/counters.
+
+In edit mode, paint **Breakaway floor** like any other surface. Start an
+eligible body on it, then inspect `__lantern.breakawayFloors()` and
+`__lantern.breakawayFloorEvents()` as it latches, darkens, and opens. Reset or
+Restore positions returns it to its authored intact state.
 
 Automated renderer tests verify snapshot adaptation and bounded resource use;
 actual WebGPU/WebGL lighting, shadows, visibility, and visual readability still

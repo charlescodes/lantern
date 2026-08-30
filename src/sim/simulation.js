@@ -2,6 +2,8 @@
 
 import {
   ACTOR_TEAM,
+  BREAKAWAY_FLOOR_PROFILE_NONE,
+  BREAKAWAY_FLOOR_PROFILE_V1,
   COMBAT,
   DEAD_BODY,
   DEAD_BODY_PROFILE_NONE,
@@ -759,6 +761,7 @@ export class Simulation {
    * deadBodyProfile?:string,
    * movementSoundProfile?:string,
    * elevatorProjectileCollisionProfile?:string,
+   * breakawayFloorProfile?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -767,7 +770,16 @@ export class Simulation {
   constructor(options = {}) {
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
+    this.breakawayFloorProfile = options.breakawayFloorProfile
+      ?? BREAKAWAY_FLOOR_PROFILE_V1;
+    if (
+      this.breakawayFloorProfile !== BREAKAWAY_FLOOR_PROFILE_V1
+      && this.breakawayFloorProfile !== BREAKAWAY_FLOOR_PROFILE_NONE
+    ) {
+      throw new RangeError(`Unsupported breakaway-floor profile: ${this.breakawayFloorProfile}`);
+    }
     this.map = this.scenario.map;
+    this.runtimeViewLayerId = this.scenario.startLayerId;
     this.layerIds = [...this.scenario.compiledLayerIds];
     this.layerIdToIndex = new Map(
       this.layerIds.map((layerId, index) => [layerId, index]),
@@ -777,7 +789,11 @@ export class Simulation {
     this.layerBaseY = Float32Array.from(
       this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
     );
-    this.layerHoles = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).holes ?? []);
+    this.layerHoles = this.layerIds.map((layerId) => [
+      ...(this.scenario.compiledLayer(layerId).holes ?? []),
+    ]);
+    this.breakawayFloors = this.#compiledBreakawayFloors();
+    this.breakawayFloorEvents = new RingBuffer(VERTICAL_PHYSICS.breakawayEventCapacity);
     this.pressurePlates = this.#compiledPressurePlates();
     this.pressurePlateEvents = new RingBuffer(VERTICAL_PHYSICS.pressurePlateEventCapacity);
     this.authoringRevision = 1;
@@ -1007,6 +1023,7 @@ export class Simulation {
     this.commandLogDeadBodyProfile = this.deadBodyProfile;
     this.commandLogMovementSoundProfile = this.movementSoundProfile;
     this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
+    this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
     this.commandLogSoundEventCapacity = this.soundEvents.capacity;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1192,6 +1209,7 @@ export class Simulation {
       this.commandLogDeadBodyProfile = this.deadBodyProfile;
       this.commandLogMovementSoundProfile = this.movementSoundProfile;
       this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
+      this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1212,10 +1230,23 @@ export class Simulation {
     this.inertDeadBodies.reset();
     this.soundEvents.reset();
     this.pressurePlateEvents.clear();
+    this.breakawayFloorEvents.clear();
+    this._skipBreakawayTrigger = true;
+    for (const floor of this.breakawayFloors) {
+      floor.state = "intact";
+      floor.triggerTick = 0;
+      floor.ticksRemaining = 0;
+    }
+    this.layerHoles = this.layerIds.map((layerId) => [
+      ...(this.scenario.compiledLayer(layerId).holes ?? []),
+    ]);
     for (const plate of this.pressurePlates) {
       plate.pressed = false;
       plate.occupantCount = 0;
     }
+    const startLayerIndex = this.layerIdToIndex.get(this.scenario.startLayerId) ?? 0;
+    this.runtimeViewLayerId = this.layerIds[startLayerIndex] ?? this.scenario.startLayerId;
+    this.map = this.layerMaps[startLayerIndex] ?? this.scenario.map;
     this.navigationField.reset(this.map);
     this.destinationFields.reset(this.map);
     this.reachability.reset(this.map);
@@ -1289,22 +1320,27 @@ export class Simulation {
       if (isDynamicRuntimeEntity(entity)) this.#spawnRuntimeDynamicEntity(entity);
     }
     for (const connector of this.scenario.connectors) {
-      this.elevators.spawn({
-        id: connector.runtimeId,
-        authoringId: connector.id,
-        lowerLayerIndex: connector.lowerLayerIndex,
-        upperLayerIndex: connector.upperLayerIndex,
-        x: connector.x,
-        z: connector.z,
-        platformWidth: connector.platformWidth,
-        apertureWidth: connector.apertureWidth,
-        lowerY: connector.lowerY,
-        upperY: connector.upperY,
-        travelDurationSeconds: connector.travelDurationSeconds,
-        dwellTicks: connector.dwellTicks,
-        initialStop: connector.initialStop,
-      });
+      this.#spawnAuthoredElevator(connector);
     }
+  }
+
+  /** @param {Record<string,any>} connector */
+  #spawnAuthoredElevator(connector) {
+    return this.elevators.spawn({
+      id: connector.runtimeId,
+      authoringId: connector.id,
+      lowerLayerIndex: connector.lowerLayerIndex,
+      upperLayerIndex: connector.upperLayerIndex,
+      x: connector.x,
+      z: connector.z,
+      platformWidth: connector.platformWidth,
+      apertureWidth: connector.apertureWidth,
+      lowerY: connector.lowerY,
+      upperY: connector.upperY,
+      travelDurationSeconds: connector.travelDurationSeconds,
+      dwellTicks: connector.dwellTicks,
+      initialStop: connector.initialStop,
+    });
   }
 
   /** @param {unknown} input */
@@ -1343,6 +1379,7 @@ export class Simulation {
       this.#facingSystem(simulationTick);
     }
     this.#elevatorSupportAndMotionSystem(SIMULATION.dt);
+    this.#breakawayFloorSystem(simulationTick);
     this.#jumpSystem(command.jump, command.jumpTarget ?? command.move);
     this.#holeRimAttractionSystem(SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
@@ -1417,8 +1454,55 @@ export class Simulation {
     this.layerBaseY = Float32Array.from(
       this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
     );
-    this.layerHoles = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).holes ?? []);
+    this.layerHoles = this.layerIds.map((layerId) => [
+      ...(this.scenario.compiledLayer(layerId).holes ?? []),
+    ]);
     this.pressurePlates = this.#compiledPressurePlates();
+    this.breakawayFloors = this.#compiledBreakawayFloors(this.breakawayFloors);
+  }
+
+  /** @param {Array<Record<string,any>>} [previous] */
+  #compiledBreakawayFloors(previous = []) {
+    if (this.breakawayFloorProfile !== BREAKAWAY_FLOOR_PROFILE_V1) return [];
+    const previousById = new Map(previous.map((floor) => [floor.id, floor]));
+    const values = [];
+    for (let layerIndex = 0; layerIndex < this.layerIds.length; layerIndex += 1) {
+      const layer = this.scenario.compiledLayer(this.layerIds[layerIndex]);
+      for (const recipe of layer?.breakawayFloors ?? []) {
+        if (values.length >= VERTICAL_PHYSICS.breakawayFloorCapacity) {
+          throw new RangeError("Breakaway-floor capacity exceeded");
+        }
+        const before = previousById.get(recipe.id);
+        const value = {
+          ...recipe,
+          layerIndex,
+          state: before?.state ?? "intact",
+          triggerTick: before?.triggerTick ?? 0,
+          ticksRemaining: before?.ticksRemaining ?? 0,
+        };
+        values.push(value);
+      }
+    }
+    for (const floor of values) this.#installOpenBreakawayAperture(floor);
+    return values;
+  }
+
+  /** @param {Record<string,any>} floor */
+  #installOpenBreakawayAperture(floor) {
+    if (floor.state !== "open") return;
+    const holes = this.layerHoles[floor.layerIndex];
+    if (!holes || holes.some((hole) => hole.id === floor.id)) return;
+    holes.push({
+      id: floor.id,
+      layerId: floor.layerId,
+      cellIndex: floor.cellIndex,
+      cx: floor.cx,
+      cz: floor.cz,
+      x: floor.x,
+      z: floor.z,
+      width: floor.width,
+      clearance: floor.clearance,
+    });
   }
 
   #compiledPressurePlates() {
@@ -1445,6 +1529,7 @@ export class Simulation {
     this.holeEvents.clear();
     this.holeEventDropped = 0;
     for (const key of Object.keys(this.holeMetrics)) this.holeMetrics[key] = 0;
+    this.breakawayFloorEvents.clear();
   }
 
   /** Spawn one authored dynamic recipe at its authored starting pose. */
@@ -1541,6 +1626,54 @@ export class Simulation {
     }
   }
 
+  /** @param {number} elevatorId */
+  #elevatorHasRider(elevatorId) {
+    const supported = (kind, index) => (
+      this.#bodyValue(kind, index, "supportKind") === SUPPORT_KIND.ELEVATOR
+      && this.#bodyValue(kind, index, "supportId") === elevatorId
+    );
+    if (supported(BODY_PLAYER, 0)) return true;
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (supported(BODY_ENEMY_WIZARD, index)) return true;
+    }
+    for (let index = 0; index < this.rocks.activeCount; index += 1) {
+      if (supported(BODY_ROCK, index)) return true;
+    }
+    for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+      if (supported(BODY_ENEMY_WIZARD_BODY, index)) return true;
+    }
+    return false;
+  }
+
+  /** @param {ArenaScenario} previousScenario @param {ArenaScenario} candidate */
+  #validateConnectorAuthoringMutation(previousScenario, candidate) {
+    const previous = new Map(previousScenario.connectors.map((connector) => [connector.id, connector]));
+    const next = new Map(candidate.connectors.map((connector) => [connector.id, connector]));
+    for (const [id, before] of previous) {
+      const after = next.get(id);
+      if (after && JSON.stringify(before) === JSON.stringify(after)) continue;
+      const elevatorIndex = this.elevators.findIndexByAuthoringId(id);
+      if (elevatorIndex >= 0 && this.#elevatorHasRider(this.elevators.id[elevatorIndex])) {
+        throw new RangeError(`Elevator "${id}" cannot be edited while a body is riding it`);
+      }
+    }
+  }
+
+  /** @param {ArenaScenario} previousScenario */
+  #reconcileElevatorAuthoringRuntime(previousScenario) {
+    const previous = new Map(previousScenario.connectors.map((connector) => [connector.id, connector]));
+    const next = new Map(this.scenario.connectors.map((connector) => [connector.id, connector]));
+    for (let index = this.elevators.activeCount - 1; index >= 0; index -= 1) {
+      const id = this.elevators.authoringId[index];
+      const before = previous.get(id);
+      const after = next.get(id);
+      if (!after || JSON.stringify(before) !== JSON.stringify(after)) this.elevators.removeSwap(index);
+    }
+    for (const [id, connector] of next) {
+      if (this.elevators.findIndexByAuthoringId(id) < 0) this.#spawnAuthoredElevator(connector);
+    }
+  }
+
   /** Keep live bodies attached to stable layer IDs when authoring layer order changes. */
   #remapLiveLayerIndices(previousLayerIds) {
     const remap = (value) => {
@@ -1616,6 +1749,7 @@ export class Simulation {
     if (options.restore !== true) {
       const overlap = this.#candidateOverlapsLiveSolid(candidate);
       if (overlap) throw new RangeError(overlap);
+      this.#validateConnectorAuthoringMutation(this.scenario, candidate);
     }
     const layerId = candidate.hasLayer(requestedLayerId)
       ? requestedLayerId
@@ -1628,7 +1762,11 @@ export class Simulation {
     this.scenario = candidate;
     this.#rebuildCompiledLayerRuntime();
     if (options.restore !== true) this.#remapLiveLayerIndices(previousLayerIds);
-    this.map = candidate.map;
+    const runtimeLayerIndex = this.layerIdToIndex.get(
+      this.layerIds[this.player.layerIndex] ?? candidate.startLayerId,
+    ) ?? this.layerIdToIndex.get(candidate.startLayerId) ?? 0;
+    this.runtimeViewLayerId = this.layerIds[runtimeLayerIndex] ?? candidate.startLayerId;
+    this.map = this.layerMaps[runtimeLayerIndex] ?? candidate.map;
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     this.mapRevision += 1;
@@ -1637,6 +1775,7 @@ export class Simulation {
       this.#clearLayerRuntimeEvents();
     } else {
       this.#reconcileDynamicAuthoringRuntime(previousScenario);
+      this.#reconcileElevatorAuthoringRuntime(previousScenario);
       this.navigationField.reset(this.map);
       this.destinationFields.reset(this.map);
       this.reachability.reset(this.map);
@@ -1653,14 +1792,8 @@ export class Simulation {
     if (!this.scenario.activateLayer(layerId)) {
       throw new RangeError(this.scenario.lastMutationError ?? `Could not activate layer "${layerId}"`);
     }
-    this.map = this.scenario.map;
-    this.layerMaps[this.layerIdToIndex.get(layerId) ?? 0] = this.map;
+    this.layerMaps[this.layerIdToIndex.get(layerId) ?? 0] = this.scenario.map;
     this.#refreshPreparedAuthoringState();
-    this.mapRevision += 1;
-    this.navigationField.reset(this.map);
-    this.destinationFields.reset(this.map);
-    this.reachability.reset(this.map);
-    this.broadphase.reset(this.map);
     return true;
   }
 
@@ -5589,9 +5722,11 @@ export class Simulation {
 
   #syncRuntimeViewToPlayerLayer() {
     const layerId = this.layerIds[this.player.layerIndex];
-    if (!layerId || this.scenario.activeLayer.id === layerId) return;
-    if (!this.scenario.activateLayer(layerId)) return;
-    this.map = this.scenario.map;
+    if (!layerId || this.runtimeViewLayerId === layerId) return;
+    const layerIndex = this.layerIdToIndex.get(layerId);
+    if (layerIndex === undefined) return;
+    this.runtimeViewLayerId = layerId;
+    this.map = this.layerMaps[layerIndex];
     this.mapRevision += 1;
     this.navigationField.reset(this.map);
     this.destinationFields.reset(this.map);
@@ -5659,6 +5794,78 @@ export class Simulation {
       plate.pressed = pressed;
       plate.occupantCount = count;
     }
+  }
+
+  /** @param {number} simulationTick */
+  #breakawayFloorSystem(simulationTick) {
+    if (this._skipBreakawayTrigger) {
+      this._skipBreakawayTrigger = false;
+      return;
+    }
+    for (let floorIndex = 0; floorIndex < this.breakawayFloors.length; floorIndex += 1) {
+      const floor = this.breakawayFloors[floorIndex];
+      if (floor.state === "open") continue;
+      if (floor.state === "intact") {
+        let triggered = this.#bodyTriggersBreakaway(BODY_PLAYER, 0, floor);
+        for (let index = 0; !triggered && index < this.enemies.activeCount; index += 1) {
+          triggered = this.#bodyTriggersBreakaway(BODY_ENEMY_WIZARD, index, floor);
+        }
+        for (let index = 0; !triggered && index < this.rocks.activeCount; index += 1) {
+          triggered = this.#bodyTriggersBreakaway(BODY_ROCK, index, floor);
+        }
+        if (!triggered) continue;
+        floor.state = "cracking";
+        floor.triggerTick = simulationTick;
+        floor.ticksRemaining = VERTICAL_PHYSICS.breakawayCountdownTicks;
+        this.breakawayFloorEvents.push({
+          tick: simulationTick,
+          kind: "BREAKAWAY_TRIGGERED",
+          breakawayId: floor.id,
+          layerId: floor.layerId,
+        });
+        continue;
+      }
+      floor.ticksRemaining -= 1;
+      if (floor.ticksRemaining > 0) continue;
+      floor.ticksRemaining = 0;
+      floor.state = "open";
+      this.#installOpenBreakawayAperture(floor);
+      this.breakawayFloorEvents.push({
+        tick: simulationTick,
+        kind: "BREAKAWAY_OPENED",
+        breakawayId: floor.id,
+        layerId: floor.layerId,
+      });
+    }
+  }
+
+  /** @param {number} kind @param {number} index @param {Record<string,any>} floor */
+  #bodyTriggersBreakaway(kind, index, floor) {
+    if (
+      this.#bodyValue(kind, index, "verticalMode") !== VERTICAL_MODE.SUPPORTED
+      || this.#bodyValue(kind, index, "supportKind") !== SUPPORT_KIND.FLOOR
+      || this.#bodyValue(kind, index, "layerIndex") !== floor.layerIndex
+      || !hasVerticalCapability(
+        this.#bodyValue(kind, index, "verticalCapabilities"),
+        VERTICAL_CAPABILITY.CAN_PRESS_PLATE,
+      )
+    ) return false;
+    const footprint = this.#writeBodyFootprint(
+      kind,
+      index,
+      this.#bodyValue(kind, index, "x"),
+      this.#bodyValue(kind, index, "z"),
+    );
+    const half = floor.width / 2;
+    this._plateContact.x = floor.x;
+    this._plateContact.z = floor.z;
+    this._plateContact.halfWidth = half;
+    this._plateContact.halfDepth = half;
+    return footprintOverlapsAxisAlignedRectangle(
+      footprint,
+      this._plateContact,
+      this._apertureExtents,
+    );
   }
 
   /** @param {number} kind @param {number} index @param {Record<string,any>} plate */
@@ -9179,7 +9386,47 @@ export class Simulation {
     }
     const runtimeLayerId = this.layerIds[this.player.layerIndex]
       ?? this.scenario.startLayerId;
+    const visibleLayerId = this.runtimeViewLayerId ?? runtimeLayerId;
+    const visibleLayerIndex = this.layerIdToIndex.get(visibleLayerId) ?? this.player.layerIndex;
     const pressurePlates = this.pressurePlates.map((plate) => ({ ...plate }));
+    const breakawayFloors = this.breakawayFloors.map((floor) => ({
+      ...floor,
+      progress: floor.state === "intact"
+        ? 0
+        : floor.state === "open"
+          ? 1
+          : 1 - floor.ticksRemaining / VERTICAL_PHYSICS.breakawayCountdownTicks,
+    }));
+    const layerPresentationMap = (layerId, layerIndex) => {
+      const layer = this.scenario.compiledLayer(layerId);
+      const map = this.layerMaps[layerIndex] ?? layer?.map ?? this.map;
+      const isEditorLayer = layerId === this.scenario.activeLayer.id;
+      return {
+        version: MAP_VERSION,
+        layerId,
+        baseY: this.layerBaseY[layerIndex] ?? 0,
+        width: map.width,
+        height: map.height,
+        cells: Array.from(map.cells),
+        occluderCells: isEditorLayer
+          ? this._preparedAuthoringState.occluderCells
+          : Array.from(layer?.occluderMask ?? []),
+        surface: isEditorLayer
+          ? this._preparedAuthoringState.surface
+          : {
+            legend: [...(layer?.surface.legend ?? [])],
+            cells: Array.from(layer?.surface.cells ?? []),
+          },
+        structure: isEditorLayer
+          ? this._preparedAuthoringState.structure
+          : {
+            legend: [...(layer?.structure.legend ?? [])],
+            cells: Array.from(layer?.structure.cells ?? []),
+          },
+        holes: (this.layerHoles[layerIndex] ?? []).map((hole) => ({ ...hole })),
+        playerSpawn: { ...map.playerSpawn },
+      };
+    };
     return {
       schemaVersion: SCHEMA_VERSION,
       seed: this.seed,
@@ -9229,20 +9476,12 @@ export class Simulation {
       authoringMapVersion: AUTHORING_MAP_VERSION,
       runtimeLayerId,
       authoring: this._preparedAuthoringState.authoring,
-      map: {
-        version: MAP_VERSION,
-        layerId: this.scenario.activeLayer.id,
-        baseY: this.scenario.activeLayer.baseY,
-        width: this.map.width,
-        height: this.map.height,
-        cells: Array.from(this.map.cells),
-        occluderCells: this._preparedAuthoringState.occluderCells,
-        surface: this._preparedAuthoringState.surface,
-        structure: this._preparedAuthoringState.structure,
-        holes: (this.layerHoles[this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0] ?? [])
-          .map((hole) => ({ ...hole })),
-        playerSpawn: { ...this.map.playerSpawn },
-      },
+      map: layerPresentationMap(visibleLayerId, visibleLayerIndex),
+      editorMap: (() => {
+        const editorLayerId = this.scenario.activeLayer.id;
+        const editorLayerIndex = this.layerIdToIndex.get(editorLayerId) ?? 0;
+        return layerPresentationMap(editorLayerId, editorLayerIndex);
+      })(),
       player: {
         kind: "player",
         index: 0,
@@ -9307,6 +9546,8 @@ export class Simulation {
       elevators,
       pressurePlates,
       recentPressurePlateEvents: this.pressurePlateEvents.toArray(32).map(cloneUnknown),
+      breakawayFloors,
+      recentBreakawayFloorEvents: this.breakawayFloorEvents.toArray(32).map(cloneUnknown),
       obelisks,
       enemies,
       deadBodies: {
@@ -9909,6 +10150,7 @@ export class Simulation {
       solidCells: Array.from(compiled.solidMask),
       occluderCells: Array.from(compiled.occluderMask),
       holes: compiled.holes.map((hole) => ({ ...hole })),
+      breakawayFloors: (compiled.breakawayFloors ?? []).map((floor) => ({ ...floor })),
       pressurePlates: (compiled.pressurePlates ?? []).map((plate) => ({ ...plate })),
       markers: cloneUnknown(source.markers),
       connectorEndpoints: compiled.connectorEndpoints.map((endpoint) => ({ ...endpoint })),
@@ -10163,9 +10405,22 @@ export class Simulation {
   /** @param {string} layerId */
   activateRuntimeLayer(layerId) {
     try {
-      const result = this.#activateScenarioLayer(String(layerId));
+      const id = String(layerId);
+      const layerIndex = this.layerIdToIndex.get(id);
+      if (layerIndex === undefined) throw new RangeError(`Unknown runtime layer "${id}"`);
+      if (!this.scenario.activateLayer(id)) {
+        throw new RangeError(this.scenario.lastMutationError ?? `Unknown editor layer "${id}"`);
+      }
+      this.runtimeViewLayerId = id;
+      this.map = this.layerMaps[layerIndex];
+      this.mapRevision += 1;
+      this.navigationField.reset(this.map);
+      this.destinationFields.reset(this.map);
+      this.reachability.reset(this.map);
+      this.broadphase.reset(this.map);
+      this.#refreshPreparedAuthoringState();
       this.lastError = null;
-      return result;
+      return true;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
       return false;
@@ -10220,6 +10475,7 @@ export class Simulation {
         movementSoundProfile: this.commandLogMovementSoundProfile,
         elevatorProjectileCollisionProfile:
           this.commandLogElevatorProjectileCollisionProfile,
+        breakawayFloorProfile: this.commandLogBreakawayFloorProfile,
         soundEventCapacity: this.commandLogSoundEventCapacity,
         dynamicDeadBodyCapacity: this.commandLogDynamicDeadBodyCapacity,
         inertDeadBodyCapacity: this.commandLogInertDeadBodyCapacity,
@@ -10263,6 +10519,7 @@ export class Simulation {
     let deadBodyProfile = DEAD_BODY_PROFILE_NONE;
     let movementSoundProfile = MOVEMENT_SOUND_PROFILE_NONE;
     let elevatorProjectileCollisionProfile = ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE;
+    let breakawayFloorProfile = BREAKAWAY_FLOOR_PROFILE_NONE;
     let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
@@ -10321,6 +10578,7 @@ export class Simulation {
       || recordingSchema === 11
       || recordingSchema === 12
       || recordingSchema === 13
+      || recordingSchema === 14
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -10404,6 +10662,12 @@ export class Simulation {
           );
         }
       }
+      if (recordingSchema >= 14) {
+        breakawayFloorProfile = String(recording.configuration?.breakawayFloorProfile ?? "");
+        if (breakawayFloorProfile !== BREAKAWAY_FLOOR_PROFILE_V1) {
+          throw new TypeError("Schema-v14 recording has invalid or missing breakaway-floor profile");
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -10435,6 +10699,7 @@ export class Simulation {
       deadBodyProfile,
       movementSoundProfile,
       elevatorProjectileCollisionProfile,
+      breakawayFloorProfile,
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

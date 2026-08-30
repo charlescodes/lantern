@@ -65,6 +65,8 @@ function compileLayer(document, layer, layerIndex) {
   const structureCodes = Uint16Array.from(layer.structure.cells);
   /** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
   const holes = [];
+  /** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
+  const breakawayFloors = [];
   /** @type {Array<{id:string,layerId:string,x:number,z:number,cx:number,cz:number}>} */
   const pressurePlates = [];
   const authoredDynamicBodyCount = layer.instances.reduce((count, instance) => {
@@ -85,6 +87,21 @@ function compileLayer(document, layer, layerIndex) {
     if (surfaceDefinition?.traits.runtimeKind === "floor-hole") {
       holes.push({
         id: `hole:${layer.id}:${index}`,
+        layerId: layer.id,
+        cellIndex: index,
+        cx: index % layer.width,
+        cz: Math.floor(index / layer.width),
+        x: (index % layer.width) + 0.5,
+        z: Math.floor(index / layer.width) + 0.5,
+        width: Number(surfaceDefinition.traits.apertureWidth
+          ?? VERTICAL_PHYSICS.defaultHoleApertureWidthMeters),
+        clearance: Number(surfaceDefinition.traits.apertureClearance
+          ?? VERTICAL_PHYSICS.holeFitClearanceMeters),
+      });
+    }
+    if (surfaceDefinition?.traits.runtimeKind === "breakaway-floor") {
+      breakawayFloors.push({
+        id: `breakaway:${layer.id}:${index}`,
         layerId: layer.id,
         cellIndex: index,
         cx: index % layer.width,
@@ -294,6 +311,7 @@ function compileLayer(document, layer, layerIndex) {
     entities,
     runtimeMappings,
     holes,
+    breakawayFloors,
     pressurePlates,
     connectorEndpoints: document.connectors
       .filter((connector) => (
@@ -333,6 +351,7 @@ function compatibilityProjection(layer) {
     entities: layer.entities,
     runtimeMappings: layer.runtimeMappings,
     holes: layer.holes,
+    breakawayFloors: layer.breakawayFloors,
     pressurePlates: layer.pressurePlates,
   };
 }

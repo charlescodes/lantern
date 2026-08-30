@@ -56,6 +56,17 @@ import {
 } from "./scorch_marks.js";
 import { TrueSightTextureTransport } from "./true_sight_transport.js";
 import { PresentationWarmupStatus } from "./warmup.js";
+
+/** @param {string} from @param {string} to @param {number} amount */
+function blendHex(from, to, amount) {
+  const t = Math.max(0, Math.min(1, amount));
+  const source = Number.parseInt(from.slice(1), 16);
+  const target = Number.parseInt(to.slice(1), 16);
+  const channel = (shift) => Math.round(
+    (((source >> shift) & 0xff) * (1 - t)) + (((target >> shift) & 0xff) * t),
+  );
+  return `rgb(${channel(16)} ${channel(8)} ${channel(0)})`;
+}
 import {
   shouldFadeWall,
   WALL_FADED_OPACITY,
@@ -840,7 +851,7 @@ export class ThreePresentation {
     this.resize();
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
-    this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
     this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
     this.#updateWallOcclusion(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
@@ -1024,7 +1035,7 @@ export class ThreePresentation {
     };
     this.#setActiveBaseY(snapshot.map.baseY);
     this.#syncCamera();
-    this.#updateMap(snapshot.map, snapshot.obelisks ?? []);
+    this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
     this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
     this.#updateWallOcclusion(snapshot.player, 0);
     this.#updateKineticFragments(snapshot, 0);
@@ -1380,7 +1391,7 @@ export class ThreePresentation {
   }
 
   /** @param {{width:number,height:number,cells:number[],playerSpawn:{x:number,z:number}}} map @param {Array<{cell:{cx:number,cz:number}}>} obelisks */
-  #updateMap(map, obelisks) {
+  #updateMap(map, obelisks, breakawayFloors = []) {
     const nextHash = hashMap(map, obelisks);
     const dimensionsChanged = map.width !== this.mapWidth || map.height !== this.mapHeight;
     if (nextHash === this.mapHash && !dimensionsChanged) return;
@@ -1424,6 +1435,11 @@ export class ThreePresentation {
 
     if (!this.surfaceMesh) this.#replaceSurfaceMesh(map.width * map.height);
     let surfaceCount = 0;
+    const breakaways = new Map(
+      breakawayFloors
+        .filter((floor) => floor.layerId === map.layerId)
+        .map((floor) => [floor.cellIndex, floor]),
+    );
     for (let cz = 0; cz < map.height; cz += 1) {
       for (let cx = 0; cx < map.width; cx += 1) {
         const index = cz * map.width + cx;
@@ -1431,13 +1447,17 @@ export class ThreePresentation {
           ? map.surface.legend[map.surface.cells[index]]
           : "surface.stone";
         const definition = getPlaceableDefinition(definitionId);
-        const isHole = definition?.traits.runtimeKind === "floor-hole";
-        const color = (cx + cz) % 2 === 0
+        const breakaway = breakaways.get(index);
+        const isHole = definition?.traits.runtimeKind === "floor-hole" || breakaway?.state === "open";
+        const baseColor = (cx + cz) % 2 === 0
           ? definition?.debug.fill ?? "#586358"
           : definition?.debug.alternateFill ?? "#5b665b";
+        const color = breakaway?.state === "cracking"
+          ? blendHex(baseColor, "#20252a", breakaway.progress)
+          : baseColor;
         this._position.set(cx + 0.5, 0.004, cz + 0.5);
         const surfaceScale = isHole
-          ? Number(definition?.traits.apertureWidth ?? 0.9)
+          ? Number(breakaway?.width ?? definition?.traits.apertureWidth ?? 0.9)
           : 0.995;
         this._scale.set(surfaceScale, surfaceScale, surfaceScale);
         this._matrix.compose(this._position, this._quaternion, this._scale);

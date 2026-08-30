@@ -637,12 +637,13 @@ function normalizeCurrentDocument(input) {
       const layer = layerIndex < 0 ? null : layers[layerIndex];
       if (!layer || cx < 0 || cz < 0 || cx >= layer.width || cz >= layer.height) continue;
       const surfaceId = layer.surface.legend[layer.surface.cells[cz * layer.width + cx]];
-      if (getPlaceableDefinition(surfaceId)?.traits.runtimeKind === "floor-hole") {
+      const runtimeKind = getPlaceableDefinition(surfaceId)?.traits.runtimeKind;
+      if (runtimeKind === "floor-hole" || runtimeKind === "breakaway-floor") {
         issue(
           "error",
           `connectors[${connectorIndex}]`,
           "aperture-owner-conflict",
-          `Elevator connector conflicts with the standalone floor hole in ${layerId} cell (${cx}, ${cz}).`,
+          `Elevator connector conflicts with a floor aperture in ${layerId} cell (${cx}, ${cz}).`,
           layerId,
         );
       }

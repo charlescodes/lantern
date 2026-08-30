@@ -22,7 +22,7 @@ The central modules are:
 - `src/authoring/placement_validation.js`: lightweight, non-mutating bounds and overlap checks shared by previews and compilation.
 - `src/authoring/editor_interaction.js`: DOM-free editor state, deterministic picking, target reconciliation, and eyedropper rules.
 - `src/authoring/map_compiler.js`: deterministic, DOM-free authoring-to-runtime compilation.
-- `src/sim/scenario.js`: compatibility adapter between the authoring source, schema-v13's legacy scenario projection, and the simulation.
+- `src/sim/scenario.js`: compatibility adapter between the authoring source, schema-v14's legacy scenario projection, and the simulation.
 - `src/browser/layer_panel.js`: fixed layer management, reference selection, and concise structured validation diagnostics.
 
 Stable authoring IDs are mapped to numeric runtime spawn IDs where a pool needs one. Neither identity is a pool index.

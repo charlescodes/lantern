@@ -1,7 +1,7 @@
 # Lantern: Lay of the Land in Pseudocode
 
 > **Descriptive snapshot:** Lantern 0.9.1 development runtime,
-> snapshot/recording schema v13 and authoring-map v5.
+> snapshot/recording schema v14 and authoring-map v5.
 >
 > This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.
 
@@ -63,7 +63,7 @@ TrueSight never gives knowledge to AI
 
 ```text
 FUNCTION boot()
-    simulation      := new Simulation(default scenario, schema-v13 profiles)
+    simulation      := new Simulation(default scenario, schema-v14 profiles)
     initialSnapshot := simulation.snapshot()
 
     options   := parse renderer/backend/visual flags from URL

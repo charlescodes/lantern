@@ -693,7 +693,7 @@ export class AuthoringEditorController {
             ? `Links ${pair.lowerLayerId} to ${pair.upperLayerId}`
             : pair
               ? "Elevator endpoint is outside the shared map bounds"
-              : "Create another layer before placing an elevator",
+              : "Select a floor with a higher floor above it before placing an elevator",
           transform: { x: snapped.x, z: snapped.z, rotation: 0 },
           occupiedCells: inside
             ? [{ cx: Math.min(layer.width - 1, Math.floor(snapped.x)), cz: Math.min(layer.height - 1, Math.floor(snapped.z)) }]
@@ -911,16 +911,13 @@ export class AuthoringEditorController {
     const active = layers.find((layer) => layer.id === this.activeLayerId);
     if (!active || layers.length < 2) return null;
     const other = layers
-      .filter((layer) => layer.id !== active.id)
+      .filter((layer) => layer.baseY > active.baseY)
       .sort((left, right) => (
-        Math.abs(left.baseY - active.baseY) - Math.abs(right.baseY - active.baseY)
-        || left.baseY - right.baseY
+        left.baseY - right.baseY
         || left.id.localeCompare(right.id)
       ))[0];
-    if (!other || other.baseY === active.baseY) return null;
-    return active.baseY < other.baseY
-      ? { lowerLayerId: active.id, upperLayerId: other.id }
-      : { lowerLayerId: other.id, upperLayerId: active.id };
+    if (!other) return null;
+    return { lowerLayerId: active.id, upperLayerId: other.id };
   }
 
   #reconcileLayers() {

@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.2` is the current application release. The development runtime is now at snapshot/recording schema v13 and authoring-map v5. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.2` is the current application release. The development runtime is now at snapshot/recording schema v14 and authoring-map v5. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -21,7 +21,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
 - [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v5, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, and map-level connector authoring.
-- [M1B.1–M1B.3 vertical bodies, elevator, holes, and jumping](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, and grounded plates.
+- [M1B.1–M1B.4 vertical bodies, elevator, holes, jumping, and breakaways](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, grounded plates, live connector authoring, and breakaway floors.
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
 - [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
@@ -77,13 +77,13 @@ These documents preserve future intent and candidate experiments. They are mutab
 These identifiers evolve independently:
 
 - Application/package release: `0.9.2`.
-- Snapshot and command-recording schema: v13.
+- Snapshot and command-recording schema: v14.
 - Authoring-map schema: `lantern-authoring-map` v5; v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
-- Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the schema-v13 recording compatibility projection.
+- Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the schema-v14 recording compatibility projection.
 - Fireball definition format: v1.
 - Performance-report schema: v4.
 - Default particle behavior profile: `m0.2.5-balanced`.
 - Historical replay particle profile: `m0.2`.
 - Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
 
-Release numbering does not rename frozen profiles. Schema v13 adds `elevator-projectile-collision-v1`, which makes Fireballs impact stopped elevator decks and lower-floor shafts while preserving schema-v12 behavior. Schema v12 adds the replayed committed-jump edge and current authoring-map projection; schemas v2-v11 retain their existing command and simulation branches. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.
+Release numbering does not rename frozen profiles. Schema v14 adds `breakaway-floor-v1`, which records the latched 18-tick floor-to-hole profile while schemas v2-v13 leave authored breakaway tiles inert. Schema v13 adds `elevator-projectile-collision-v1`, which makes Fireballs impact stopped elevator decks and lower-floor shafts while preserving schema-v12 behavior. Schema v12 adds the replayed committed-jump edge and current authoring-map projection; schemas v2-v11 retain their existing command and simulation branches. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.

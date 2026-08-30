@@ -55,6 +55,25 @@ export class ElevatorPool {
     this.activeCount = 0;
   }
 
+  /** Removes one elevator while retaining dense bounded storage. @param {number} index */
+  removeSwap(index) {
+    if (index < 0 || index >= this.activeCount) return false;
+    const last = this.activeCount - 1;
+    if (index !== last) {
+      for (const field of [
+        "id", "lowerLayerIndex", "upperLayerIndex", "x", "z", "platformWidth",
+        "apertureWidth", "lowerY", "upperY", "worldY", "previousWorldY", "velocityY",
+        "speed", "travelDurationSeconds", "dwellTicks", "dwellRemaining", "currentStop",
+        "requestedStop", "debugRequestedStop", "hasDebugRequest", "motion",
+        "supportedBodyCount", "rejectedLoadCount", "failedEjectionCount",
+      ]) this[field][index] = this[field][last];
+      this.authoringId[index] = this.authoringId[last];
+    }
+    this.authoringId[last] = null;
+    this.activeCount = last;
+    return true;
+  }
+
   /** @param {Record<string, any>} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) return 0;

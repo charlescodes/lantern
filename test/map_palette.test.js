@@ -38,7 +38,7 @@ test("palette groups are derived from catalog categories in stable order", () =>
   assert.deepEqual(groups.map((group) => group.id), ["surface", "structure", "object", "connector"]);
   assert.deepEqual(
     groups[0].definitions.map((definition) => definition.id),
-    ["surface.stone", "surface.moss", "surface.hole"],
+    ["surface.stone", "surface.moss", "surface.hole", "surface.breakaway"],
   );
   assert.equal(groups[1].definitions[0].placementMode, "paint");
   assert.equal(groups[2].definitions.every((definition) => definition.placementMode === "stamp"), true);

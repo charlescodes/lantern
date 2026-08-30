@@ -856,7 +856,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
     simulation.enemies.health[current] = 100;
   }
   const snapshot = simulation.snapshot();
-  assert.equal(snapshot.schemaVersion, 13);
+  assert.equal(snapshot.schemaVersion, 14);
   assert.equal(snapshot.player.maximumHealth, 100);
   assert.equal(snapshot.enemies[0].maximumHealth, 100);
   assert.equal(snapshot.pools.enemies.capacity, 4);
@@ -892,7 +892,7 @@ test("schema-v11 replay is exact and schema-v2 through v5 force frozen pre-comba
     });
   }
   const recording = live.exportCommandLog();
-  assert.equal(recording.schemaVersion, 13);
+  assert.equal(recording.schemaVersion, 14);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());

@@ -164,7 +164,10 @@ const runtime = new FixedStepRuntime({
       layerPanel?.sync(editorView);
       authoringInspector?.update(snapshot, editorView);
     }
-    presentation.render(snapshot, alpha, {
+    const presentationSnapshot = mode === "edit" && snapshot.editorMap
+      ? { ...snapshot, map: snapshot.editorMap }
+      : snapshot;
+    presentation.render(presentationSnapshot, alpha, {
       mouseWorld: input.mouseWorld,
       mouseInside: input.mouseInside && cursorVisible,
       hover,
@@ -755,6 +758,12 @@ const probe = Object.freeze({
   },
   pressurePlateEvents() {
     return structuredClone(simulation.snapshot().recentPressurePlateEvents ?? []);
+  },
+  breakawayFloors() {
+    return structuredClone(simulation.snapshot().breakawayFloors ?? []);
+  },
+  breakawayFloorEvents() {
+    return structuredClone(simulation.snapshot().recentBreakawayFloorEvents ?? []);
   },
   verticalBody(kind, id) {
     return simulation.resolveSelection({ kind: String(kind), id: Number(id) });

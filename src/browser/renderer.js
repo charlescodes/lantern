@@ -83,6 +83,17 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/** @param {string} from @param {string} to @param {number} amount */
+function blendHex(from, to, amount) {
+  const t = clamp(amount, 0, 1);
+  const source = Number.parseInt(from.slice(1), 16);
+  const target = Number.parseInt(to.slice(1), 16);
+  const channel = (shift) => Math.round(
+    (((source >> shift) & 0xff) * (1 - t)) + (((target >> shift) & 0xff) * t),
+  );
+  return `rgb(${channel(16)} ${channel(8)} ${channel(0)})`;
+}
+
 /** @param {{r:number,g:number,b:number}} color @param {number} [alpha] */
 function cssColor(color, alpha = 1) {
   const r = Math.round(clamp(color.r, 0, 1) * 255);
@@ -320,6 +331,11 @@ export class DebugRenderer {
     const minZ = clamp(Math.floor(topLeft.z) - 1, 0, map.height - 1);
     const maxZ = clamp(Math.ceil(bottomRight.z) + 1, 0, map.height - 1);
     const line = this.camera.viewportLengthToWorld(1);
+    const breakaways = new Map(
+      (snapshot.breakawayFloors ?? [])
+        .filter((floor) => floor.layerId === map.layerId)
+        .map((floor) => [floor.cellIndex, floor]),
+    );
 
     for (let cz = minZ; cz <= maxZ; cz += 1) {
       for (let cx = minX; cx <= maxX; cx += 1) {
@@ -328,12 +344,21 @@ export class DebugRenderer {
           ? map.surface.legend[map.surface.cells[index]]
           : "surface.stone";
         const surfaceDefinition = getPlaceableDefinition(surfaceDefinitionId);
-        context.fillStyle = (cx + cz) % 2 === 0
+        const breakaway = breakaways.get(index);
+        const baseColor = (cx + cz) % 2 === 0
           ? surfaceDefinition?.debug.fill ?? COLORS.floorA
           : surfaceDefinition?.debug.alternateFill ?? COLORS.floorB;
+        context.fillStyle = breakaway?.state === "cracking"
+          ? blendHex(baseColor, "#20252a", breakaway.progress)
+          : baseColor;
         context.fillRect(cx, cz, 1, 1);
-        if (surfaceDefinition?.traits.runtimeKind === "floor-hole") {
-          const apertureWidth = Number(surfaceDefinition.traits.apertureWidth ?? 0.9);
+        if (
+          surfaceDefinition?.traits.runtimeKind === "floor-hole"
+          || breakaway?.state === "open"
+        ) {
+          const apertureWidth = Number(
+            breakaway?.width ?? surfaceDefinition?.traits.apertureWidth ?? 0.9,
+          );
           const inset = (1 - apertureWidth) / 2;
           // The painted cell remains a floor frame; only this central square is
           // an aperture, including when its neighbors are also holes.
