@@ -10,6 +10,7 @@ Lantern `0.9.3` is the current application release. The development runtime is a
 - [Lay of the land in pseudocode](./lay-of-the-land-pseudocode.md) — the current startup, fixed-tick, simulation, combat, AI, presentation, command, and replay flows in one compact trace.
 - [Probe and observability contract](./probe-contract.md) — rules for detached inspection, fixed-tick mutations, bounded diagnostics, and reproducible reports.
 - [Verification guide](./verification.md) — automated checks and the manual M1B traversal route.
+- [Research and inspiration shelf](./references.md) — a curated, non-authoritative bibliography of Nox references, released engines, technical foundations, talks, and later research leads.
 
 ## Soft specifications
 

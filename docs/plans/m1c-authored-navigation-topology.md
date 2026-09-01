@@ -36,6 +36,39 @@ It is not a navmesh, a general planner, or cross-floor omniscience.
 - Elevators remain timer-driven. M1C AI may observe and wait for their state,
   but it never issues `cycleElevator` or `summonElevator` commands.
 
+## Algorithm choice and OpenNox comparison
+
+Lantern does not need a polygon navigation mesh for M1C. Its authored maps are
+already cell-based, actor X/Z remains continuous, and
+`SharedNavigationField`/`DestinationFieldCache` already build reverse,
+incremental Dijkstra cost fields over eight grid neighbors. Cardinal steps cost
+10, diagonal steps cost 14, diagonal corner cutting is rejected, and one field
+can guide every enemy sharing a destination. Dynamic bodies are currently
+resolved later by collision; they do not alter field costs.
+
+The useful name for the M1C architecture is **hierarchical grid navigation**:
+
+1. a small authored graph chooses the next meaningful place, connector, or
+   patrol stop;
+2. the existing layer-local field chooses cells toward that local goal;
+3. ordinary movement, support, and collision execute the next step.
+
+The local OpenNox checkout was inspected at commit
+`b184030e76be2b681a7f6d2bcdef52b091d94b9b`. It provides historical
+inspiration for this separation, not code to copy. Its `Waypoint` stores up to
+32 authored connections, its coarse waypoint traversal writes at most 16 route
+nodes, and its separate detailed path search uses a 23-world-unit grid, a
+bounded 1,024-node work pool, periodic dynamic-object indexing, and special
+cell flags for elevators, shafts, holes, and transporters. Roaming chooses a
+waypoint and asks the detailed pathfinder to reach it. That is a coarse graph
+plus local grid search—not waypoint-only steering and not a polygon navmesh.
+
+Lantern should preserve the pattern but not the historical constants or search
+details. Its shared reverse fields are a better fit for several enemies chasing
+one player, and stable tie breaks must replace OpenNox's randomized neighbor
+rotation. OpenNox is GPL-3.0; keep it as a read-only behavioral reference and do
+not copy source into Lantern.
+
 ## Locked product decisions
 
 - Authors place high-level nodes at cell centers and explicitly connect them.
@@ -99,6 +132,23 @@ and load preserve stable IDs and document ordering.
 V5 and all older supported maps migrate by adding empty navigation arrays and
 ordinals set to one. Saving emits v6 only. Legacy scenario-v3 projection stays
 unchanged because topology has no representation there.
+
+### Elevator grid alignment
+
+The current v5 elevator definition snaps X/Z to tenths, while navigation nodes
+and the destination grid use cell centers. M1C.1 changes newly placed and
+explicitly moved elevators to `cell-center` snapping. Connector commands,
+inspector edits, and probe adapters must share that rule rather than rounding
+through separate paths.
+
+Migration must not silently shift an existing elevator: changing its exact
+deck/aperture location could move riders or alter collision. A migrated
+off-center v5 connector therefore retains its exact X/Z, remains valid, and
+emits a non-blocking `legacy-off-center-connector` authoring diagnostic. Its
+compiled endpoint port records both the containing grid cell used for topology
+and the exact world-space deck center used for boarding. Moving that connector
+in v6 normalizes it to the selected cell center; undo restores its exact prior
+coordinate. New v6 connectors are always centered.
 
 ## Compiled topology
 
@@ -399,3 +449,63 @@ reservations, squad knowledge, cross-floor sound or sight, hidden-target
 tracking, general creature planner, dynamic obstacle topology rebuild, hazard
 cost field, general trigger graph, procedural dungeon generation, networking,
 or simulation-wide ECS/refactor belongs to M1C.
+
+### Later dynamic traversal-cost slice
+
+Fire, water, ice, furniture, crowds, and temporary holes should not be folded
+into M1C merely because they affect movement. The later bounded design should
+keep three distinct inputs:
+
+- **static traversal:** walls, authored apertures, and permanently blocked
+  cells, represented by the existing map revision;
+- **dynamic occupancy:** only sufficiently large or long-lived bodies that can
+  make a cell temporarily impassable, with local collision remaining the
+  fallback for small clutter and other agents;
+- **hazard channels:** sparse per-cell fire, slip, water, or similar costs,
+  transformed by a small set of agent profiles into blocked or weighted cells.
+
+A circular fire patch does not require circular pathfinding. Rasterize the
+circle conservatively into the cells it overlaps, then let the actor's policy
+decide whether those cells are forbidden, expensive, or acceptable. A lethal
+fire can be blocked for a vulnerable creature while a resistant creature uses
+a lower cost; avoid one unique field per actor.
+
+Start that later slice by rebuilding referenced fields from sparse dirty cells
+within the existing global budget. Adopt an incremental repair algorithm such
+as LPA* or D* Lite only if profiling shows repeated full-field rebuilds are the
+actual bottleneck. Crowd avoidance or reservations are a separate local-motion
+problem and must not be presented as global pathfinding.
+
+## Research references
+
+- The broader, non-authoritative [Lantern research and inspiration shelf](../references.md)
+  provides reusable engine, browser, AI, design, and process references. M1C
+  depends only on the sources below.
+- **Direct inspiration:** [OpenNox repository](https://github.com/opennox/opennox),
+  [documentation](https://opennox.github.io/docs/index.html), and
+  [supporting libraries](https://github.com/noxworld-dev/opennox-lib) — local
+  behavioral comparison for authored waypoints, bounded detailed paths, known
+  formats, and special traversal cells; GPL-3.0 reference only.
+- **Foundation:** [Introduction to A*](https://www.redblobgames.com/pathfinding/a-star/introduction.html)
+  and [grid-pathfinding optimizations](https://www.redblobgames.com/pathfinding/grids/algorithms.html)
+  by Amit Patel — graph representation, Dijkstra/A* tradeoffs, distance fields,
+  and reducing a dense grid to meaningful decision points.
+- **Foundation:** [Near Optimal Hierarchical Path-Finding](https://webdocs.cs.ualberta.ca/~mmueller/ps/2004/hpastar.pdf)
+  by Botea, Muller, and Schaeffer — the formal coarse/fine search pattern most
+  analogous to M1C, though Lantern's authored graph is semantic rather than an
+  automatically clustered HPA* abstraction.
+- **Foundation:** [Crowd Pathfinding and Steering Using Flow Field Tiles](https://www.gameaipro.com/GameAIPro/GameAIPro_Chapter23_Crowd_Pathfinding_and_Steering_Using_Flow_Field_Tiles.pdf)
+  by Elijah Emerson — why shared goal fields are effective for many units and
+  how integration and flow layers can be separated.
+- **Comparative inspiration:** [Recast Navigation](https://github.com/recastnavigation/recastnavigation) —
+  the principal polygon-navmesh alternative. Its geometry rasterization,
+  polygon generation, Detour queries, and crowd modules are useful comparison
+  points, but are unnecessary for Lantern's current cell-authored world.
+- **Comparative foundation:** [Godot 2D navigation overview](https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_introduction_2d.html)
+  — a clear industry-facing separation among navmesh regions, arbitrary links,
+  agents, avoidance, and obstacles. In particular, avoidance obstacles do not
+  automatically change global paths.
+- **Future reference:** [D* Lite](https://publications.ri.cmu.edu/d-lite) by
+  Koenig and Likhachev — a
+  later option for repairing similar searches after localized cost changes,
+  not a prerequisite for M1C.
