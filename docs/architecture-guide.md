@@ -1,6 +1,6 @@
 # Lantern Architecture Review and Owner's Guide
 
-> **Review snapshot:** the Lantern 0.8.0 working tree built on commit `2727c2e`, before the human visual/behavioral release gate.
+> **Review snapshot:** post-M1B.4 working tree at `cb98dfa` (application `0.9.3`, recording schema v14, authoring-map v5), reviewed 2026-09-01. Line counts and module boundaries are descriptive, not release contracts.
 >
 > **Purpose:** explain the code as it exists, distinguish strong foundations from accumulating debt, and provide a practical route for reviewing and later refactoring it. This is a living engineering guide, not a frozen release contract. For a control-flow-first view, use the companion [lay of the land in pseudocode](./lay-of-the-land-pseudocode.md).
 
@@ -250,7 +250,7 @@ The right trigger is not “engines should have masks.” The trigger is a concr
 | Bounded resource behavior | Typed pools, ring buffers, cache budgets, broadphase scratch, drop telemetry | Strong |
 | Observability | Snapshots, diagnostics, AI View, probes, timing, event histories | Strong |
 | Low-level algorithm cohesion | Physics helpers, AI geometry, navigation, cache, and broadphase are separately testable | Strong |
-| System modularity | Most integrated systems and state transitions remain in one 5,500-line class | At risk |
+| System modularity | Most integrated systems and state transitions remain in one approximately 10,700-line class | At risk |
 | Pool lifecycle safety | Dense and fast, but the 96-column enemy lifecycle is manually synchronized | At risk |
 | Data-driven content | Fireball and rocks are data-backed; actors, AI profiles, and system dispatch are hard-coded | Mixed |
 | Generic actor extensibility | Player singleton and enemy-specific loops dominate | Early |
@@ -285,7 +285,7 @@ The suite preserves exact replay boundaries, tick timing, candidate ordering, fi
 
 ### 1. `Simulation` has too many reasons to change
 
-At this review point it is over 6,000 lines and owns:
+At this review point it is over 10,000 lines and owns:
 
 - command interpretation and editor actions;
 - encounter spawning;
@@ -365,11 +365,14 @@ If a presentation-only change starts touching `src/sim`, or an AI change starts 
 
 ## Recommended refactoring sequence
 
-Do this after the current schema-v11 movement-sound checkpoint, in behavior-preserving slices. Do not combine it with a new spell, actor type, networking, or perception feature.
+Treat this as a later, behavior-preserving extraction option after the post-M1B
+transition. Do not combine it with M1C topology/navigation work, a new spell,
+an actor type, networking, or perception changes merely because the systems
+share `Simulation` today.
 
 ### Stage 0: freeze the current behavior
 
-- Retain the v2-v11 replay fixtures and broadphase-versus-brute-force oracles.
+- Retain the v2-v14 replay fixtures and broadphase-versus-brute-force oracles.
 - Add a simple import-boundary test for `src/sim`, `src/spells`, and `src/core`.
 - Record representative snapshot fixtures at a few ticks rather than snapshotting every implementation detail everywhere.
 - Keep Canvas2D and Three.js acceptance as separate human gates.

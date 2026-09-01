@@ -5,8 +5,8 @@
 | Status | Working draft |
 | Authority | Non-authoritative soft specification |
 | Last reviewed | 2026-08-07 |
-| Horizon | Feature direction beyond the current 0.9.1 contract; no release assignment |
-| Related current documents | [Platform contract](../platform.md), [architecture guide](../architecture-guide.md), [lay of the land](../lay-of-the-land-pseudocode.md) |
+| Horizon | Feature direction beyond the current 0.9.3 checkpoint; no release assignment |
+| Related current documents | [Product vision](../product-vision.md), [roadmap](../roadmap.md), [platform contract](../platform.md), [architecture guide](../architecture-guide.md), [lay of the land](../lay-of-the-land-pseudocode.md) |
 
 This document formalizes an owner brain dump about Lantern's possible future. It is deliberately broader than an implementation plan and narrower than a promise. Its job is to preserve the character of the desired game, expose architectural pressure early, and provide concrete stories from which small features can be promoted.
 

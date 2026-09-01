@@ -14,6 +14,7 @@ The documentation categories have different jobs:
 | --- | --- | --- |
 | [Current contracts](../README.md#current-contracts) | What behavior and authority boundaries exist now? | Change with the behavior or compatibility boundary. |
 | [Architecture guide](../architecture-guide.md) | How is the current code composed, and where is it under pressure? | Keep aligned with the live tree. |
+| [Current roadmap](../roadmap.md) | What work is ordered next? | Current planning authority; do not use a soft-spec candidate list for active sequencing. |
 | Soft specifications | What experience are we aiming toward, and what might we try? | Revise freely as experiments teach us more. |
 | [Milestone history](../README.md#release-and-milestone-history) | What did a release promise at that point in time? | Keep frozen except for factual corrections. |
 
@@ -75,7 +76,7 @@ Before using a soft specification to change the engine:
 | --- | --- | --- |
 | [Gameplay idea bin](./idea-bin.md) | Seed | Keeps unprioritized mechanics, creatures, traps, spell behavior, and unfinished fragments without turning them into roadmap commitments. |
 | [Emergent co-op simulation north star](./emergent-coop-simulation.md) | Working draft | Captures the desired experience, narrative probes, world layers, AI composition, data residency, co-op shape, portability, and architectural pressure. |
-| [Candidate feature roadmap](./candidate-roadmap.md) | Working draft | Orders small vertical slices that can test the north star without committing versions, dates, or a broad rewrite. |
+| [Candidate feature roadmap](./candidate-roadmap.md) | Retired | Preserves earlier candidate stories; the current roadmap owns active ordering. |
 | [Long-term improvement ledger](./long-term-improvements.md) | Working draft | Records credible future architecture boundaries, their promotion triggers, migration constraints, and acceptance evidence without scheduling them as features. |
 
 ## Template for another soft specification

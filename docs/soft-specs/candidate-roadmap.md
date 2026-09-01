@@ -2,13 +2,16 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Working draft |
+| Status | Retired |
 | Authority | Non-authoritative soft specification |
 | Last reviewed | 2026-08-07 |
-| Scheduling | No dates, release numbers, or commitments |
+| Scheduling | Historical candidate order; no active commitments |
 | Parent direction | [Emergent co-op simulation north star](./emergent-coop-simulation.md) |
 
-This roadmap is a sequence of experiments, not a backlog that must be completed in full. Each slice should create a playable result and prove one or two reusable seams. The next plan may reorder, split, replace, or retire any candidate after inspecting the live tree.
+> **Superseded for active sequencing:** use the [current roadmap](../roadmap.md).
+> This document is retained for its story seeds and earlier design context.
+
+This roadmap was a sequence of experiments, not a backlog that had to be completed in full. Each slice was intended to create a playable result and prove one or two reusable seams.
 
 ## Roadmap principles
 

@@ -1,6 +1,6 @@
 # Lantern: Lay of the Land in Pseudocode
 
-> **Descriptive snapshot:** Lantern 0.9.1 development runtime,
+> **Descriptive snapshot:** Lantern 0.9.3 post-M1B.4 development runtime,
 > snapshot/recording schema v14 and authoring-map v5.
 >
 > This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.

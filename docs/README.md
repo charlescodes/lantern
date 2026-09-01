@@ -1,11 +1,15 @@
 # Lantern Documentation
 
-Lantern `0.9.2` is the current application release. The development runtime is now at snapshot/recording schema v14 and authoring-map v5. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v14 and authoring-map v5. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
+- [Product vision](./product-vision.md) — Lantern's durable game identity and direction; it does not redefine shipped behavior.
+- [Current roadmap](./roadmap.md) — the authoritative ordering for transition work and future milestones.
 - [Architecture review and owner's guide](./architecture-guide.md) — a current code map, plain-language mental model, strengths and drift assessment, review route, and staged refactoring strategy.
 - [Lay of the land in pseudocode](./lay-of-the-land-pseudocode.md) — the current startup, fixed-tick, simulation, combat, AI, presentation, command, and replay flows in one compact trace.
+- [Probe and observability contract](./probe-contract.md) — rules for detached inspection, fixed-tick mutations, bounded diagnostics, and reproducible reports.
+- [Verification guide](./verification.md) — automated checks and the manual M1B traversal route.
 
 ## Soft specifications
 
@@ -14,7 +18,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 - [Soft-specification collection and promotion rules](./soft-specs/README.md) — how brainstorming becomes a candidate, implementation plan, and eventually a proven contract without rewriting milestone history.
 - [Gameplay idea bin](./soft-specs/idea-bin.md) — unprioritized mechanics, monsters, traps, spell behavior, and unfinished sparks kept as non-binding seeds.
 - [Emergent co-op simulation north star](./soft-specs/emergent-coop-simulation.md) — the rat wizard, movable furniture, stealth and sound, elemental surfaces, layered world data, AI composition, CPU/GPU authority, networking shape, portability, and architectural pressure.
-- [Candidate feature roadmap](./soft-specs/candidate-roadmap.md) — small vertical slices from player telekinesis through the enchanted rat, sound, elemental contact, actor composition, co-op authority, and larger-world experiments.
+- [Retired candidate feature roadmap](./soft-specs/candidate-roadmap.md) — preserved historical ordering and idea seeds; use the current roadmap for active sequencing.
 - [Long-term improvement ledger](./soft-specs/long-term-improvements.md) — trigger-driven architecture work, beginning with moving visual particles and lighting behind a client-effect event boundary before authoritative multiplayer.
 
 ## Current contracts
@@ -42,6 +46,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 - [0.9.0 Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) — anonymous projectile and explosion clues, deterministic priority arbitration and search, schema-v9 replay, and frozen schema-v8 perception.
 - [0.9.1 Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) — multi-layer map authoring, semantic history, holes, elevators, falling, jumping, pressure plates, schema-v12 replay, and authoring-map v5.
 - [0.9.2 Elevator Spell Impacts](./milestones/0.9.2-elevator-spell-impacts.md) — Fireballs hit elevator decks and lower-floor shafts under schema-v13 replay while schema v12 remains frozen.
+- [0.9.3 M1B vertical traversal closure](./milestones/0.9.3-m1b-vertical-traversal-closure.md) — formal application closure for M1B.1–M1B.4; schema v14 adds breakaway floors while authoring-map v5 remains unchanged.
 - [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
 
 ## Open defects
@@ -71,12 +76,17 @@ These documents preserve future intent and candidate experiments. They are mutab
 | 0.9.0 | [Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) | Anonymous Fireball sight/hearing clues, priority arbitration, deterministic investigation, and schema v9 |
 | 0.9.1 | [Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) | Map-authoring v5, multi-floor vertical bodies, holes, autonomous elevators, jumping, plates, and schema v12 |
 | 0.9.2 | [Elevator Spell Impacts](./milestones/0.9.2-elevator-spell-impacts.md) | Layer-local Fireball impacts on elevator decks and lower shafts, with schema v13 replay |
+| 0.9.3 | [M1B vertical traversal closure](./milestones/0.9.3-m1b-vertical-traversal-closure.md) | Formal closure of M1B.1–M1B.4 under schema v14; no authoring-map migration |
+
+## Historical context
+
+- [Post-M1B.4 ChatGPT handoff](./archive/handoffs/2026-08-30-post-m1b4-chatgpt-handoff.md) — archived planning context. It is not current authority; code, tests, current contracts, and the roadmap take precedence.
 
 ## Version boundaries
 
 These identifiers evolve independently:
 
-- Application/package release: `0.9.2`.
+- Application/package release: `0.9.3`.
 - Snapshot and command-recording schema: v14.
 - Authoring-map schema: `lantern-authoring-map` v5; v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
 - Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the schema-v14 recording compatibility projection.
