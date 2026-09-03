@@ -13,7 +13,7 @@ The immediate goal is a trusted post-M1B.4 baseline, not new gameplay.
 | T.1 | Canonical documentation foundation and handoff archive | Complete; documentation only. |
 | T.2 | Probe and verification baseline | Complete; strengthened existing canonical docs without a parallel runtime probe system. |
 | T.3 | Formal M1B / `0.9.3` closure | Complete; application/package bump only, preserving schema v14 and authoring-map v5. |
-| T.4 | [Decision-complete M1C plan](./plans/m1c-authored-navigation-topology.md) | Complete; no feature implementation. |
+| T.4 | [Implementation-ready M1C plan](./plans/m1c-authored-navigation-topology.md) | Complete; 14 bounded work packets, no feature implementation. |
 
 ## M1C — authored navigation topology
 
