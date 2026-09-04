@@ -11,6 +11,7 @@ import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
 import { createPresentation } from "./presentation/factory.js";
+import { createNavigationTopologyView } from "./presentation/navigation_topology_view.js";
 import {
   focusCameraOnPlayer,
   syncPlayerCamera,
@@ -167,6 +168,14 @@ const runtime = new FixedStepRuntime({
     const presentationSnapshot = mode === "edit" && snapshot.editorMap
       ? { ...snapshot, map: snapshot.editorMap }
       : snapshot;
+    const navigationTopologySnapshot = developerToolsOpen
+      ? simulation.navigationTopologySnapshot()
+      : null;
+    const navigationTopology = createNavigationTopologyView({
+      topology: navigationTopologySnapshot,
+      editor: editorView,
+      developerToolsOpen,
+    });
     presentation.render(presentationSnapshot, alpha, {
       mouseWorld: input.mouseWorld,
       mouseInside: input.mouseInside && cursorVisible,
@@ -176,10 +185,16 @@ const runtime = new FixedStepRuntime({
       editorTool: editorView?.selectedDefinitionId ?? "structure.wall",
       placementValid: editorView?.placementPreview?.valid ?? true,
       authoringEditor: editorView,
+      navigationTopology,
       sightFrame,
       developerToolsOpen,
     });
-    aiView?.update(snapshot, alpha, sightFrame, developerToolsOpen);
+    aiView?.update(
+      navigationTopologySnapshot ? { ...snapshot, navigationTopology: navigationTopologySnapshot } : snapshot,
+      alpha,
+      sightFrame,
+      developerToolsOpen,
+    );
     const currentPresentationDiagnostics = presentationDiagnostics();
     ui.update(snapshot, metrics, {
       mouseWorld: input.mouseWorld,
@@ -254,6 +269,12 @@ const LAYER_SCOPED_AUTHORING_ACTIONS = new Set([
   "removeInstance",
   "updateInstanceTransform",
   "updateInstanceProperties",
+  "placeNavigationNode",
+  "moveNavigationNode",
+  "removeNavigationNode",
+  "updateNavigationNode",
+  "placeNavigationLink",
+  "removeNavigationLink",
 ]);
 
 /** @param {Record<string,unknown>} action */
@@ -550,6 +571,14 @@ authoringInspector = new AuthoringInspector({
   },
   onDeleteConnector: (connectorId) => {
     const ok = authoringEditor.removeConnector(connectorId);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onUpdateNavigationNode: (nodeId, changes) => {
+    const ok = authoringEditor.updateNavigationNode(nodeId, changes);
+    return { ok, message: authoringEditor.snapshot().status.message };
+  },
+  onDeleteNavigationNode: (nodeId) => {
+    const ok = authoringEditor.removeNavigationNode(nodeId);
     return { ok, message: authoringEditor.snapshot().status.message };
   },
 });
@@ -1055,6 +1084,8 @@ const probe = Object.freeze({
           "placeConnector",
           "removeConnector",
           "updateConnector",
+          "placeNavigationLink",
+          "removeNavigationLink",
         ]).has(String(action.type))
       ) {
         return commitAuthoringAction(action).ok;

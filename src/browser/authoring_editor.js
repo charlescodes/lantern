@@ -9,6 +9,8 @@ import {
   occupiedCellsForTarget,
   pickAuthoredConnector,
   pickAuthoredInstance,
+  pickNavigationEndpoint,
+  pickNavigationNode,
   pickAuthoringTarget,
   sampleAuthoredDefinition,
 } from "../authoring/editor_interaction.js";
@@ -69,6 +71,10 @@ const LAYER_SCOPED_ACTIONS = new Set([
   "removeInstance",
   "updateInstanceTransform",
   "updateInstanceProperties",
+  "placeNavigationNode",
+  "moveNavigationNode",
+  "removeNavigationNode",
+  "updateNavigationNode",
 ]);
 
 export class AuthoringEditorController {
@@ -158,7 +164,7 @@ export class AuthoringEditorController {
     if (!AUTHORING_CHANNELS.includes(channel)) return false;
     this.cancel();
     this.state.setChannel(channel);
-    if (this.state.activeTool === "paint") {
+    if (channel !== "navigation" && this.state.activeTool === "paint") {
       const selected = getPlaceableDefinition(this.state.selectedDefinitionId);
       if (authoringChannelForDefinition(selected) !== channel) {
         const fallback = listPlaceableDefinitions().find(
@@ -274,6 +280,7 @@ export class AuthoringEditorController {
     this.pointer = { x: Number(x), z: Number(z), inside: Boolean(inside) };
     if (this.gesture?.kind === "stroke") this.#addStrokeCell(x, z);
     if (this.gesture?.kind === "move") this.#updateMoveCandidate(x, z);
+    if (this.gesture?.kind === "moveNavigationNode") this.#updateNavigationMoveCandidate(x, z);
     this.#refreshHoverAndPreview();
   }
 
@@ -289,7 +296,17 @@ export class AuthoringEditorController {
     this.pointerMove(x, z, true);
     const authoring = this.currentSnapshot.authoring;
     const effectiveTool = button === 2 ? "erase" : this.state.activeTool;
-    const target = pickAuthoringTarget(authoring, x, z);
+    const navigationTarget = pickNavigationEndpoint(authoring, x, z);
+    const target = this.state.activeChannel === "navigation"
+      ? navigationTarget ?? pickAuthoringTarget(authoring, x, z)
+      : pickAuthoringTarget(authoring, x, z);
+    if (effectiveTool === "link") {
+      if (!navigationTarget) {
+        this.#message("Choose a navigation node or visible connector endpoint", false);
+        return false;
+      }
+      return this.#linkEndpoint(navigationTarget);
+    }
     if (effectiveTool === "select") {
       this.state.setSelectedTarget(target);
       if (button === 0 && target?.kind === "instance") {
@@ -315,6 +332,19 @@ export class AuthoringEditorController {
           };
         }
       }
+      if (button === 0 && target?.kind === "navigation-node") {
+        const node = this.#navigationNode(target.nodeId);
+        if (node) {
+          this.gesture = {
+            kind: "moveNavigationNode",
+            button,
+            nodeId: node.id,
+            original: { cx: node.cx, cz: node.cz },
+            candidate: { cx: node.cx, cz: node.cz },
+            moved: false,
+          };
+        }
+      }
       this.#refreshHoverAndPreview();
       return true;
     }
@@ -325,6 +355,14 @@ export class AuthoringEditorController {
     }
 
     if (effectiveTool === "erase") {
+      if (this.state.activeChannel === "navigation") {
+        const picked = pickNavigationNode(authoring, x, z);
+        this.gesture = picked
+          ? { kind: "removeNavigationNode", button, nodeId: picked.nodeId }
+          : null;
+        this.state.setPlacementPreview(null);
+        return Boolean(picked);
+      }
       if (this.state.activeChannel === "connector") {
         const picked = pickAuthoredConnector(authoring, x, z);
         this.gesture = picked
@@ -356,6 +394,13 @@ export class AuthoringEditorController {
       return true;
     }
 
+    if (this.state.activeChannel === "navigation") {
+      const cell = authoringCellAt(authoring, x, z);
+      if (!cell) return false;
+      this.gesture = { kind: "placeNavigationNode", button, cell: { cx: cell.x, cz: cell.z } };
+      this.#refreshHoverAndPreview();
+      return true;
+    }
     const definition = getPlaceableDefinition(this.state.selectedDefinitionId);
     if (!definition) return false;
     const channel = authoringChannelForDefinition(definition);
@@ -410,12 +455,24 @@ export class AuthoringEditorController {
         );
       }
     }
+    if (gesture.kind === "placeNavigationNode") {
+      result = this.placeNavigationNode(gesture.cell.cx, gesture.cell.cz);
+    }
+    if (gesture.kind === "removeNavigationNode") result = this.removeNavigationNode(gesture.nodeId);
+    if (gesture.kind === "moveNavigationNode") {
+      const moved = Boolean(options.moved) || gesture.moved;
+      result = !moved || this.moveNavigationNode(
+        gesture.nodeId,
+        gesture.candidate.cx,
+        gesture.candidate.cz,
+      );
+    }
     this.#refreshHoverAndPreview();
     return result;
   }
 
   cancel() {
-    const hadGesture = Boolean(this.gesture);
+    const hadGesture = Boolean(this.gesture) || this.state.cancelPendingLink();
     this.gesture = null;
     this.state.setPlacementPreview(null);
     return hadGesture;
@@ -500,6 +557,49 @@ export class AuthoringEditorController {
     return result;
   }
 
+  /** @param {number} cx @param {number} cz @param {boolean} [patrol] */
+  placeNavigationNode(cx, cz, patrol = false) {
+    const before = new Set((this.currentSnapshot.authoring.navigationNodes ?? []).map((node) => node.id));
+    const result = this.#commit({
+      type: "placeNavigationNode", cx: Math.floor(cx), cz: Math.floor(cz), patrol,
+    });
+    if (!result) return false;
+    const node = (this.currentSnapshot.authoring.navigationNodes ?? []).find((candidate) => !before.has(candidate.id));
+    if (node) this.state.setSelectedTarget({ kind: "navigation-node", layerId: node.layerId, nodeId: node.id });
+    this.#message("Placed navigation node", true);
+    return true;
+  }
+
+  /** @param {string} nodeId @param {number} cx @param {number} cz */
+  moveNavigationNode(nodeId, cx, cz) {
+    const node = this.#navigationNode(nodeId);
+    if (!node) return false;
+    const result = this.#commit({ type: "moveNavigationNode", nodeId, cx: Math.floor(cx), cz: Math.floor(cz) });
+    if (result) {
+      this.state.setSelectedTarget({ kind: "navigation-node", layerId: node.layerId, nodeId });
+      this.#message(`Moved ${nodeId}`, true);
+    }
+    return result;
+  }
+
+  /** @param {string} nodeId @param {Record<string, unknown>} changes */
+  updateNavigationNode(nodeId, changes) {
+    if (!this.#navigationNode(nodeId)) return false;
+    const result = this.#commit({ type: "updateNavigationNode", nodeId, changes });
+    if (result) this.#message(`Updated ${nodeId}`, true);
+    return result;
+  }
+
+  /** @param {string} nodeId */
+  removeNavigationNode(nodeId) {
+    if (!this.#navigationNode(nodeId)) return false;
+    const result = this.#commit({ type: "removeNavigationNode", nodeId });
+    if (result && this.state.selectedTarget?.kind === "navigation-node"
+      && this.state.selectedTarget.nodeId === nodeId) this.state.setSelectedTarget(null);
+    if (result) this.#message(`Removed ${nodeId}`, true);
+    return result;
+  }
+
   /** @param {string} connectorId */
   removeConnector(connectorId) {
     if (!this.#connector(connectorId)) return false;
@@ -577,7 +677,10 @@ export class AuthoringEditorController {
 
   /** @param {number} x @param {number} z */
   selectAt(x, z) {
-    const target = pickAuthoringTarget(this.currentSnapshot.authoring, x, z);
+    const target = this.state.activeChannel === "navigation"
+      ? pickNavigationEndpoint(this.currentSnapshot.authoring, x, z)
+        ?? pickAuthoringTarget(this.currentSnapshot.authoring, x, z)
+      : pickAuthoringTarget(this.currentSnapshot.authoring, x, z);
     this.state.setSelectedTarget(target);
     return cloneTarget(target);
   }
@@ -627,8 +730,8 @@ export class AuthoringEditorController {
             label: hoveredConnectorDefinition?.label ?? hoveredConnector.definitionId,
           }
           : null,
-      dragging: this.gesture?.kind === "move",
-      pendingAction: this.gesture?.kind ?? null,
+      dragging: this.gesture?.kind === "move" || this.gesture?.kind === "moveNavigationNode",
+      pendingAction: this.gesture?.kind ?? (this.state.pendingLinkStart ? "link" : null),
       history,
       status: {
         message: this.lastMessage,
@@ -653,6 +756,22 @@ export class AuthoringEditorController {
       });
       return;
     }
+    if (this.gesture?.kind === "moveNavigationNode") {
+      this.state.setPlacementPreview({
+        kind: "move-navigation-node",
+        valid: true,
+        occupiedCells: [{ ...this.gesture.candidate }],
+      });
+      return;
+    }
+    if (this.gesture?.kind === "placeNavigationNode") {
+      this.state.setPlacementPreview({
+        kind: "place-navigation-node",
+        valid: true,
+        occupiedCells: [{ ...this.gesture.cell }],
+      });
+      return;
+    }
     if (this.gesture?.kind === "stroke") {
       this.state.setPlacementPreview({
         kind: this.gesture.operation,
@@ -666,6 +785,15 @@ export class AuthoringEditorController {
       return;
     }
     const definition = getPlaceableDefinition(this.state.selectedDefinitionId);
+    if (this.state.activeTool === "paint" && this.state.activeChannel === "navigation" && this.pointer.inside) {
+      const cell = authoringCellAt(authoring, this.pointer.x, this.pointer.z);
+      this.state.setPlacementPreview(cell ? {
+        kind: "place-navigation-node",
+        valid: true,
+        occupiedCells: [{ cx: cell.x, cz: cell.z }],
+      } : null);
+      return;
+    }
     if (
       this.state.activeTool !== "paint"
       || (definition?.placementTarget !== "instance" && definition?.placementTarget !== "connector")
@@ -756,6 +884,17 @@ export class AuthoringEditorController {
     this.gesture.candidate.x = snapped.x;
     this.gesture.candidate.z = snapped.z;
     this.#validateMoveCandidate();
+  }
+
+  /** @param {number} x @param {number} z */
+  #updateNavigationMoveCandidate(x, z) {
+    if (this.gesture?.kind !== "moveNavigationNode") return;
+    const cell = authoringCellAt(this.currentSnapshot.authoring, x, z);
+    if (!cell) return;
+    this.gesture.candidate = { cx: cell.x, cz: cell.z };
+    this.gesture.moved = this.gesture.moved
+      || cell.x !== this.gesture.original.cx
+      || cell.z !== this.gesture.original.cz;
   }
 
   #validateMoveCandidate() {
@@ -854,6 +993,41 @@ export class AuthoringEditorController {
     return true;
   }
 
+  /** @param {Record<string, any>} endpoint */
+  #linkEndpoint(endpoint) {
+    const start = this.state.pendingLinkStart;
+    if (!start) {
+      this.state.setPendingLinkStart(endpoint);
+      this.state.setSelectedTarget(endpoint);
+      this.#message("Link start selected; choose a second endpoint", true);
+      return true;
+    }
+    this.state.cancelPendingLink();
+    if (start.layerId !== endpoint.layerId) {
+      this.#message("Authored navigation links must remain on one layer", false);
+      return false;
+    }
+    const a = this.#linkEndpointPayload(start);
+    const b = this.#linkEndpointPayload(endpoint);
+    if (JSON.stringify(a) === JSON.stringify(b)) {
+      this.#message("Choose a different navigation endpoint", false);
+      return false;
+    }
+    const result = this.#commit({ type: "placeNavigationLink", a, b });
+    if (result) {
+      this.state.setSelectedTarget(endpoint);
+      this.#message("Placed navigation link", true);
+    }
+    return result;
+  }
+
+  /** @param {Record<string, any>} endpoint */
+  #linkEndpointPayload(endpoint) {
+    return endpoint.kind === "navigation-node"
+      ? { kind: "node", nodeId: endpoint.nodeId }
+      : { kind: "connector-endpoint", connectorId: endpoint.connectorId, stop: endpoint.stop };
+  }
+
   /** @param {Record<string,unknown>} action */
   #commit(action) {
     const scopedAction = LAYER_SCOPED_ACTIONS.has(String(action.type))
@@ -896,6 +1070,13 @@ export class AuthoringEditorController {
   #instance(instanceId) {
     return this.currentSnapshot.authoring.instances.find(
       (instance) => instance.id === instanceId,
+    ) ?? null;
+  }
+
+  /** @param {string} nodeId */
+  #navigationNode(nodeId) {
+    return (this.currentSnapshot.authoring.navigationNodes ?? []).find(
+      (node) => node.id === nodeId,
     ) ?? null;
   }
 

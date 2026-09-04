@@ -10,8 +10,8 @@ import {
   pointHitsInstanceExtent,
 } from "./footprint.js";
 
-export const EDITOR_TOOLS = Object.freeze(["select", "paint", "erase", "eyedropper"]);
-export const AUTHORING_CHANNELS = Object.freeze(["surface", "structure", "instance", "connector"]);
+export const EDITOR_TOOLS = Object.freeze(["select", "paint", "erase", "eyedropper", "link"]);
+export const AUTHORING_CHANNELS = Object.freeze(["surface", "structure", "instance", "connector", "navigation"]);
 
 /** @param {Record<string, any>} definition */
 export function authoringChannelForDefinition(definition) {
@@ -89,6 +89,48 @@ export function pickAuthoredConnector(authoring, worldX, worldZ) {
 }
 
 /**
+ * Picks an authored navigation node on the active editor layer. Nodes are
+ * intentionally cell anchored: pointer and inspector edits share that same
+ * integer cell coordinate contract.
+ */
+export function pickNavigationNode(authoring, worldX, worldZ) {
+  const cell = authoringCellAt(authoring, worldX, worldZ);
+  if (!cell) return null;
+  const node = (authoring.navigationNodes ?? []).find((candidate) => (
+    candidate.layerId === authoring.activeLayer.id
+    && candidate.cx === cell.x
+    && candidate.cz === cell.z
+  ));
+  return node
+    ? { kind: "navigation-node", layerId: node.layerId, nodeId: node.id }
+    : null;
+}
+
+/**
+ * Picks the visible stop port for a two-stop connector. This exposes authored
+ * graph endpoints without coupling the editor to a body's runtime layer.
+ */
+export function pickConnectorEndpoint(authoring, worldX, worldZ) {
+  const connector = pickAuthoredConnector(authoring, worldX, worldZ);
+  if (!connector) return null;
+  const source = (authoring.connectors ?? []).find((candidate) => candidate.id === connector.connectorId);
+  if (!source) return null;
+  const stop = source.lowerLayerId === authoring.activeLayer.id ? "lower" : "upper";
+  return {
+    kind: "connector-endpoint",
+    layerId: authoring.activeLayer.id,
+    connectorId: source.id,
+    stop,
+  };
+}
+
+/** @param {Record<string, any>} authoring @param {number} worldX @param {number} worldZ */
+export function pickNavigationEndpoint(authoring, worldX, worldZ) {
+  return pickNavigationNode(authoring, worldX, worldZ)
+    ?? pickConnectorEndpoint(authoring, worldX, worldZ);
+}
+
+/**
  * @param {Record<string, any>} authoring
  * @param {number} worldX
  * @param {number} worldZ
@@ -123,6 +165,27 @@ export function reconcileAuthoringTarget(authoring, target) {
       ? { kind: "connector", layerId: target.layerId, connectorId: target.connectorId }
       : null;
   }
+  if (target.kind === "navigation-node") {
+    const node = (authoring.navigationNodes ?? []).find((candidate) => candidate.id === target.nodeId);
+    return node && node.layerId === target.layerId
+      ? { kind: "navigation-node", layerId: target.layerId, nodeId: node.id }
+      : null;
+  }
+  if (target.kind === "connector-endpoint") {
+    const connector = (authoring.connectors ?? []).find((candidate) => candidate.id === target.connectorId);
+    const visible = connector && (
+      (target.stop === "lower" && connector.lowerLayerId === target.layerId)
+      || (target.stop === "upper" && connector.upperLayerId === target.layerId)
+    );
+    return visible
+      ? {
+        kind: "connector-endpoint",
+        layerId: target.layerId,
+        connectorId: target.connectorId,
+        stop: target.stop,
+      }
+      : null;
+  }
   if (target.kind === "cell") {
     const layer = authoring.activeLayer;
     return Number.isInteger(target.x)
@@ -143,6 +206,16 @@ export function occupiedCellsForTarget(authoring, target) {
   if (!reconciled) return [];
   if (reconciled.kind === "cell") return [{ cx: reconciled.x, cz: reconciled.z }];
   if (reconciled.kind === "connector") {
+    const connector = (authoring.connectors ?? []).find(
+      (candidate) => candidate.id === reconciled.connectorId,
+    );
+    return connector ? [{ cx: Math.floor(connector.x), cz: Math.floor(connector.z) }] : [];
+  }
+  if (reconciled.kind === "navigation-node") {
+    const node = (authoring.navigationNodes ?? []).find((candidate) => candidate.id === reconciled.nodeId);
+    return node ? [{ cx: node.cx, cz: node.cz }] : [];
+  }
+  if (reconciled.kind === "connector-endpoint") {
     const connector = (authoring.connectors ?? []).find(
       (candidate) => candidate.id === reconciled.connectorId,
     );
@@ -234,6 +307,7 @@ export class EditorInteractionState {
     this.previewRotation = 0;
     this.placementPreview = null;
     this.showAuthoringExtents = false;
+    this.pendingLinkStart = null;
     this.setDefinition(options.selectedDefinitionId ?? "structure.wall");
   }
 
@@ -242,6 +316,7 @@ export class EditorInteractionState {
     if (!EDITOR_TOOLS.includes(tool)) throw new RangeError(`Unknown editor tool "${tool}"`);
     this.activeTool = tool;
     this.placementPreview = null;
+    if (tool !== "link") this.pendingLinkStart = null;
   }
 
   /** @param {string} channel */
@@ -251,6 +326,7 @@ export class EditorInteractionState {
     }
     this.activeChannel = channel;
     this.placementPreview = null;
+    if (channel !== "navigation") this.pendingLinkStart = null;
   }
 
   /** @param {string} definitionId */
@@ -283,6 +359,17 @@ export class EditorInteractionState {
     this.selectedTarget = target ? { ...target } : null;
   }
 
+  /** @param {Record<string, any>|null} endpoint */
+  setPendingLinkStart(endpoint) {
+    this.pendingLinkStart = endpoint ? { ...endpoint } : null;
+  }
+
+  cancelPendingLink() {
+    const pending = Boolean(this.pendingLinkStart);
+    this.pendingLinkStart = null;
+    return pending;
+  }
+
   /** @param {Record<string, any>|null} preview */
   setPlacementPreview(preview) {
     this.placementPreview = preview ? JSON.parse(JSON.stringify(preview)) : null;
@@ -292,6 +379,7 @@ export class EditorInteractionState {
   reconcile(authoring) {
     this.hoveredTarget = reconcileAuthoringTarget(authoring, this.hoveredTarget);
     this.selectedTarget = reconcileAuthoringTarget(authoring, this.selectedTarget);
+    this.pendingLinkStart = reconcileAuthoringTarget(authoring, this.pendingLinkStart);
   }
 
   /** @param {boolean} value */
@@ -306,6 +394,7 @@ export class EditorInteractionState {
       selectedDefinitionId: this.selectedDefinitionId,
       hoveredTarget: this.hoveredTarget ? { ...this.hoveredTarget } : null,
       selectedTarget: this.selectedTarget ? { ...this.selectedTarget } : null,
+      pendingLinkStart: this.pendingLinkStart ? { ...this.pendingLinkStart } : null,
       previewRotation: this.previewRotation,
       placementPreview: this.placementPreview
         ? JSON.parse(JSON.stringify(this.placementPreview))

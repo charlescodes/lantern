@@ -10159,6 +10159,12 @@ export class Simulation {
           collisionCells: mapping.collisionCells.map((cell) => ({ ...cell })),
         })),
         connectors: this.scenario.connectors.map((connector) => ({ ...connector })),
+        navigationNodes: this.scenario.authoringMap.navigationNodes.map((node) => ({ ...node })),
+        navigationLinks: this.scenario.authoringMap.navigationLinks.map((link) => ({
+          ...link,
+          a: { ...link.a },
+          b: { ...link.b },
+        })),
         connectorEndpoints: this.scenario.compiledLayer(this.scenario.activeLayer.id)
           ?.connectorEndpoints.map((endpoint) => ({ ...endpoint })) ?? [],
       },

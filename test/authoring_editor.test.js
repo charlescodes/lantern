@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   eraseStructure,
+  createLayer,
   paintStructure,
   paintSurface,
+  placeElevatorConnector,
   placeInstance,
   removeInstance,
   updateInstanceTransform,
@@ -19,6 +21,7 @@ import { getOccupiedCells, getRuntimeBodyTransform } from "../src/authoring/foot
 import { compileAuthoringMap } from "../src/authoring/map_compiler.js";
 import { validateInstancePlacement } from "../src/authoring/placement_validation.js";
 import { AuthoringEditorController } from "../src/browser/authoring_editor.js";
+import { commandFromAuthoringAction } from "../src/authoring/authoring_history.js";
 import {
   ENEMY_AI_PROFILE_NONE,
   GAMEPLAY_PROFILE_PRE_COMBAT,
@@ -62,7 +65,8 @@ function controllerFor(simulation) {
       simulation.validateInstanceTransform(definitionId, x, z, rotation, ignoreId)
     ),
     commit: (action) => {
-      simulation.tick(action);
+      const command = commandFromAuthoringAction(simulation.authoringDocument(), action);
+      simulation.tick({ type: "applyAuthoringCommand", command });
       return {
         ok: !simulation.lastError,
         error: simulation.lastError,
@@ -136,6 +140,66 @@ test("overlapping authoring extents pick deterministically by placement order an
     z: 2,
   });
   assert.equal(pickAuthoringTarget(authoring, -0.1, 2.5), null);
+});
+
+test("navigation editor stamps, moves, and links nodes as separate semantic commands", () => {
+  const simulation = simulationFor();
+  const editor = controllerFor(simulation);
+  assert.equal(editor.setChannel("navigation"), true);
+  editor.pointerDown(0, 2.5, 2.5);
+  assert.equal(editor.pointerUp(0, 2.5, 2.5), true);
+  editor.pointerDown(0, 4.5, 2.5);
+  assert.equal(editor.pointerUp(0, 4.5, 2.5), true);
+  let nodes = simulation.authoringSnapshot().navigationNodes;
+  assert.equal(nodes.length, 2);
+
+  editor.setTool("select");
+  editor.pointerDown(0, 2.5, 2.5);
+  editor.pointerMove(3.5, 2.5);
+  assert.equal(editor.pointerUp(0, 3.5, 2.5, { moved: true }), true);
+  nodes = simulation.authoringSnapshot().navigationNodes;
+  assert.deepEqual(nodes[0] && { cx: nodes[0].cx, cz: nodes[0].cz }, { cx: 3, cz: 2 });
+
+  editor.setTool("link");
+  const savedBeforePartialLink = simulation.saveMap();
+  assert.equal(editor.pointerDown(0, 3.5, 2.5), true);
+  assert.equal(simulation.saveMap(), savedBeforePartialLink);
+  assert.equal(editor.snapshot().history.transactionActive, false);
+  assert.equal(editor.pointerDown(0, 4.5, 2.5), true);
+  assert.equal(simulation.authoringSnapshot().navigationLinks.length, 1);
+  assert.equal(editor.cancel(), false);
+});
+
+test("navigation node picking is layer-authored and does not consult runtime body layers", () => {
+  const authoring = simulationFor().authoringSnapshot();
+  authoring.navigationNodes = [{
+    id: "navigation-node-0001", layerId: authoring.activeLayer.id, cx: 3, cz: 3, patrol: false,
+  }];
+  const state = new EditorInteractionState();
+  state.setChannel("navigation");
+  assert.deepEqual(
+    pickAuthoringTarget(authoring, 3.5, 3.5),
+    { kind: "cell", layerId: authoring.activeLayer.id, x: 3, z: 3 },
+  );
+  assert.equal(state.snapshot().activeChannel, "navigation");
+});
+
+test("link tool accepts a visible connector endpoint without changing the runtime layer", () => {
+  const upper = createLayer(sourceDocument(), "ground", "above", { baseY: 3 });
+  const elevator = placeElevatorConnector(upper.document, 5.5, 4.5, {
+    lowerLayerId: "ground", upperLayerId: upper.layerId,
+  });
+  const simulation = simulationFor(elevator.document);
+  const editor = controllerFor(simulation);
+  editor.setChannel("navigation");
+  editor.pointerDown(0, 2.5, 2.5);
+  assert.equal(editor.pointerUp(0, 2.5, 2.5), true);
+  const runtimeLayerBefore = simulation.snapshot().runtimeLayerId;
+  editor.setTool("link");
+  assert.equal(editor.pointerDown(0, 2.5, 2.5), true);
+  assert.equal(editor.pointerDown(0, 5.5, 4.5), true);
+  assert.equal(simulation.authoringSnapshot().navigationLinks.length, 1);
+  assert.equal(simulation.snapshot().runtimeLayerId, runtimeLayerBefore);
 });
 
 test("moving and rotating an instance preserves its stable ID through save/load", () => {

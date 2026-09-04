@@ -142,6 +142,7 @@ export class MapPalette {
       ["paint", "Paint / stamp"],
       ["erase", "Erase"],
       ["eyedropper", "Eyedropper"],
+      ["link", "Link endpoints"],
     ]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -162,6 +163,7 @@ export class MapPalette {
       ["structure", "Structure"],
       ["instance", "Instances"],
       ["connector", "Connectors"],
+      ["navigation", "Navigation"],
     ]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -291,8 +293,11 @@ export class MapPalette {
     this.root.dataset.activeTool = this.activeTool;
     this.root.dataset.activeChannel = this.activeChannel;
     const selected = this.definitions.find((definition) => definition.id === this.selectedId);
-    this.selectionOutput.value = selected?.label ?? "None";
-    this.selectionOutput.textContent = selected?.label ?? "None";
+    const selectionLabel = this.activeChannel === "navigation"
+      ? "Navigation node"
+      : selected?.label ?? "None";
+    this.selectionOutput.value = selectionLabel;
+    this.selectionOutput.textContent = selectionLabel;
     this.toolOutput.value = this.activeTool;
     this.toolOutput.textContent = this.activeTool;
     this.channelOutput.value = this.activeChannel;

@@ -140,8 +140,11 @@ test("AI View model is generic enough for future friendly and critter collection
 
 test("AI View prints tactical truth without mutating the snapshot", () => {
   const value = snapshot();
+  value.navigationTopology = { revision: 9 };
   const before = structuredClone(value);
-  const mob = value.enemies[0];
+  const mob = { ...value.enemies[0], navigationRoute: {
+    code: "disconnected", phase: "NONE", sourceAnchor: "node:a", targetAnchor: "node:b", evidence: "none",
+  } };
   const text = formatAiMobDetails(value, mob, false);
   assert.match(text, /profile\s+tactical-wizard-v1/);
   assert.match(text, /player sight hidden \(AI View still shown\)/);
@@ -150,6 +153,8 @@ test("AI View prints tactical truth without mutating the snapshot", () => {
   assert.match(text, /aim\s+4\.5,6\.5 · lead 0\.375s/);
   assert.match(text, /threat\s+effect #77 · projectile #9 · dodge 12t/);
   assert.match(text, /field\s+slot — · none · v3 · building · stale/);
+  assert.match(text, /topology\s+revision 9 · route disconnected · phase NONE/);
+  assert.match(text, /anchors\s+source node:a · target node:b · evidence none/);
   buildAiViewFrame(value, 0.25, {
     mode: AI_VIEW_MODE.all,
     selectedKey: aiMobKey(mob),

@@ -2180,8 +2180,10 @@ export class ThreePresentation {
     const editor = view.authoringEditor ?? null;
     this.#updateAuthoringOverlays(
       snapshot,
-      editor,
-      view.mode === "edit" && view.developerToolsOpen !== false,
+      view.mode === "edit" ? editor : null,
+      (view.mode === "edit" || view.navigationTopology?.visible)
+        && view.developerToolsOpen !== false,
+      view.navigationTopology,
     );
     const editing = view.mouseInside && view.mode === "edit" && !editor;
     const definition = getPlaceableDefinition(view.editorTool);
@@ -2218,11 +2220,11 @@ export class ThreePresentation {
    * @param {Record<string,any>|null} editor
    * @param {boolean} visible
    */
-  #updateAuthoringOverlays(snapshot, editor, visible) {
+  #updateAuthoringOverlays(snapshot, editor, visible, topology = null) {
     const mesh = this.authoringOverlayMesh;
     if (!mesh) return;
-    mesh.visible = visible && Boolean(editor);
-    if (!mesh.visible || !editor) {
+    mesh.visible = visible && Boolean(editor || topology?.visible);
+    if (!mesh.visible) {
       publishInstancedPool(mesh, 0, { instanceColors: true });
       return;
     }
@@ -2239,7 +2241,7 @@ export class ThreePresentation {
         count += 1;
       }
     };
-    if (editor.referenceLayer) {
+    if (editor?.referenceLayer) {
       const reference = editor.referenceLayer;
       const referenceCells = [];
       for (let cx = 0; cx < reference.width; cx += 1) {
@@ -2262,28 +2264,50 @@ export class ThreePresentation {
       }
       addCells(referenceCells, 0x78bee0, 0.022);
     }
-    if (editor.showAuthoringExtents) {
+    if (editor?.showAuthoringExtents) {
       for (const instance of snapshot.authoring.instances) {
         const definition = getPlaceableDefinition(instance.definitionId);
         if (definition) addCells(getOccupiedCells(definition, instance), 0x829287, 0.028);
       }
     }
-    addCells(
+    if (editor) addCells(
       occupiedCellsForTarget(snapshot.authoring, editor.hoveredTarget),
       0x69d4b3,
       0.036,
     );
-    addCells(
+    if (editor) addCells(
       occupiedCellsForTarget(snapshot.authoring, editor.selectedTarget),
       0xfff1b0,
       0.044,
     );
-    if (editor.placementPreview?.occupiedCells) {
+    if (editor?.placementPreview?.occupiedCells) {
       addCells(
         editor.placementPreview.occupiedCells,
         editor.placementPreview.valid ? 0x69d4b3 : 0xff5b63,
         0.052,
       );
+    }
+    if (topology?.visible) {
+      const addPoint = (point, color, height) => {
+        addCells([{ cx: Math.floor(point.x), cz: Math.floor(point.z) }], color, height);
+      };
+      for (const link of topology.links) {
+        const distance = Math.hypot(link.to.x - link.from.x, link.to.z - link.from.z);
+        const steps = Math.max(1, Math.ceil(distance / 0.55));
+        for (let step = 0; step <= steps; step += 1) {
+          const t = step / steps;
+          addPoint({
+            x: link.from.x + (link.to.x - link.from.x) * t,
+            z: link.from.z + (link.to.z - link.from.z) * t,
+          }, 0x76d2ff, 0.06);
+        }
+      }
+      for (const node of topology.nodes) addPoint(node, node.patrol ? 0xffdb77 : 0x6fe0bb, 0.07);
+      for (const port of topology.ports) addPoint(port, 0xb99cff, 0.07);
+      for (const arc of topology.verticalArcs) {
+        const port = arc.from.layerId === topology.layerId ? arc.from : arc.to;
+        addPoint(port, 0xd8b5ff, 0.08);
+      }
     }
     // A paint stroke grows this pool one cell at a time. Do not expose a new
     // draw slot until the frame that uploads its matrix/color has submitted;

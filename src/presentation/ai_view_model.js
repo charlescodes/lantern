@@ -203,6 +203,12 @@ export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
     : "none";
   const fieldBuilding = mob.navigationField?.building ?? snapshot.navigation?.building;
   const fieldStale = mob.navigationField?.stale ?? snapshot.navigation?.stale;
+  const topology = snapshot.navigationTopology ?? null;
+  const route = mob.navigationRoute ?? mob.topologyRoute ?? null;
+  const routeCode = route?.code ?? route?.result ?? "inactive";
+  const routePhase = route?.phase ?? "NONE";
+  const sourceAnchor = route?.sourceAnchor ?? route?.source ?? "none";
+  const targetAnchor = route?.targetAnchor ?? route?.target ?? "none";
   return [
     `identity    ${describeAiMobOption(mob)}`,
     `profile     ${mob.aiProfile ?? snapshot.enemyAiProfile ?? "unknown"}`,
@@ -228,6 +234,8 @@ export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
     `threat      ${threatText(mob)}`,
     `casting     sequence ${integer(mob.castSequence)} · ${cooldown}`,
     `field       slot ${mob.navigationField?.slot ?? "—"} · ${mob.navigationField?.key ?? "none"} · v${integer(mob.navigationField?.version)}${fieldBuilding ? " · building" : ""}${fieldStale ? " · stale" : ""}`,
+    `topology    revision ${topology?.revision ?? "inactive"} · route ${routeCode} · phase ${routePhase}`,
+    `anchors     source ${sourceAnchor} · target ${targetAnchor} · evidence ${route?.evidence ?? "none"}`,
   ].join("\n");
 }
 

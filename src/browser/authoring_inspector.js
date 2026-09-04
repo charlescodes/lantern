@@ -36,6 +36,8 @@ export class AuthoringInspector {
    * onDelete:(instanceId:string)=>boolean|{ok:boolean,message?:string},
    * onUpdateConnector?:(connectorId:string,changes:Record<string,unknown>)=>boolean|{ok:boolean,message?:string},
    * onDeleteConnector?:(connectorId:string)=>boolean|{ok:boolean,message?:string},
+   * onUpdateNavigationNode?:(nodeId:string,changes:Record<string,unknown>)=>boolean|{ok:boolean,message?:string},
+   * onDeleteNavigationNode?:(nodeId:string)=>boolean|{ok:boolean,message?:string},
    * }} options
    */
   constructor(options) {
@@ -47,6 +49,8 @@ export class AuthoringInspector {
     this.onDelete = options.onDelete;
     this.onUpdateConnector = options.onUpdateConnector ?? (() => false);
     this.onDeleteConnector = options.onDeleteConnector ?? (() => false);
+    this.onUpdateNavigationNode = options.onUpdateNavigationNode ?? (() => false);
+    this.onDeleteNavigationNode = options.onDeleteNavigationNode ?? (() => false);
     this.collapsed = false;
     this.signature = "";
     this.#renderShell();
@@ -92,6 +96,10 @@ export class AuthoringInspector {
       ? `instance:${target.layerId}:${target.instanceId}`
       : target?.kind === "connector"
         ? `connector:${target.layerId}:${target.connectorId}`
+      : target?.kind === "navigation-node"
+        ? `navigation-node:${target.layerId}:${target.nodeId}`
+      : target?.kind === "connector-endpoint"
+        ? `connector-endpoint:${target.layerId}:${target.connectorId}:${target.stop}`
       : target?.kind === "cell"
         ? `cell:${target.layerId}:${target.x}:${target.z}`
         : "none";
@@ -132,6 +140,20 @@ export class AuthoringInspector {
     }
     if (target.kind === "connector") {
       this.#renderConnector(snapshot, target);
+      return;
+    }
+    if (target.kind === "navigation-node") {
+      this.#renderNavigationNode(snapshot, target);
+      return;
+    }
+    if (target.kind === "connector-endpoint") {
+      const list = document.createElement("dl");
+      list.className = "authoring-inspector-list";
+      appendRow(list, "Endpoint", `${target.connectorId} · ${target.stop}`);
+      appendRow(list, "Layer", target.layerId);
+      appendRow(list, "Use", "Link tool endpoint");
+      this.content.append(list);
+      this.showStatus("Connector endpoint is a topology link anchor", true);
       return;
     }
 
@@ -415,6 +437,83 @@ export class AuthoringInspector {
     });
     this.content.append(deleteButton);
     this.showStatus("Live motion is runtime state and is never authored", true);
+  }
+
+  /** @param {Record<string,any>} snapshot @param {Record<string,any>} target */
+  #renderNavigationNode(snapshot, target) {
+    const node = (snapshot.authoring.navigationNodes ?? []).find((candidate) => candidate.id === target.nodeId);
+    if (!node) {
+      this.showStatus("The selected navigation node no longer exists", false);
+      return;
+    }
+    const list = document.createElement("dl");
+    list.className = "authoring-inspector-list";
+    appendRow(list, "Navigation ID", node.id);
+    appendRow(list, "Layer", node.layerId);
+    appendRow(list, "Cell", `${node.cx}, ${node.cz}`);
+    this.content.append(list);
+
+    const form = document.createElement("form");
+    form.className = "authoring-transform-form";
+    const addNumber = (labelText, name, value) => {
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.name = name;
+      input.step = "1";
+      input.value = String(value);
+      label.append(input);
+      form.append(label);
+      return input;
+    };
+    const cx = addNumber("Cell X", "cx", node.cx);
+    const cz = addNumber("Cell Z", "cz", node.cz);
+    const patrolLabel = document.createElement("label");
+    const patrol = document.createElement("input");
+    patrol.type = "checkbox";
+    patrol.name = "patrol";
+    patrol.checked = node.patrol === true;
+    patrolLabel.append(patrol, " Patrol node");
+    const apply = document.createElement("button");
+    apply.type = "submit";
+    apply.className = "accent-button";
+    apply.textContent = "Apply navigation node";
+    form.append(patrolLabel, apply);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const changes = { cx: Number(cx.value), cz: Number(cz.value), patrol: patrol.checked };
+      if (!Number.isInteger(changes.cx) || !Number.isInteger(changes.cz)) {
+        this.showStatus("Cell X/Z must be integers", false);
+        return;
+      }
+      const result = this.onUpdateNavigationNode(node.id, changes);
+      const ok = typeof result === "boolean" ? result : result.ok;
+      if (!ok) this.showStatus(
+        typeof result === "object" && result.message
+          ? result.message
+          : "Navigation node update was rejected",
+        false,
+      );
+    });
+    this.content.append(form);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "danger-button";
+    deleteButton.textContent = "Delete navigation node";
+    deleteButton.addEventListener("click", () => {
+      const result = this.onDeleteNavigationNode(node.id);
+      const ok = typeof result === "boolean" ? result : result.ok;
+      if (!ok) this.showStatus(
+        typeof result === "object" && result.message
+          ? result.message
+          : "Navigation node deletion was rejected",
+        false,
+      );
+    });
+    this.content.append(deleteButton);
+    this.showStatus("Cell edits use the same authored-grid validation as pointer edits", true);
   }
 
   /** @param {string} message @param {boolean} valid */

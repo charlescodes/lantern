@@ -198,6 +198,9 @@ export class DebugRenderer {
     if (developerToolsOpen && view.mode === "edit" && view.authoringEditor) {
       this.#drawAuthoringOverlays(snapshot, view.authoringEditor);
     }
+    if (developerToolsOpen) {
+      this.#drawNavigationTopology(view.navigationTopology);
+    }
     if (scorchMarks) this.#drawScorchMarks(scorchMarks);
     this.#drawObelisks(snapshot.obelisks ?? []);
     if (developerToolsOpen && snapshot.debugFlags.explosionForces) {
@@ -636,6 +639,55 @@ export class DebugRenderer {
         context.stroke();
       }
     }
+  }
+
+  /** @param {Record<string,any>|null|undefined} topology */
+  #drawNavigationTopology(topology) {
+    if (!topology?.visible) return;
+    const context = this.context;
+    const line = this.camera.viewportLengthToWorld(1.6);
+    context.save();
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    for (const link of topology.links) {
+      context.beginPath();
+      context.moveTo(link.from.x, link.from.z);
+      context.lineTo(link.to.x, link.to.z);
+      context.strokeStyle = "rgba(118, 210, 255, 0.9)";
+      context.lineWidth = line * 1.7;
+      context.stroke();
+    }
+    for (const arc of topology.verticalArcs) {
+      const port = arc.from.layerId === topology.layerId ? arc.from : arc.to;
+      context.beginPath();
+      context.arc(port.x, port.z, 0.18, 0, Math.PI * 2);
+      context.strokeStyle = "rgba(191, 156, 255, 0.95)";
+      context.lineWidth = line * 1.5;
+      context.stroke();
+    }
+    const drawPort = (port, color, radius) => {
+      context.beginPath();
+      context.arc(port.x, port.z, radius, 0, Math.PI * 2);
+      context.fillStyle = color;
+      context.fill();
+      context.strokeStyle = "rgba(8, 11, 9, 0.92)";
+      context.lineWidth = line;
+      context.stroke();
+    };
+    for (const node of topology.nodes) {
+      drawPort(node, node.patrol ? "#ffdb77" : "#6fe0bb", 0.18);
+    }
+    for (const port of topology.ports) drawPort(port, "#b99cff", 0.14);
+    for (const key of [topology.selectedPortKey, topology.pendingLinkStartKey]) {
+      const port = [...topology.nodes, ...topology.ports].find((candidate) => candidate.key === key);
+      if (!port) continue;
+      context.beginPath();
+      context.arc(port.x, port.z, 0.29, 0, Math.PI * 2);
+      context.strokeStyle = "#fff1b0";
+      context.lineWidth = line * 1.6;
+      context.stroke();
+    }
+    context.restore();
   }
 
   /** @param {import('../presentation/scorch_marks.js').ScorchMarkPool} scorchMarks */
