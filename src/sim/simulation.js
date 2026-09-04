@@ -2,6 +2,8 @@
 
 import {
   ACTOR_TEAM,
+  AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE,
+  AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1,
   BREAKAWAY_FLOOR_PROFILE_NONE,
   BREAKAWAY_FLOOR_PROFILE_V1,
   COMBAT,
@@ -27,6 +29,7 @@ import {
   MOVEMENT_SOUND,
   MOVEMENT_SOUND_PROFILE_NONE,
   MOVEMENT_SOUND_PROFILE_V1,
+  NAVIGATION_TOPOLOGY,
   normalizeParticleProfile,
   PARTICLE,
   PARTICLE_PROFILES,
@@ -762,6 +765,7 @@ export class Simulation {
    * movementSoundProfile?:string,
    * elevatorProjectileCollisionProfile?:string,
    * breakawayFloorProfile?:string,
+   * authoredNavigationTopologyProfile?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -770,6 +774,18 @@ export class Simulation {
   constructor(options = {}) {
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
+    this.authoredNavigationTopologyProfile = options.authoredNavigationTopologyProfile
+      ?? AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1;
+    if (
+      this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+      && this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE
+    ) {
+      throw new RangeError(
+        `Unsupported authored-navigation topology profile: ${this.authoredNavigationTopologyProfile}`,
+      );
+    }
+    this.navigationTopology = this.scenario.navigationTopology;
+    this.topologyRevision = 1;
     this.breakawayFloorProfile = options.breakawayFloorProfile
       ?? BREAKAWAY_FLOOR_PROFILE_V1;
     if (
@@ -984,6 +1000,8 @@ export class Simulation {
     this.combatEvents = new RingBuffer(COMBAT.eventCapacity);
     this.combatEventDropped = 0;
     this.perceptionEvents = new RingBuffer(PERCEPTIVE_WIZARD.perceptionEventCapacity);
+    this.navigationRouteEventHistory = new RingBuffer(NAVIGATION_TOPOLOGY.routeEventCapacity);
+    this.navigationRouteEventDropped = 0;
     this.perceptionEventDropped = 0;
     this.soundEventHistory = new RingBuffer(MOVEMENT_SOUND.historyCapacity);
     this.soundEventHistoryDropped = 0;
@@ -1178,12 +1196,23 @@ export class Simulation {
     this.tickCount = 0;
     this.nextExplosionId = 1;
     this.mapRevision = 1;
+    this.topologyRevision = 1;
     this.#restoreAuthoredState();
     this.impactEvents.clear();
     this.combatEvents.clear();
     this.combatEventDropped = 0;
     this.perceptionEvents.clear();
     this.perceptionEventDropped = 0;
+    this.navigationTopology = this.scenario.navigationTopology;
+    this.navigationRouteEventHistory.clear();
+    this.navigationRouteEventDropped = 0;
+    this.navigationRouteEventHistory.push({
+      tick: 0,
+      type: "reset",
+      topologyRevision: this.topologyRevision,
+      portCount: this.navigationTopology.portCount,
+      arcCount: this.navigationTopology.arcCount,
+    });
     this.#clearSoundEventHistory();
     this.investigationEventMetrics.projectileObservations = 0;
     this.investigationEventMetrics.heardExplosions = 0;
@@ -1210,6 +1239,7 @@ export class Simulation {
       this.commandLogMovementSoundProfile = this.movementSoundProfile;
       this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
       this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
+      this.commandLogAuthoredNavigationTopologyProfile = this.authoredNavigationTopologyProfile;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1229,6 +1259,16 @@ export class Simulation {
     this.dynamicDeadBodies.reset();
     this.inertDeadBodies.reset();
     this.soundEvents.reset();
+    this.navigationTopology = this.scenario.navigationTopology;
+    this.navigationRouteEventHistory.clear();
+    this.navigationRouteEventDropped = 0;
+    this.navigationRouteEventHistory.push({
+      tick: this.tickCount,
+      type: "restore",
+      topologyRevision: this.topologyRevision,
+      portCount: this.navigationTopology.portCount,
+      arcCount: this.navigationTopology.arcCount,
+    });
     this.pressurePlateEvents.clear();
     this.breakawayFloorEvents.clear();
     this._skipBreakawayTrigger = true;
@@ -1761,6 +1801,18 @@ export class Simulation {
     const previousLayerIds = [...this.layerIds];
     this.scenario = candidate;
     this.#rebuildCompiledLayerRuntime();
+    this.navigationTopology = this.scenario.navigationTopology;
+    this.topologyRevision += 1;
+    if (this.navigationRouteEventHistory.length >= this.navigationRouteEventHistory.capacity) {
+      this.navigationRouteEventDropped += 1;
+    }
+    this.navigationRouteEventHistory.push({
+      tick: this.tickCount,
+      type: "compiled",
+      topologyRevision: this.topologyRevision,
+      portCount: this.navigationTopology.portCount,
+      arcCount: this.navigationTopology.arcCount,
+    });
     if (options.restore !== true) this.#remapLiveLayerIndices(previousLayerIds);
     const runtimeLayerIndex = this.layerIdToIndex.get(
       this.layerIds[this.player.layerIndex] ?? candidate.startLayerId,
@@ -10126,6 +10178,45 @@ export class Simulation {
     return cloneUnknown(this._preparedAuthoringState.authoring);
   }
 
+  navigationTopologySnapshot() {
+    return cloneUnknown({
+      profile: this.authoredNavigationTopologyProfile,
+      revision: this.topologyRevision,
+      diagnostics: this.scenario.validationDiagnostics.map((entry) => ({ ...entry })),
+      ...this.navigationTopology.describe(),
+    });
+  }
+
+  navigationRouteEvents() {
+    return cloneUnknown({
+      recent: this.navigationRouteEventHistory.toArray(
+        NAVIGATION_TOPOLOGY.routeEventSnapshotCount,
+      ),
+      retained: this.navigationRouteEventHistory.length,
+      capacity: this.navigationRouteEventHistory.capacity,
+      dropped: this.navigationRouteEventDropped,
+    });
+  }
+
+  /** Pure graph query using stable public port keys. @param {string} source @param {string} target */
+  queryNavigationRoute(source, target) {
+    const result = this.navigationTopology.route(String(source), String(target));
+    if (this.navigationRouteEventHistory.length >= this.navigationRouteEventHistory.capacity) {
+      this.navigationRouteEventDropped += 1;
+    }
+    this.navigationRouteEventHistory.push({
+      tick: this.tickCount,
+      type: "route-query",
+      topologyRevision: this.topologyRevision,
+      source: String(source),
+      target: String(target),
+      code: result.code,
+      cost: result.cost,
+      hops: result.hops,
+    });
+    return cloneUnknown(result);
+  }
+
   /** Returns a detached editor/reference read model for one stable layer ID. @param {string} layerId */
   authoringLayerSnapshot(layerId) {
     const source = this.scenario.authoringMap.layers.find((layer) => layer.id === layerId);
@@ -10476,6 +10567,15 @@ export class Simulation {
         elevatorProjectileCollisionProfile:
           this.commandLogElevatorProjectileCollisionProfile,
         breakawayFloorProfile: this.commandLogBreakawayFloorProfile,
+        authoredNavigationTopologyProfile:
+          this.commandLogAuthoredNavigationTopologyProfile,
+        navigationTopologyCapacities: {
+          authoredNodes: NAVIGATION_TOPOLOGY.authoredNodeCapacity,
+          authoredLinks: NAVIGATION_TOPOLOGY.authoredLinkCapacity,
+          ports: NAVIGATION_TOPOLOGY.portCapacity,
+          arcs: NAVIGATION_TOPOLOGY.arcCapacity,
+          routeEvents: NAVIGATION_TOPOLOGY.routeEventCapacity,
+        },
         soundEventCapacity: this.commandLogSoundEventCapacity,
         dynamicDeadBodyCapacity: this.commandLogDynamicDeadBodyCapacity,
         inertDeadBodyCapacity: this.commandLogInertDeadBodyCapacity,
@@ -10493,6 +10593,15 @@ export class Simulation {
     const recordingSchema = Number(recording.schemaVersion);
     if (!Number.isInteger(recordingSchema) || recordingSchema < 2 || recordingSchema > SCHEMA_VERSION) {
       throw new RangeError(`Unsupported recording schema: ${recording.schemaVersion}`);
+    }
+    if (
+      recordingSchema >= 15
+      && (
+        !recording.initialAuthoringMap
+        || Number(recording.initialAuthoringMap.version) !== AUTHORING_MAP_VERSION
+      )
+    ) {
+      throw new TypeError("Schema-v15 recording is missing its authoring-map v6 baseline");
     }
     const scenario = ArenaScenario.fromJSON(
       recordingSchema >= 12 && recording.initialAuthoringMap
@@ -10520,6 +10629,7 @@ export class Simulation {
     let movementSoundProfile = MOVEMENT_SOUND_PROFILE_NONE;
     let elevatorProjectileCollisionProfile = ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE;
     let breakawayFloorProfile = BREAKAWAY_FLOOR_PROFILE_NONE;
+    let authoredNavigationTopologyProfile = AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE;
     let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
@@ -10579,6 +10689,7 @@ export class Simulation {
       || recordingSchema === 12
       || recordingSchema === 13
       || recordingSchema === 14
+      || recordingSchema === 15
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -10668,6 +10779,29 @@ export class Simulation {
           throw new TypeError("Schema-v14 recording has invalid or missing breakaway-floor profile");
         }
       }
+      if (recordingSchema >= 15) {
+        authoredNavigationTopologyProfile = String(
+          recording.configuration?.authoredNavigationTopologyProfile ?? "",
+        );
+        if (
+          authoredNavigationTopologyProfile
+            !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+        ) {
+          throw new TypeError(
+            "Schema-v15 recording has invalid or missing authored-navigation topology profile",
+          );
+        }
+        const capacities = recording.configuration?.navigationTopologyCapacities;
+        if (
+          Number(capacities?.authoredNodes) !== NAVIGATION_TOPOLOGY.authoredNodeCapacity
+          || Number(capacities?.authoredLinks) !== NAVIGATION_TOPOLOGY.authoredLinkCapacity
+          || Number(capacities?.ports) !== NAVIGATION_TOPOLOGY.portCapacity
+          || Number(capacities?.arcs) !== NAVIGATION_TOPOLOGY.arcCapacity
+          || Number(capacities?.routeEvents) !== NAVIGATION_TOPOLOGY.routeEventCapacity
+        ) {
+          throw new TypeError("Schema-v15 recording has invalid navigation-topology capacities");
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -10700,6 +10834,7 @@ export class Simulation {
       movementSoundProfile,
       elevatorProjectileCollisionProfile,
       breakawayFloorProfile,
+      authoredNavigationTopologyProfile,
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

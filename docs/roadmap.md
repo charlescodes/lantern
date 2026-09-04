@@ -2,7 +2,8 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v14, authoring-map v5.
+> `0.9.3`, recording schema v15, authoring-map v6. M1C.1 is implemented;
+> editor and enemy-navigation slices remain open.
 
 ## Transition after M1B.4
 

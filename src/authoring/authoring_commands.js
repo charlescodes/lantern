@@ -97,6 +97,9 @@ export function deleteLayer(input, layerId) {
   ))) {
     throw new RangeError("A layer linked by an elevator must have that connector deleted first");
   }
+  if (document.navigationNodes.some((node) => node.layerId === layerId)) {
+    throw new RangeError("A layer with navigation nodes must have those nodes deleted first");
+  }
   document.layers.splice(index, 1);
   return cloneAuthoringMap(document);
 }
@@ -154,8 +157,8 @@ export function placeElevatorConnector(input, x, z, options) {
     definitionId: "connector.elevator.two-stop",
     lowerLayerId: lower.id,
     upperLayerId: upper.id,
-    x: Math.round(Number(x) * 10) / 10,
-    z: Math.round(Number(z) * 10) / 10,
+    x: Math.floor(Number(x)) + 0.5,
+    z: Math.floor(Number(z)) + 0.5,
     platformWidth: Number(
       options.platformWidth ?? VERTICAL_PHYSICS.defaultPlatformWidthMeters,
     ),
@@ -179,6 +182,11 @@ export function removeConnector(input, connectorId) {
   const index = document.connectors.findIndex((connector) => connector.id === connectorId);
   if (index < 0) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
   document.connectors.splice(index, 1);
+  document.navigationLinks = document.navigationLinks.filter((link) => (
+    ![link.a, link.b].some((endpoint) => (
+      endpoint.kind === "connector-endpoint" && endpoint.connectorId === connectorId
+    ))
+  ));
   return cloneAuthoringMap(document);
 }
 
@@ -200,8 +208,115 @@ export function updateConnector(input, connectorId, changes) {
   ]) {
     if (changes[field] !== undefined) connector[field] = changes[field];
   }
-  if (changes.x !== undefined) connector.x = Math.round(Number(changes.x) * 10) / 10;
-  if (changes.z !== undefined) connector.z = Math.round(Number(changes.z) * 10) / 10;
+  if (changes.x !== undefined || changes.z !== undefined) {
+    connector.x = Math.floor(Number(changes.x ?? connector.x)) + 0.5;
+    connector.z = Math.floor(Number(changes.z ?? connector.z)) + 0.5;
+  }
+  return cloneAuthoringMap(document);
+}
+
+/** @param {number} ordinal */
+function generatedNavigationNodeId(ordinal) {
+  return `navigation-node-${String(ordinal).padStart(4, "0")}`;
+}
+
+/** @param {number} ordinal */
+function generatedNavigationLinkId(ordinal) {
+  return `navigation-link-${String(ordinal).padStart(4, "0")}`;
+}
+
+/** @param {Record<string,any>} endpoint */
+function navigationEndpointKey(endpoint) {
+  return endpoint.kind === "node"
+    ? `node:${String(endpoint.nodeId)}`
+    : `connector:${String(endpoint.connectorId)}:${String(endpoint.stop)}`;
+}
+
+/** @param {unknown} input @param {number} cx @param {number} cz @param {{layerId?:string,patrol?:boolean}} [options] */
+export function placeNavigationNode(input, cx, cz, options = {}) {
+  const document = cloneAuthoringMap(input);
+  const layer = layerFor(document, options.layerId);
+  const cellX = Number(cx);
+  const cellZ = Number(cz);
+  cellIndex(layer, cellX, cellZ);
+  let ordinal = document.nextNavigationNodeOrdinal;
+  const usedIds = new Set(document.navigationNodes.map((node) => node.id));
+  let nodeId = generatedNavigationNodeId(ordinal);
+  while (usedIds.has(nodeId)) {
+    ordinal += 1;
+    nodeId = generatedNavigationNodeId(ordinal);
+  }
+  document.nextNavigationNodeOrdinal = ordinal + 1;
+  document.navigationNodes.push({
+    id: nodeId,
+    layerId: layer.id,
+    cx: cellX,
+    cz: cellZ,
+    patrol: options.patrol === true,
+  });
+  return { document: cloneAuthoringMap(document), nodeId };
+}
+
+/** @param {unknown} input @param {string} nodeId @param {{cx?:number,cz?:number,patrol?:boolean}} changes */
+export function updateNavigationNode(input, nodeId, changes) {
+  const document = cloneAuthoringMap(input);
+  const node = document.navigationNodes.find((candidate) => candidate.id === nodeId);
+  if (!node) throw new RangeError(`Unknown navigation node "${nodeId}"`);
+  const layer = layerFor(document, node.layerId);
+  const cx = changes.cx === undefined ? node.cx : Number(changes.cx);
+  const cz = changes.cz === undefined ? node.cz : Number(changes.cz);
+  cellIndex(layer, cx, cz);
+  node.cx = cx;
+  node.cz = cz;
+  if (changes.patrol !== undefined) node.patrol = changes.patrol === true;
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} input @param {string} nodeId @param {number} cx @param {number} cz */
+export function moveNavigationNode(input, nodeId, cx, cz) {
+  return updateNavigationNode(input, nodeId, { cx, cz });
+}
+
+/** @param {unknown} input @param {string} nodeId */
+export function removeNavigationNode(input, nodeId) {
+  const document = cloneAuthoringMap(input);
+  const index = document.navigationNodes.findIndex((node) => node.id === nodeId);
+  if (index < 0) throw new RangeError(`Unknown navigation node "${nodeId}"`);
+  document.navigationNodes.splice(index, 1);
+  document.navigationLinks = document.navigationLinks.filter((link) => (
+    ![link.a, link.b].some((endpoint) => endpoint.kind === "node" && endpoint.nodeId === nodeId)
+  ));
+  return cloneAuthoringMap(document);
+}
+
+/**
+ * @param {unknown} input
+ * @param {{kind:"node",nodeId:string}|{kind:"connector-endpoint",connectorId:string,stop:"lower"|"upper"}} aInput
+ * @param {{kind:"node",nodeId:string}|{kind:"connector-endpoint",connectorId:string,stop:"lower"|"upper"}} bInput
+ */
+export function placeNavigationLink(input, aInput, bInput) {
+  const document = cloneAuthoringMap(input);
+  const a = JSON.parse(JSON.stringify(aInput));
+  const b = JSON.parse(JSON.stringify(bInput));
+  const [first, second] = navigationEndpointKey(a) <= navigationEndpointKey(b) ? [a, b] : [b, a];
+  let ordinal = document.nextNavigationLinkOrdinal;
+  const usedIds = new Set(document.navigationLinks.map((link) => link.id));
+  let linkId = generatedNavigationLinkId(ordinal);
+  while (usedIds.has(linkId)) {
+    ordinal += 1;
+    linkId = generatedNavigationLinkId(ordinal);
+  }
+  document.nextNavigationLinkOrdinal = ordinal + 1;
+  document.navigationLinks.push({ id: linkId, a: first, b: second });
+  return { document: cloneAuthoringMap(document), linkId };
+}
+
+/** @param {unknown} input @param {string} linkId */
+export function removeNavigationLink(input, linkId) {
+  const document = cloneAuthoringMap(input);
+  const index = document.navigationLinks.findIndex((link) => link.id === linkId);
+  if (index < 0) throw new RangeError(`Unknown navigation link "${linkId}"`);
+  document.navigationLinks.splice(index, 1);
   return cloneAuthoringMap(document);
 }
 

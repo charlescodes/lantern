@@ -11,16 +11,21 @@ import {
   paintStructureCells,
   paintSurface,
   paintSurfaceCells,
+  placeNavigationLink,
+  placeNavigationNode,
   placeElevatorConnector,
   placeInstance,
   renameLayer,
   removeConnector,
+  removeNavigationLink,
+  removeNavigationNode,
   removeInstance,
   setLayerBaseY,
   setPlayerStartLayer,
   updateInstanceProperties,
   updateInstanceTransform,
   updateConnector,
+  updateNavigationNode,
 } from "./authoring_commands.js";
 import { validateAuthoringMap } from "./authoring_map.js";
 import {
@@ -139,6 +144,19 @@ function connectorSnapshot(input, connectorId, path) {
   return snapshot;
 }
 
+/** @param {unknown} input @param {string} stableId @param {string} path @param {"node"|"link"} kind */
+function navigationSnapshot(input, stableId, path, kind) {
+  if (input === null) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError(`${path} must be a navigation ${kind} snapshot or null`);
+  }
+  const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+  if (snapshot.id !== stableId) {
+    throw new TypeError(`${path}.id must equal patch ${kind} ID "${stableId}"`);
+  }
+  return snapshot;
+}
+
 /** @param {unknown} input @param {string} path */
 function playerStartSnapshot(input, path) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -179,7 +197,12 @@ export function cloneAuthoringCommand(input) {
     let key;
     if (kind === "map") {
       const field = String(patch.field);
-      if (field === "nextLayerOrdinal" || field === "nextConnectorOrdinal") {
+      if (
+        field === "nextLayerOrdinal"
+        || field === "nextConnectorOrdinal"
+        || field === "nextNavigationNodeOrdinal"
+        || field === "nextNavigationLinkOrdinal"
+      ) {
         const before = finiteInteger(patch.before, `${path}.before`);
         const after = finiteInteger(patch.after, `${path}.after`);
         if (before < 1 || after < 1) throw new TypeError(`${path} ordinals must be positive integers`);
@@ -225,6 +248,19 @@ export function cloneAuthoringCommand(input) {
       }
       normalized = { kind, connectorId, before, after, beforeIndex, afterIndex };
       key = `${kind}:${connectorId}`;
+    } else if (kind === "navigation-node" || kind === "navigation-link") {
+      const idField = kind === "navigation-node" ? "nodeId" : "linkId";
+      const stableId = nonEmptyString(patch[idField], `${path}.${idField}`);
+      const snapshotKind = kind === "navigation-node" ? "node" : "link";
+      const before = navigationSnapshot(patch.before, stableId, `${path}.before`, snapshotKind);
+      const after = navigationSnapshot(patch.after, stableId, `${path}.after`, snapshotKind);
+      const beforeIndex = patch.beforeIndex === null ? null : finiteInteger(patch.beforeIndex, `${path}.beforeIndex`);
+      const afterIndex = patch.afterIndex === null ? null : finiteInteger(patch.afterIndex, `${path}.afterIndex`);
+      if ((before === null) !== (beforeIndex === null) || (after === null) !== (afterIndex === null)) {
+        throw new TypeError(`${path} snapshot and ordering index must both be null or both be present`);
+      }
+      normalized = { kind, [idField]: stableId, before, after, beforeIndex, afterIndex };
+      key = `${kind}:${stableId}`;
     } else if (kind === "cell") {
       const layerId = nonEmptyString(patch.layerId, `${path}.layerId`);
       const channel = patch.channel;
@@ -364,6 +400,10 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
       before: before.nextConnectorOrdinal,
       after: after.nextConnectorOrdinal,
     });
+  }
+  for (const field of ["nextNavigationNodeOrdinal", "nextNavigationLinkOrdinal"]) {
+    if (before[field] === after[field]) continue;
+    patches.push({ kind: "map", field, before: before[field], after: after[field] });
   }
   if (!jsonEqual(before.playerStart, after.playerStart)) {
     patches.push({
@@ -516,6 +556,36 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
       afterIndex: afterEntry?.index ?? null,
     });
   }
+  for (const [kind, listField, idField] of [
+    ["navigation-node", "navigationNodes", "nodeId"],
+    ["navigation-link", "navigationLinks", "linkId"],
+  ]) {
+    const beforeEntries = new Map(
+      before[listField].map((value, index) => [value.id, { value, index }]),
+    );
+    const afterEntries = new Map(
+      after[listField].map((value, index) => [value.id, { value, index }]),
+    );
+    const stableIds = [...new Set([...beforeEntries.keys(), ...afterEntries.keys()])].sort();
+    for (const stableId of stableIds) {
+      const beforeEntry = beforeEntries.get(stableId) ?? null;
+      const afterEntry = afterEntries.get(stableId) ?? null;
+      if (
+        beforeEntry
+        && afterEntry
+        && beforeEntry.index === afterEntry.index
+        && jsonEqual(beforeEntry.value, afterEntry.value)
+      ) continue;
+      patches.push({
+        kind,
+        [idField]: stableId,
+        before: beforeEntry ? cloneJson(beforeEntry.value) : null,
+        after: afterEntry ? cloneJson(afterEntry.value) : null,
+        beforeIndex: beforeEntry?.index ?? null,
+        afterIndex: afterEntry?.index ?? null,
+      });
+    }
+  }
   if (patches.length === 0) return null;
   return cloneAuthoringCommand({ id: options.id ?? 0, label, patches });
 }
@@ -563,6 +633,18 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
       const current = index < 0 ? null : document.connectors[index];
       if (index !== (expectedIndex ?? -1) || !jsonEqual(current, patch[sourceSide])) {
         throw new RangeError(`Connector patch precondition failed for "${patch.connectorId}"`);
+      }
+      continue;
+    }
+    if (patch.kind === "navigation-node" || patch.kind === "navigation-link") {
+      const list = patch.kind === "navigation-node" ? document.navigationNodes : document.navigationLinks;
+      const idField = patch.kind === "navigation-node" ? "nodeId" : "linkId";
+      const stableId = patch[idField];
+      const index = list.findIndex((value) => value.id === stableId);
+      const expectedIndex = patch[sourceIndexSide];
+      const current = index < 0 ? null : list[index];
+      if (index !== (expectedIndex ?? -1) || !jsonEqual(current, patch[sourceSide])) {
+        throw new RangeError(`Navigation patch precondition failed for "${stableId}"`);
       }
       continue;
     }
@@ -629,6 +711,29 @@ export function applyAuthoringCommand(documentInput, commandInput, direction = "
         throw new RangeError(`Connector ordering for "${patch.connectorId}" is outside the document`);
       }
       document.connectors.splice(targetIndex, 0, cloneJson(patch[targetSide]));
+    }
+  }
+
+  for (const [kind, listField, idField] of [
+    ["navigation-node", "navigationNodes", "nodeId"],
+    ["navigation-link", "navigationLinks", "linkId"],
+  ]) {
+    const navigationPatches = command.patches.filter((patch) => patch.kind === kind);
+    if (navigationPatches.length === 0) continue;
+    const touchedIds = new Set(navigationPatches.map((patch) => patch[idField]));
+    document[listField] = document[listField].filter((value) => !touchedIds.has(value.id));
+    const insertions = navigationPatches
+      .filter((patch) => patch[targetSide] !== null)
+      .sort((left, right) => (
+        left[targetIndexSide] - right[targetIndexSide]
+        || left[idField].localeCompare(right[idField])
+      ));
+    for (const patch of insertions) {
+      const targetIndex = patch[targetIndexSide];
+      if (targetIndex > document[listField].length) {
+        throw new RangeError(`Navigation ordering for "${patch[idField]}" is outside the document`);
+      }
+      document[listField].splice(targetIndex, 0, cloneJson(patch[targetSide]));
     }
   }
 
@@ -892,6 +997,62 @@ export function commandFromAuthoringAction(documentInput, action) {
       if (!connector) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
       after = updateConnector(before, connectorId, action.changes ?? {});
       label = "Edit Two-stop Elevator";
+      break;
+    }
+    case "placeNavigationNode": {
+      const result = placeNavigationNode(
+        before,
+        Number(action.cx),
+        Number(action.cz),
+        { layerId, patrol: action.patrol === true },
+      );
+      after = result.document;
+      label = "Place Navigation Node";
+      break;
+    }
+    case "updateNavigationNode": {
+      const nodeId = String(action.nodeId);
+      if (!before.navigationNodes.some((node) => node.id === nodeId)) {
+        throw new RangeError(`Unknown navigation node "${nodeId}"`);
+      }
+      after = updateNavigationNode(before, nodeId, action.changes ?? {});
+      label = "Edit Navigation Node";
+      break;
+    }
+    case "moveNavigationNode": {
+      const nodeId = String(action.nodeId);
+      if (!before.navigationNodes.some((node) => node.id === nodeId)) {
+        throw new RangeError(`Unknown navigation node "${nodeId}"`);
+      }
+      after = updateNavigationNode(before, nodeId, {
+        cx: Number(action.cx),
+        cz: Number(action.cz),
+      });
+      label = "Move Navigation Node";
+      break;
+    }
+    case "removeNavigationNode": {
+      const nodeId = String(action.nodeId);
+      if (!before.navigationNodes.some((node) => node.id === nodeId)) {
+        throw new RangeError(`Unknown navigation node "${nodeId}"`);
+      }
+      after = removeNavigationNode(before, nodeId);
+      label = "Delete Navigation Node";
+      break;
+    }
+    case "placeNavigationLink": {
+      const result = placeNavigationLink(before, action.a, action.b);
+      after = result.document;
+      label = "Place Navigation Link";
+      break;
+    }
+    case "removeNavigationLink": {
+      const linkId = String(action.linkId);
+      if (!before.navigationLinks.some((link) => link.id === linkId)) {
+        throw new RangeError(`Unknown navigation link "${linkId}"`);
+      }
+      after = removeNavigationLink(before, linkId);
+      label = "Delete Navigation Link";
       break;
     }
     default:

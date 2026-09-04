@@ -75,6 +75,7 @@ export class ArenaScenario {
     this.validationDiagnostics = compiled.diagnostics.map((entry) => ({ ...entry }));
     this._compiledLayers = compiled.layers;
     this.connectors = compiled.connectors.map((connector) => ({ ...connector }));
+    this.navigationTopology = compiled.navigationTopology;
     const selected = getCompiledLayer(compiled, requestedLayerId)
       ?? getCompiledLayer(compiled, compiled.startLayerId);
     if (!selected) throw new RangeError("Compiled authoring map has no playable layer");
@@ -193,6 +194,10 @@ export class ArenaScenario {
 
   compiledLayers() {
     return this._compiledLayers.slice();
+  }
+
+  navigationTopologySnapshot() {
+    return this.navigationTopology.describe();
   }
 
   allRuntimeEntities() {

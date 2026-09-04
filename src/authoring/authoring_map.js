@@ -2,6 +2,7 @@
 
 import {
   MAP_VERSION,
+  NAVIGATION_TOPOLOGY,
   ROCK,
   SCENARIO_VERSION,
   VERTICAL_PHYSICS,
@@ -13,7 +14,9 @@ import {
 import { validateInstancePlacement } from "./placement_validation.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 5;
+export const AUTHORING_MAP_VERSION = 6;
+/** M1B.4 autonomous-elevator maps without authored navigation topology. */
+export const M1B_AUTHORING_MAP_VERSION = 5;
 /** M1B.1-M1B.3 connector maps using speed and activation policies. */
 export const CLOCK_ELEVATOR_AUTHORING_MAP_VERSION = 4;
 /** M1B.1 connector maps. */
@@ -90,9 +93,13 @@ function normalizeCurrentDocument(input) {
       "metadata",
       "nextLayerOrdinal",
       "nextConnectorOrdinal",
+      "nextNavigationNodeOrdinal",
+      "nextNavigationLinkOrdinal",
       "playerStart",
       "layers",
       "connectors",
+      "navigationNodes",
+      "navigationLinks",
     ]),
     "",
   );
@@ -209,6 +216,14 @@ function normalizeCurrentDocument(input) {
     source.nextConnectorOrdinal,
     "nextConnectorOrdinal",
   );
+  const nextNavigationNodeOrdinal = positiveInteger(
+    source.nextNavigationNodeOrdinal,
+    "nextNavigationNodeOrdinal",
+  );
+  const nextNavigationLinkOrdinal = positiveInteger(
+    source.nextNavigationLinkOrdinal,
+    "nextNavigationLinkOrdinal",
+  );
   let playerStart = { layerId: "", x: 0, z: 0 };
   if (!isRecord(source.playerStart)) {
     issue("error", "playerStart", "object", "Player start must be an object.");
@@ -234,8 +249,6 @@ function normalizeCurrentDocument(input) {
   const layerIds = new Set();
   const instanceIds = new Set();
   const baseHeights = new Map();
-  let sharedWidth = null;
-  let sharedHeight = null;
   const layers = layerValues.map((layerValue, layerIndex) => {
     const path = `layers[${layerIndex}]`;
     if (!isRecord(layerValue)) {
@@ -282,18 +295,6 @@ function normalizeCurrentDocument(input) {
     }
     const width = dimensionValue(layerSource.width, `${path}.width`, id);
     const height = dimensionValue(layerSource.height, `${path}.height`, id);
-    if (sharedWidth === null) {
-      sharedWidth = width;
-      sharedHeight = height;
-    } else if (width !== sharedWidth || height !== sharedHeight) {
-      issue(
-        "error",
-        path,
-        "incompatible-layer-dimensions",
-        `Layer dimensions ${width}x${height} do not match shared dimensions ${sharedWidth}x${sharedHeight}.`,
-        id,
-      );
-    }
     const cellCount = width * height;
 
     const surfaceSource = isRecord(layerSource.surface) ? layerSource.surface : {};
@@ -567,14 +568,31 @@ function normalizeCurrentDocument(input) {
       }
       const x = finiteValue(connector.x, `${path}.x`);
       const z = finiteValue(connector.z, `${path}.z`);
-      if (
-        Math.abs(x * 10 - Math.round(x * 10)) > 1e-9
-        || Math.abs(z * 10 - Math.round(z * 10)) > 1e-9
-      ) {
-        issue("error", path, "connector-alignment", "Elevator endpoints must use shared tenth-meter X/Z coordinates.");
+      const cellCentered = x === Math.floor(x) + 0.5 && z === Math.floor(z) + 0.5;
+      const legacyTenthAligned = (
+        Math.abs(x * 10 - Math.round(x * 10)) <= 1e-9
+        && Math.abs(z * 10 - Math.round(z * 10)) <= 1e-9
+      );
+      if (!cellCentered && !legacyTenthAligned) {
+        issue(
+          "error",
+          path,
+          "connector-alignment",
+          "Elevator endpoints must be cell-centered or retain legacy tenth-meter X/Z coordinates.",
+        );
+      } else if (!cellCentered) {
+        issue(
+          "warning",
+          path,
+          "legacy-off-center-connector",
+          "Elevator retains an exact legacy off-center X/Z until it is explicitly moved.",
+        );
       }
-      if (lowerLayer && (x < 0 || z < 0 || x >= lowerLayer.width || z >= lowerLayer.height)) {
-        issue("error", path, "connector-out-of-bounds", "Elevator endpoint is outside the shared map bounds.");
+      if (
+        (lowerLayer && (x < 0 || z < 0 || x >= lowerLayer.width || z >= lowerLayer.height))
+        || (upperLayer && (x < 0 || z < 0 || x >= upperLayer.width || z >= upperLayer.height))
+      ) {
+        issue("error", path, "connector-out-of-bounds", "Elevator endpoint is outside a linked layer's map bounds.");
       }
       const positiveWidth = (value, field) => {
         const number = finiteValue(value, `${path}.${field}`);
@@ -615,15 +633,185 @@ function normalizeCurrentDocument(input) {
       };
     });
 
+  if (!Array.isArray(source.navigationNodes)) {
+    issue("error", "navigationNodes", "array", "Navigation nodes must be an array.");
+  } else if (source.navigationNodes.length > NAVIGATION_TOPOLOGY.authoredNodeCapacity) {
+    issue(
+      "error",
+      "navigationNodes",
+      "navigation-node-capacity",
+      `Map contains more than the ${NAVIGATION_TOPOLOGY.authoredNodeCapacity}-node limit.`,
+    );
+  }
+  const navigationNodeIds = new Set();
+  const navigationNodeCells = new Set();
+  const navigationNodes = (Array.isArray(source.navigationNodes)
+    ? source.navigationNodes.slice(0, NAVIGATION_TOPOLOGY.authoredNodeCapacity + 1)
+    : [])
+    .map((nodeValue, nodeIndex) => {
+      const path = `navigationNodes[${nodeIndex}]`;
+      if (!isRecord(nodeValue)) issue("error", path, "object", "Navigation node must be an object.");
+      const node = isRecord(nodeValue) ? /** @type {Record<string,any>} */ (nodeValue) : {};
+      rejectUnknownFields(node, new Set(["id", "layerId", "cx", "cz", "patrol"]), path);
+      const id = stringValue(node.id, `${path}.id`);
+      if (id && navigationNodeIds.has(id)) {
+        issue("error", `${path}.id`, "duplicate-navigation-node-id", `Navigation node ID "${id}" is already in use.`);
+      }
+      if (id) navigationNodeIds.add(id);
+      const layerId = stringValue(node.layerId, `${path}.layerId`);
+      const layer = layers.find((candidate) => candidate.id === layerId);
+      if (!layer) issue("error", `${path}.layerId`, "missing-navigation-layer", `Navigation node references missing layer "${layerId}".`);
+      const integerCell = (value, field) => {
+        if (!Number.isInteger(value)) {
+          issue("error", `${path}.${field}`, "integer-cell", "Navigation node cells must be integers.", layerId);
+          return 0;
+        }
+        return Number(value);
+      };
+      const cx = integerCell(node.cx, "cx");
+      const cz = integerCell(node.cz, "cz");
+      if (layer && (cx < 0 || cz < 0 || cx >= layer.width || cz >= layer.height)) {
+        issue("error", path, "navigation-node-out-of-bounds", `Navigation node cell (${cx}, ${cz}) is outside layer "${layerId}".`, layerId);
+      }
+      const cellKey = `${layerId}:${cx}:${cz}`;
+      if (layer && navigationNodeCells.has(cellKey)) {
+        issue("error", path, "duplicate-navigation-node-cell", `Layer "${layerId}" already has a navigation node at (${cx}, ${cz}).`, layerId);
+      }
+      if (layer) navigationNodeCells.add(cellKey);
+      if (typeof node.patrol !== "boolean") {
+        issue("error", `${path}.patrol`, "boolean", "Navigation node patrol must be a boolean.", layerId);
+      }
+      if (layer && cx >= 0 && cz >= 0 && cx < layer.width && cz < layer.height) {
+        const cellIndex = cz * layer.width + cx;
+        const surfaceId = layer.surface.legend[layer.surface.cells[cellIndex]];
+        const runtimeKind = getPlaceableDefinition(surfaceId)?.traits.runtimeKind;
+        if (runtimeKind === "floor-hole" || runtimeKind === "breakaway-floor") {
+          issue("error", path, "navigation-node-aperture", "Navigation nodes require an ordinary floor cell.", layerId);
+        }
+        const structureId = layer.structure.legend[layer.structure.cells[cellIndex]];
+        if (getPlaceableDefinition(structureId)?.traits.blocksMovement === true) {
+          issue("error", path, "navigation-node-solid", "Navigation nodes cannot occupy solid cells.", layerId);
+        }
+        if (connectors.some((connector) => (
+          (connector.lowerLayerId === layerId || connector.upperLayerId === layerId)
+          && Math.floor(connector.x) === cx && Math.floor(connector.z) === cz
+        ))) {
+          issue("error", path, "navigation-node-connector-aperture", "Navigation nodes cannot occupy elevator aperture cells.", layerId);
+        }
+      }
+      return { id, layerId, cx, cz, patrol: node.patrol === true };
+    });
+
+  const nodeOrdinalMaximum = navigationNodes.reduce((maximum, node) => {
+    const match = /^navigation-node-(\d+)$/.exec(node.id);
+    return match ? Math.max(maximum, Number(match[1])) : maximum;
+  }, 0);
+  if (nextNavigationNodeOrdinal <= nodeOrdinalMaximum) {
+    issue("error", "nextNavigationNodeOrdinal", "navigation-node-ordinal", "Next navigation-node ordinal must exceed every generated node ID ordinal.");
+  }
+
+  if (!Array.isArray(source.navigationLinks)) {
+    issue("error", "navigationLinks", "array", "Navigation links must be an array.");
+  } else if (source.navigationLinks.length > NAVIGATION_TOPOLOGY.authoredLinkCapacity) {
+    issue(
+      "error",
+      "navigationLinks",
+      "navigation-link-capacity",
+      `Map contains more than the ${NAVIGATION_TOPOLOGY.authoredLinkCapacity}-link limit.`,
+    );
+  }
+  const navigationLinkIds = new Set();
+  const navigationPairs = new Set();
+  const endpointKey = (endpoint) => endpoint.kind === "node"
+    ? `node:${endpoint.nodeId}`
+    : `connector:${endpoint.connectorId}:${endpoint.stop}`;
+  const endpointLayer = (endpoint) => {
+    if (endpoint.kind === "node") {
+      return navigationNodes.find((node) => node.id === endpoint.nodeId)?.layerId ?? null;
+    }
+    const connector = connectors.find((candidate) => candidate.id === endpoint.connectorId);
+    if (!connector) return null;
+    return endpoint.stop === "lower" ? connector.lowerLayerId : connector.upperLayerId;
+  };
+  const normalizeEndpoint = (value, path) => {
+    if (!isRecord(value)) {
+      issue("error", path, "object", "Navigation link endpoint must be an object.");
+      return { kind: "node", nodeId: "" };
+    }
+    const endpoint = /** @type {Record<string,any>} */ (value);
+    if (endpoint.kind === "node") {
+      rejectUnknownFields(endpoint, new Set(["kind", "nodeId"]), path);
+      const nodeId = stringValue(endpoint.nodeId, `${path}.nodeId`);
+      if (nodeId && !navigationNodeIds.has(nodeId)) {
+        issue("error", `${path}.nodeId`, "missing-navigation-node", `Navigation link references missing node "${nodeId}".`);
+      }
+      return { kind: "node", nodeId };
+    }
+    if (endpoint.kind === "connector-endpoint") {
+      rejectUnknownFields(endpoint, new Set(["kind", "connectorId", "stop"]), path);
+      const connectorId = stringValue(endpoint.connectorId, `${path}.connectorId`);
+      const connector = connectors.find((candidate) => candidate.id === connectorId);
+      if (!connector) {
+        issue("error", `${path}.connectorId`, "missing-navigation-connector", `Navigation link references missing connector "${connectorId}".`);
+      }
+      const stop = endpoint.stop === "upper" ? "upper" : "lower";
+      if (endpoint.stop !== "lower" && endpoint.stop !== "upper") {
+        issue("error", `${path}.stop`, "connector-endpoint-stop", "Connector endpoint stop must be lower or upper.");
+      }
+      return { kind: "connector-endpoint", connectorId, stop };
+    }
+    issue("error", `${path}.kind`, "navigation-endpoint-kind", "Endpoint kind must be node or connector-endpoint.");
+    return { kind: "node", nodeId: "" };
+  };
+  const navigationLinks = (Array.isArray(source.navigationLinks)
+    ? source.navigationLinks.slice(0, NAVIGATION_TOPOLOGY.authoredLinkCapacity + 1)
+    : [])
+    .map((linkValue, linkIndex) => {
+      const path = `navigationLinks[${linkIndex}]`;
+      if (!isRecord(linkValue)) issue("error", path, "object", "Navigation link must be an object.");
+      const link = isRecord(linkValue) ? /** @type {Record<string,any>} */ (linkValue) : {};
+      rejectUnknownFields(link, new Set(["id", "a", "b"]), path);
+      const id = stringValue(link.id, `${path}.id`);
+      if (id && navigationLinkIds.has(id)) {
+        issue("error", `${path}.id`, "duplicate-navigation-link-id", `Navigation link ID "${id}" is already in use.`);
+      }
+      if (id) navigationLinkIds.add(id);
+      const a = normalizeEndpoint(link.a, `${path}.a`);
+      const b = normalizeEndpoint(link.b, `${path}.b`);
+      const aKey = endpointKey(a);
+      const bKey = endpointKey(b);
+      if (aKey === bKey) issue("error", path, "navigation-self-link", "Navigation links cannot connect an endpoint to itself.");
+      const pair = aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+      if (navigationPairs.has(pair)) issue("error", path, "duplicate-navigation-link", "Duplicate undirected navigation link.");
+      navigationPairs.add(pair);
+      const aLayer = endpointLayer(a);
+      const bLayer = endpointLayer(b);
+      if (aLayer && bLayer && aLayer !== bLayer) {
+        issue("error", path, "navigation-link-layer", "Authored navigation links must connect endpoints on the same layer.");
+      }
+      return { id, a, b };
+    });
+  const linkOrdinalMaximum = navigationLinks.reduce((maximum, link) => {
+    const match = /^navigation-link-(\d+)$/.exec(link.id);
+    return match ? Math.max(maximum, Number(match[1])) : maximum;
+  }, 0);
+  if (nextNavigationLinkOrdinal <= linkOrdinalMaximum) {
+    issue("error", "nextNavigationLinkOrdinal", "navigation-link-ordinal", "Next navigation-link ordinal must exceed every generated link ID ordinal.");
+  }
+
   const document = {
     format: AUTHORING_MAP_FORMAT,
     version: AUTHORING_MAP_VERSION,
     metadata,
     nextLayerOrdinal,
     nextConnectorOrdinal,
+    nextNavigationNodeOrdinal,
+    nextNavigationLinkOrdinal,
     playerStart,
     layers,
     connectors,
+    navigationNodes,
+    navigationLinks,
   };
   // A single cell may have exactly one aperture owner. Surface holes are
   // independent (including adjacent cells), but cannot silently overlap a
@@ -756,6 +944,8 @@ export function migrateAuthoringMapV1(input) {
     metadata: source.metadata,
     nextLayerOrdinal: source.layers.length + 1,
     nextConnectorOrdinal: 1,
+    nextNavigationNodeOrdinal: 1,
+    nextNavigationLinkOrdinal: 1,
     playerStart: {
       layerId: startLayerId,
       x: startLayer.markers.playerSpawn.x,
@@ -763,6 +953,8 @@ export function migrateAuthoringMapV1(input) {
     },
     layers,
     connectors: [],
+    navigationNodes: [],
+    navigationLinks: [],
   });
 }
 
@@ -773,11 +965,19 @@ export function migrateAuthoringMapV2(input) {
   if (source.format !== AUTHORING_MAP_FORMAT || source.version !== M1A_AUTHORING_MAP_VERSION) {
     fail("version", "unsupported-schema-version", `Expected authoring-map version ${M1A_AUTHORING_MAP_VERSION}.`);
   }
-  if (Object.hasOwn(source, "connectors") || Object.hasOwn(source, "nextConnectorOrdinal")) {
+  const futureField = [
+    "connectors",
+    "nextConnectorOrdinal",
+    "nextNavigationNodeOrdinal",
+    "nextNavigationLinkOrdinal",
+    "navigationNodes",
+    "navigationLinks",
+  ].find((field) => Object.hasOwn(source, field));
+  if (futureField) {
     fail(
-      Object.hasOwn(source, "connectors") ? "connectors" : "nextConnectorOrdinal",
+      futureField,
       "unknown-field",
-      "Authoring-map v2 cannot contain elevator connector data.",
+      `Authoring-map v2 cannot contain ${futureField}.`,
     );
   }
   return validateAuthoringMap({
@@ -785,11 +985,25 @@ export function migrateAuthoringMapV2(input) {
     version: AUTHORING_MAP_VERSION,
     nextConnectorOrdinal: 1,
     connectors: [],
+    nextNavigationNodeOrdinal: 1,
+    nextNavigationLinkOrdinal: 1,
+    navigationNodes: [],
+    navigationLinks: [],
   });
 }
 
 /** @param {Record<string, any>} source */
 function migrateClockDrivenConnectors(source) {
+  for (const field of [
+    "nextNavigationNodeOrdinal",
+    "nextNavigationLinkOrdinal",
+    "navigationNodes",
+    "navigationLinks",
+  ]) {
+    if (Object.hasOwn(source, field)) {
+      fail(field, "unknown-field", `This historical authoring-map version cannot contain ${field}.`);
+    }
+  }
   const heights = new Map(
     Array.isArray(source.layers)
       ? source.layers.filter(isRecord).map((layer) => [layer.id, Number(layer.baseY)])
@@ -811,6 +1025,10 @@ function migrateClockDrivenConnectors(source) {
     ...source,
     version: AUTHORING_MAP_VERSION,
     connectors,
+    nextNavigationNodeOrdinal: 1,
+    nextNavigationLinkOrdinal: 1,
+    navigationNodes: [],
+    navigationLinks: [],
   });
 }
 
@@ -832,6 +1050,33 @@ export function migrateAuthoringMapV4(input) {
     fail("version", "unsupported-schema-version", `Expected authoring-map version ${CLOCK_ELEVATOR_AUTHORING_MAP_VERSION}.`);
   }
   return migrateClockDrivenConnectors(source);
+}
+
+/** Additively migrates the M1B authoring envelope without moving connectors. @param {unknown} input */
+export function migrateAuthoringMapV5(input) {
+  if (!isRecord(input)) fail("map", "object", "Map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  if (source.format !== AUTHORING_MAP_FORMAT || source.version !== M1B_AUTHORING_MAP_VERSION) {
+    fail("version", "unsupported-schema-version", `Expected authoring-map version ${M1B_AUTHORING_MAP_VERSION}.`);
+  }
+  for (const field of [
+    "nextNavigationNodeOrdinal",
+    "nextNavigationLinkOrdinal",
+    "navigationNodes",
+    "navigationLinks",
+  ]) {
+    if (Object.hasOwn(source, field)) {
+      fail(field, "unknown-field", `Authoring-map v5 cannot contain ${field}.`);
+    }
+  }
+  return validateAuthoringMap({
+    ...source,
+    version: AUTHORING_MAP_VERSION,
+    nextNavigationNodeOrdinal: 1,
+    nextNavigationLinkOrdinal: 1,
+    navigationNodes: [],
+    navigationLinks: [],
+  });
 }
 
 /**
@@ -914,6 +1159,8 @@ export function migrateLegacyMap(input, metadata = {}) {
     },
     nextLayerOrdinal: 2,
     nextConnectorOrdinal: 1,
+    nextNavigationNodeOrdinal: 1,
+    nextNavigationLinkOrdinal: 1,
     playerStart: { layerId: DEFAULT_LAYER_ID, ...playerSpawn },
     layers: [{
       id: DEFAULT_LAYER_ID,
@@ -934,6 +1181,8 @@ export function migrateLegacyMap(input, metadata = {}) {
       nextInstanceOrdinal: instances.length + 1,
     }],
     connectors: [],
+    navigationNodes: [],
+    navigationLinks: [],
   });
 }
 
@@ -955,6 +1204,7 @@ export function loadAuthoringMap(input) {
   if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
   const version = /** @type {Record<string,any>} */ (value).version;
   if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
+  if (version === M1B_AUTHORING_MAP_VERSION) return migrateAuthoringMapV5(value);
   if (version === CLOCK_ELEVATOR_AUTHORING_MAP_VERSION) return migrateAuthoringMapV4(value);
   if (version === LEGACY_AUTHORING_MAP_VERSION) return migrateAuthoringMapV3(value);
   if (version === M1A_AUTHORING_MAP_VERSION) return migrateAuthoringMapV2(value);

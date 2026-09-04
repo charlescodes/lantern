@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -20,6 +20,20 @@ export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1 = "elevator-projectile-col
 export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE = "none";
 export const BREAKAWAY_FLOOR_PROFILE_V1 = "breakaway-floor-v1";
 export const BREAKAWAY_FLOOR_PROFILE_NONE = "none";
+export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1 = "authored-navigation-topology-v1";
+export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE = "none";
+
+export const NAVIGATION_TOPOLOGY = Object.freeze({
+  authoredNodeCapacity: 128,
+  authoredLinkCapacity: 256,
+  portCapacity: 160,
+  arcCapacity: 544,
+  noPort: 0xffff,
+  noLayer: 0xffff,
+  noConnectorIndex: 0xffff,
+  routeEventCapacity: 128,
+  routeEventSnapshotCount: 32,
+});
 
 export const ACTOR_TEAM = Object.freeze({
   player: 1,

@@ -96,6 +96,10 @@ test("M1B.1 v3 documents migrate to the current schema when they contain no hole
   const source = new ArenaScenario(borderedMap()).toAuthoringJSON();
   const v3 = structuredClone(source);
   v3.version = 3;
+  delete v3.nextNavigationNodeOrdinal;
+  delete v3.nextNavigationLinkOrdinal;
+  delete v3.navigationNodes;
+  delete v3.navigationLinks;
   const migrated = loadAuthoringMap(v3);
   assert.equal(migrated.version, AUTHORING_MAP_VERSION);
   assert.equal(compileAuthoringMap(migrated).layers[0].holes.length, 0);

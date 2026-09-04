@@ -1,6 +1,6 @@
 # M1A.1–M1A.4 Map-authoring kit
 
-> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Current runtime recording schema:** v14 (M1A itself did not introduce a recording-schema change)
+> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v6 · **Current runtime recording schema:** v15 (M1C.1 advances both envelopes without enabling enemy movement)
 
 M1A.1 separates friendly saved source from the compact grid and bounded pools used by the live simulation. M1A.2 adds deterministic selection, inspection, previews, and practical sparse-instance edits. M1A.3 wraps those edits in bounded undo/redo and saved-revision tracking. M1A.4 makes the same kit multi-layer, validates complete documents with structured diagnostics, and makes replacement atomic. The editor still changes authoritative state only through fixed-tick commands, and its palette and compiler resolve stable catalog IDs instead of treating HTML button names as gameplay data.
 
@@ -22,7 +22,7 @@ The central modules are:
 - `src/authoring/placement_validation.js`: lightweight, non-mutating bounds and overlap checks shared by previews and compilation.
 - `src/authoring/editor_interaction.js`: DOM-free editor state, deterministic picking, target reconciliation, and eyedropper rules.
 - `src/authoring/map_compiler.js`: deterministic, DOM-free authoring-to-runtime compilation.
-- `src/sim/scenario.js`: compatibility adapter between the authoring source, schema-v14's legacy scenario projection, and the simulation.
+- `src/sim/scenario.js`: compatibility adapter between the authoring source, the legacy scenario projection, and the simulation.
 - `src/browser/layer_panel.js`: fixed layer management, reference selection, and concise structured validation diagnostics.
 
 Stable authoring IDs are mapped to numeric runtime spawn IDs where a pool needs one. Neither identity is a pool index.
@@ -104,9 +104,9 @@ Load/import parses into a candidate, detects and migrates its supported version,
 
 ## Legacy loading and recordings
 
-Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, current markers, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. Saving after any migration emits authoring-map v5 only.
+Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, current markers, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. Saving after any migration emits authoring-map v6 only.
 
-Snapshot/recording schema is v14. Recordings keep their compiled scenario-v3 field for frozen compatibility and add `initialAuthoringMap` for current authoring data. Schema v14 adds the breakaway-floor profile; schema v13 additionally records the elevator-projectile collision profile; schema v12 retains its committed jump edge and frozen projectile behavior. Replay uses `initialAuthoringMap` for schema v12 and later, preserving older schema fixtures and branches.
+Snapshot/recording schema is v15. Recordings keep their compiled scenario-v3 field for frozen compatibility and add `initialAuthoringMap` for current authoring data. Schema v15 pins the inert authored-topology profile and capacities; schema v14 adds the breakaway-floor profile; schema v13 additionally records the elevator-projectile collision profile; schema v12 retains its committed jump edge and frozen projectile behavior. Replay uses `initialAuthoringMap` for schema v12 and later, preserving older schema fixtures and branches.
 
 The probe preserves the M1A.1–M1A.3 surface and adds safe layer activation/reference/validation, connector, and layer-operation adapters. `authoring()` reports schema/revision, detached layer/connector summaries, editor/reference/start/runtime layer IDs, compiled layer IDs, base heights/dimensions/counts, validation diagnostics/counts, layer capacity, catalog IDs, active placed instances, runtime mappings, hover/selection, preview transform/validity, the extents toggle, undo/redo depths and labels, dirty and saved revision identities, and active-transaction state without exposing mutable commands, masks, or internal arrays.
 

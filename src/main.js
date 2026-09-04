@@ -712,6 +712,12 @@ const probe = Object.freeze({
   enemyDiagnostics(id) {
     return simulation.enemyDiagnostics(id === undefined ? undefined : Number(id));
   },
+  navigationTopology() {
+    return simulation.navigationTopologySnapshot();
+  },
+  navigationRouteEvents() {
+    return simulation.navigationRouteEvents();
+  },
   developerTools() {
     return {
       open: developerToolbox.isOpen,

@@ -470,7 +470,6 @@ test("structured validation reports deterministic paths, codes, layers, and warn
   assert.ok(codes.includes("duplicate-layer-id"));
   assert.ok(codes.includes("finite-number"));
   assert.ok(codes.includes("unknown-definition"));
-  assert.ok(codes.includes("incompatible-layer-dimensions"));
   assert.ok(codes.includes("invalid-player-start-layer"));
   assert.ok(diagnostics.some((entry) => entry.path === "layers[1].surface.cells"));
   assert.ok(diagnostics.some((entry) => entry.path === "layers[0].instances[0].x"));
@@ -572,9 +571,13 @@ test("serialized maps exclude editor, history, reference, and disposable runtime
     "metadata",
     "nextLayerOrdinal",
     "nextConnectorOrdinal",
+    "nextNavigationNodeOrdinal",
+    "nextNavigationLinkOrdinal",
     "playerStart",
     "layers",
     "connectors",
+    "navigationNodes",
+    "navigationLinks",
   ]);
   assert.equal(text.includes("activeEditorLayerId"), false);
   assert.equal(text.includes("referenceLayerId"), false);

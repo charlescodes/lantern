@@ -3,6 +3,7 @@
 import { PLAYER, ROCK, SIMULATION, VERTICAL_PHYSICS } from "../config.js";
 import { firstSolidContact } from "../sim/collision.js";
 import { GridMap } from "../sim/grid_map.js";
+import { compileNavigationTopology } from "../sim/navigation_topology.js";
 import {
   AuthoringMapValidationError,
   validateAuthoringMapWithDiagnostics,
@@ -395,9 +396,11 @@ export function compileAuthoringMap(input) {
       travelDurationSeconds: connector.travelDurationSeconds,
       dwellSeconds: connector.dwellSeconds,
       dwellTicks: Math.max(0, Math.round(connector.dwellSeconds * SIMULATION.tickHz)),
+      travelTicks: Math.max(1, Math.round(connector.travelDurationSeconds * SIMULATION.tickHz)),
       initialStop: connector.initialStop,
     };
   });
+  const navigationTopology = compileNavigationTopology(document, layers, connectors);
   return {
     document,
     playerStart: { ...document.playerStart },
@@ -405,6 +408,7 @@ export function compileAuthoringMap(input) {
     layerIds: layers.map((layer) => layer.id),
     layers,
     connectors,
+    navigationTopology,
     diagnostics: validated.diagnostics.map((entry) => ({ ...entry })),
     ...compatibilityProjection(startLayer),
   };

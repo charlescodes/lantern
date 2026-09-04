@@ -72,6 +72,9 @@ function elevatorDocument(options = {}) {
     dwellSeconds: options.dwellSeconds ?? 0,
     initialStop: options.initialStop ?? "lower",
   });
+  // Preserve the historical off-center M1B fixture so its frozen physical
+  // expectations continue to exercise the exact pre-v6 deck position.
+  connector.document.connectors[0].x = 4;
   return {
     document: connector.document,
     lowerLayerId,
@@ -105,6 +108,10 @@ test("authoring-map v2 migrates without connectors and elevator connector histor
   v2.version = 2;
   delete v2.nextConnectorOrdinal;
   delete v2.connectors;
+  delete v2.nextNavigationNodeOrdinal;
+  delete v2.nextNavigationLinkOrdinal;
+  delete v2.navigationNodes;
+  delete v2.navigationLinks;
   const migrated = loadAuthoringMap(v2);
   assert.equal(migrated.version, AUTHORING_MAP_VERSION);
   assert.deepEqual(migrated.connectors, []);
@@ -137,6 +144,10 @@ test("v4 elevator maps migrate speed and obsolete policy into clock timing", () 
   const source = elevatorDocument({ travelDurationSeconds: 2, dwellSeconds: 1 });
   const v4 = structuredClone(source.document);
   v4.version = 4;
+  delete v4.nextNavigationNodeOrdinal;
+  delete v4.nextNavigationLinkOrdinal;
+  delete v4.navigationNodes;
+  delete v4.navigationLinks;
   const connector = v4.connectors[0];
   connector.travelSpeed = 3 / connector.travelDurationSeconds;
   delete connector.travelDurationSeconds;
