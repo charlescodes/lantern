@@ -51,3 +51,18 @@ test("topology view remains empty while developer diagnostics are closed", () =>
     selectedPortKey: null, pendingLinkStartKey: null, diagnostics: [],
   });
 });
+
+test("selected runtime patrol route and local goal are detached presentation data", () => {
+  const selectedRoute = [topology.ports[0], topology.ports[1]];
+  const view = createNavigationTopologyView({
+    topology: { ...topology, selectedRoute, localGoal: topology.ports[1] },
+    editor: { activeLayerId: "ground" },
+    developerToolsOpen: true,
+  });
+  assert.deepEqual(view.selectedRoute.map((port) => port.key), ["node:n1", "node:n2"]);
+  assert.equal(view.localGoal.key, "node:n2");
+  view.selectedRoute[0].x = 99;
+  view.localGoal.x = 88;
+  assert.equal(topology.ports[0].x, 2.5);
+  assert.equal(topology.ports[1].x, 5.5);
+});

@@ -171,8 +171,20 @@ const runtime = new FixedStepRuntime({
     const navigationTopologySnapshot = developerToolsOpen
       ? simulation.navigationTopologySnapshot()
       : null;
+    const selectedAiKey = aiView?.snapshot().selectedKey ?? null;
+    const selectedAiId = selectedAiKey?.startsWith("enemyWizard:")
+      ? Number(selectedAiKey.slice("enemyWizard:".length))
+      : Number.NaN;
+    const selectedAiEnemy = snapshot.enemies.find((enemy) => enemy.id === selectedAiId);
+    const topologyPresentationInput = navigationTopologySnapshot && selectedAiEnemy?.navigationRoute
+      ? {
+        ...navigationTopologySnapshot,
+        selectedRoute: selectedAiEnemy.navigationRoute.ports,
+        localGoal: selectedAiEnemy.navigationRoute.localGoal,
+      }
+      : navigationTopologySnapshot;
     const navigationTopology = createNavigationTopologyView({
-      topology: navigationTopologySnapshot,
+      topology: topologyPresentationInput,
       editor: editorView,
       developerToolsOpen,
     });

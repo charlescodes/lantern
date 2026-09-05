@@ -1,8 +1,8 @@
 # M1C Authored Navigation Topology
 
 > **Status:** active, sessionized technical plan · **Baseline:** Lantern `0.9.3`,
-> recording schema v14, authoring-map v5 · **Implementation:** M1C.1-M1C.2 complete;
-> M1C.3-M1C.5 not started
+> recording schema v14, authoring-map v5 · **Implementation:** M1C.1-M1C.3 complete;
+> M1C.4-M1C.5 not started
 
 M1C adds a small authored topology above Lantern's existing layer-local
 destination fields. Authors describe meaningful places and connections; the

@@ -207,8 +207,17 @@ export function formatAiMobDetails(snapshot, mob, sightVisible = null) {
   const route = mob.navigationRoute ?? mob.topologyRoute ?? null;
   const routeCode = route?.code ?? route?.result ?? "inactive";
   const routePhase = route?.phase ?? "NONE";
-  const sourceAnchor = route?.sourceAnchor ?? route?.source ?? "none";
-  const targetAnchor = route?.targetAnchor ?? route?.target ?? "none";
+  const anchorText = (value) => {
+    if (!value) return "none";
+    if (typeof value === "string") return value;
+    return value.key ?? value.stableId ?? "unknown";
+  };
+  const sourceAnchor = anchorText(
+    route?.sourceAnchor ?? route?.source ?? route?.previousPort,
+  );
+  const targetAnchor = anchorText(
+    route?.targetAnchor ?? route?.target ?? route?.currentPort,
+  );
   return [
     `identity    ${describeAiMobOption(mob)}`,
     `profile     ${mob.aiProfile ?? snapshot.enemyAiProfile ?? "unknown"}`,

@@ -223,16 +223,42 @@ export class NavigationTopology {
 
   /** @param {string} layerId @param {number} cx @param {number} cz */
   nearestNode(layerId, cx, cz) {
+    return this.#nearestNode(layerId, cx, cz, false);
+  }
+
+  /** @param {string} layerId @param {number} cx @param {number} cz */
+  nearestPatrolNode(layerId, cx, cz) {
+    return this.#nearestNode(layerId, cx, cz, true);
+  }
+
+  /** @param {string} layerId @param {number} cx @param {number} cz @param {boolean} patrolOnly */
+  #nearestNode(layerId, cx, cz, patrolOnly) {
     const layerIndex = this.layerIds.indexOf(String(layerId));
     const map = this.layerMaps[layerIndex];
     if (!map || !Number.isInteger(cx) || !Number.isInteger(cz) || map.get(cx, cz) !== 0) {
       return { ok: false, code: "no-anchor", port: null, cost: null };
     }
+    let hasCandidate = false;
+    for (let port = 0; port < this.portCount; port += 1) {
+      if (
+        this.portKind[port] === NAVIGATION_PORT_KIND.node
+        && this.portLayerIndex[port] === layerIndex
+        && (!patrolOnly || this.portMetadata[port].patrol === true)
+      ) {
+        hasCandidate = true;
+        break;
+      }
+    }
+    if (!hasCandidate) return { ok: false, code: "no-anchor", port: null, cost: null };
     this._gridScratch.run(map, cx, cz);
     let best = -1;
     let bestCost = NAVIGATION_UNREACHABLE;
     for (let port = 0; port < this.portCount; port += 1) {
-      if (this.portKind[port] !== NAVIGATION_PORT_KIND.node || this.portLayerIndex[port] !== layerIndex) continue;
+      if (
+        this.portKind[port] !== NAVIGATION_PORT_KIND.node
+        || this.portLayerIndex[port] !== layerIndex
+        || (patrolOnly && this.portMetadata[port].patrol !== true)
+      ) continue;
       const cost = this._gridScratch.at(map, this.portCellX[port], this.portCellZ[port]);
       if (
         cost < bestCost
@@ -245,7 +271,7 @@ export class NavigationTopology {
     if (best < 0 || bestCost === NAVIGATION_UNREACHABLE) {
       return { ok: false, code: "no-anchor", port: null, cost: null };
     }
-    return { ok: true, code: "ok", port: { ...this.portMetadata[best] }, cost: bestCost };
+    return { ok: true, code: "ok", portIndex: best, port: { ...this.portMetadata[best] }, cost: bestCost };
   }
 
   describe() {

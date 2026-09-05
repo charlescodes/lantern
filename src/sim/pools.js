@@ -1,6 +1,13 @@
 // @ts-check
 
 import {
+  NAVIGATION_EVIDENCE,
+  NAVIGATION_ROUTE_FAILURE,
+  NAVIGATION_ROUTE_PHASE,
+  NAVIGATION_TOPOLOGY,
+} from "../config.js";
+
+import {
   copyVerticalBody,
   DEFAULT_ACTOR_VERTICAL_CAPABILITIES,
   initializeVerticalBody,
@@ -229,10 +236,29 @@ export class EnemyWizardPool {
     this.investigationOriginX = new Float32Array(capacity);
     this.investigationOriginZ = new Float32Array(capacity);
     this.navigationSlot = new Int16Array(capacity);
+    this.topologyPhase = new Uint8Array(capacity);
+    this.topologyRevision = new Uint32Array(capacity);
+    this.routeLength = new Uint16Array(capacity);
+    this.routeCursor = new Uint16Array(capacity);
+    this.routeConnectorRuntimeId = new Uint32Array(capacity);
+    this.routeWaitStartTick = new Uint32Array(capacity);
+    this.routeMissedCycles = new Uint8Array(capacity);
+    this.routeReplanTick = new Uint32Array(capacity);
+    this.patrolPort = new Uint16Array(capacity);
+    this.currentRoutePort = new Uint16Array(capacity);
+    this.previousRoutePort = new Uint16Array(capacity);
+    this.patrolDwellRemaining = new Uint16Array(capacity);
+    this.knownTargetLayer = new Uint16Array(capacity);
+    this.navigationEvidence = new Uint8Array(capacity);
+    this.routeFailure = new Uint8Array(capacity);
+    this.routePorts = new Uint16Array(capacity * NAVIGATION_TOPOLOGY.portCapacity);
     installVerticalBodyColumns(this, capacity);
   }
 
   reset() {
+    for (let index = 0; index < this.activeCount; index += 1) {
+      this.clearNavigationRoute(index);
+    }
     this.activeCount = 0;
     this.dropped = 0;
     this.nextId = 1;
@@ -370,6 +396,7 @@ export class EnemyWizardPool {
     this.investigationOriginX[index] = Number.NaN;
     this.investigationOriginZ[index] = Number.NaN;
     this.navigationSlot[index] = -1;
+    this.clearNavigationRoute(index);
     initializeVerticalBody(this, index, value, DEFAULT_ACTOR_VERTICAL_CAPABILITIES);
     this.activeCount += 1;
     return id;
@@ -495,6 +522,21 @@ export class EnemyWizardPool {
         this.investigationOriginX,
         this.investigationOriginZ,
         this.navigationSlot,
+        this.topologyPhase,
+        this.topologyRevision,
+        this.routeLength,
+        this.routeCursor,
+        this.routeConnectorRuntimeId,
+        this.routeWaitStartTick,
+        this.routeMissedCycles,
+        this.routeReplanTick,
+        this.patrolPort,
+        this.currentRoutePort,
+        this.previousRoutePort,
+        this.patrolDwellRemaining,
+        this.knownTargetLayer,
+        this.navigationEvidence,
+        this.routeFailure,
         this.worldY,
         this.previousWorldY,
         this.verticalVelocityY,
@@ -508,9 +550,75 @@ export class EnemyWizardPool {
       ]) {
         component[index] = component[last];
       }
+      const targetOffset = index * NAVIGATION_TOPOLOGY.portCapacity;
+      const sourceOffset = last * NAVIGATION_TOPOLOGY.portCapacity;
+      this.routePorts.copyWithin(
+        targetOffset,
+        sourceOffset,
+        sourceOffset + NAVIGATION_TOPOLOGY.portCapacity,
+      );
     }
+    this.clearNavigationRoute(last);
     this.activeCount = last;
     return true;
+  }
+
+  /** @param {number} index */
+  clearNavigationRoute(index) {
+    if (index < 0 || index >= this.capacity) return false;
+    this.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.none;
+    this.topologyRevision[index] = 0;
+    this.routeLength[index] = 0;
+    this.routeCursor[index] = 0;
+    this.routeConnectorRuntimeId[index] = 0;
+    this.routeWaitStartTick[index] = 0;
+    this.routeMissedCycles[index] = 0;
+    this.routeReplanTick[index] = 0;
+    this.patrolPort[index] = NAVIGATION_TOPOLOGY.noPort;
+    this.currentRoutePort[index] = NAVIGATION_TOPOLOGY.noPort;
+    this.previousRoutePort[index] = NAVIGATION_TOPOLOGY.noPort;
+    this.patrolDwellRemaining[index] = 0;
+    this.knownTargetLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+    this.navigationEvidence[index] = NAVIGATION_EVIDENCE.none;
+    this.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.none;
+    const offset = index * NAVIGATION_TOPOLOGY.portCapacity;
+    this.routePorts.fill(
+      NAVIGATION_TOPOLOGY.noPort,
+      offset,
+      offset + NAVIGATION_TOPOLOGY.portCapacity,
+    );
+    return true;
+  }
+
+  /** @param {number} index @param {ArrayLike<number>} ports */
+  setNavigationRoute(index, ports) {
+    if (index < 0 || index >= this.activeCount) throw new RangeError("Unknown enemy route row");
+    if (ports.length > NAVIGATION_TOPOLOGY.portCapacity) {
+      throw new RangeError(`Enemy routes support at most ${NAVIGATION_TOPOLOGY.portCapacity} ports`);
+    }
+    const offset = index * NAVIGATION_TOPOLOGY.portCapacity;
+    this.routePorts.fill(
+      NAVIGATION_TOPOLOGY.noPort,
+      offset,
+      offset + NAVIGATION_TOPOLOGY.portCapacity,
+    );
+    for (let port = 0; port < ports.length; port += 1) {
+      const value = Number(ports[port]);
+      if (!Number.isInteger(value) || value < 0 || value >= NAVIGATION_TOPOLOGY.portCapacity) {
+        throw new RangeError("Enemy route port index is out of bounds");
+      }
+      this.routePorts[offset + port] = value;
+    }
+    this.routeLength[index] = ports.length;
+    this.routeCursor[index] = 0;
+    return true;
+  }
+
+  /** @param {number} index */
+  navigationRoute(index) {
+    if (index < 0 || index >= this.activeCount) return [];
+    const offset = index * NAVIGATION_TOPOLOGY.portCapacity;
+    return Array.from(this.routePorts.slice(offset, offset + this.routeLength[index]));
   }
 
   /** @param {number} id */

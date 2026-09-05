@@ -29,6 +29,10 @@ import {
   MOVEMENT_SOUND,
   MOVEMENT_SOUND_PROFILE_NONE,
   MOVEMENT_SOUND_PROFILE_V1,
+  NAVIGATION_EVIDENCE,
+  NAVIGATION_PATROL,
+  NAVIGATION_ROUTE_FAILURE,
+  NAVIGATION_ROUTE_PHASE,
   NAVIGATION_TOPOLOGY,
   normalizeParticleProfile,
   PARTICLE,
@@ -124,6 +128,10 @@ import {
 import { GridMap } from "./grid_map.js";
 import { GridReachability } from "./grid_reachability.js";
 import { MapCellBroadphase } from "./map_cell_broadphase.js";
+import {
+  NAVIGATION_ARC_KIND,
+  NAVIGATION_PORT_KIND,
+} from "./navigation_topology.js";
 import {
   NAVIGATION_UNREACHABLE,
   SharedNavigationField,
@@ -237,6 +245,17 @@ const ENEMY_GOAL_NAMES = Object.freeze([
   "search",
   "guard",
 ]);
+const NAVIGATION_ROUTE_PHASE_NAMES = Object.freeze([
+  "NONE",
+  "APPROACH_PORT",
+  "WAIT_PLATFORM",
+  "BOARD",
+  "RIDE",
+  "DISEMBARK",
+  "LOCAL_GOAL",
+]);
+const NAVIGATION_EVIDENCE_NAMES = Object.freeze(["none"]);
+const NAVIGATION_ROUTE_FAILURE_NAMES = Object.freeze(["none", "no-anchor", "disconnected"]);
 const SPAWN_OFFSETS = Object.freeze([
   Object.freeze({ x: 0, z: -1, name: "north" }),
   Object.freeze({ x: 1, z: 0, name: "east" }),
@@ -802,6 +821,8 @@ export class Simulation {
     );
     this.layerMaps = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).map);
     this.layerMaps[this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0] = this.map;
+    this.layerMapRevisions = new Uint32Array(this.layerMaps.length);
+    this.layerMapRevisions.fill(1);
     this.layerBaseY = Float32Array.from(
       this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).baseY),
     );
@@ -942,7 +963,11 @@ export class Simulation {
     this.inertDeadBodies = new InertDeadBodyRing(inertDeadBodyCapacity);
     this.mapRevision = 1;
     this.navigationField = new SharedNavigationField(this.map);
-    this.destinationFields = new DestinationFieldCache(this.map);
+    this.destinationFields = new DestinationFieldCache(
+      this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+        ? this.layerMaps
+        : this.map,
+    );
     this.reachability = new GridReachability(this.map);
     this.projectiles = new ProjectilePool(options.projectileCapacity ?? PROJECTILE.capacity);
     const soundEventCapacity = options.soundEventCapacity
@@ -1196,6 +1221,7 @@ export class Simulation {
     this.tickCount = 0;
     this.nextExplosionId = 1;
     this.mapRevision = 1;
+    this.layerMapRevisions.fill(1);
     this.topologyRevision = 1;
     this.#restoreAuthoredState();
     this.impactEvents.clear();
@@ -1288,7 +1314,11 @@ export class Simulation {
     this.runtimeViewLayerId = this.layerIds[startLayerIndex] ?? this.scenario.startLayerId;
     this.map = this.layerMaps[startLayerIndex] ?? this.scenario.map;
     this.navigationField.reset(this.map);
-    this.destinationFields.reset(this.map);
+    this.destinationFields.reset(
+      this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+        ? this.layerMaps
+        : this.map,
+    );
     this.reachability.reset(this.map);
     this.broadphase.reset(this.map);
     this.spellCooldowns.fill(0);
@@ -1412,6 +1442,7 @@ export class Simulation {
     } else if (this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE) {
       this.#perceptionSystem(simulationTick);
     }
+    this.#topologyIntentSystem(simulationTick);
     this.#navigationSystem();
     this.#prepareMovement(command.move, SIMULATION.dt, simulationTick);
     this.#prepareEnemyMovement(SIMULATION.dt, simulationTick);
@@ -1499,6 +1530,39 @@ export class Simulation {
     ]);
     this.pressurePlates = this.#compiledPressurePlates();
     this.breakawayFloors = this.#compiledBreakawayFloors(this.breakawayFloors);
+  }
+
+  /** @param {ArenaScenario} previousScenario @param {Array<string>} previousLayerIds @param {Uint32Array} previousRevisions */
+  #reconcileLayerMapRevisions(previousScenario, previousLayerIds, previousRevisions) {
+    const next = new Uint32Array(this.layerIds.length);
+    for (let index = 0; index < this.layerIds.length; index += 1) {
+      const layerId = this.layerIds[index];
+      const previousIndex = previousLayerIds.indexOf(layerId);
+      if (previousIndex < 0) {
+        next[index] = 1;
+        continue;
+      }
+      const before = previousScenario.compiledLayer(layerId)?.map;
+      const after = this.layerMaps[index];
+      let changed = !before || before.width !== after.width || before.height !== after.height;
+      if (!changed) {
+        for (let cell = 0; cell < after.cells.length; cell += 1) {
+          if (before.cells[cell] !== after.cells[cell]) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      const revision = previousRevisions[previousIndex] || 1;
+      next[index] = changed ? revision + 1 : revision;
+    }
+    this.layerMapRevisions = next;
+  }
+
+  #markActiveLayerMapChanged() {
+    this.mapRevision += 1;
+    const layerIndex = this.layerIdToIndex.get(this.scenario.activeLayer.id);
+    if (layerIndex !== undefined) this.layerMapRevisions[layerIndex] += 1;
   }
 
   /** @param {Array<Record<string,any>>} [previous] */
@@ -1799,8 +1863,14 @@ export class Simulation {
     }
     const previousScenario = this.scenario;
     const previousLayerIds = [...this.layerIds];
+    const previousLayerMapRevisions = this.layerMapRevisions.slice();
     this.scenario = candidate;
     this.#rebuildCompiledLayerRuntime();
+    this.#reconcileLayerMapRevisions(
+      previousScenario,
+      previousLayerIds,
+      previousLayerMapRevisions,
+    );
     this.navigationTopology = this.scenario.navigationTopology;
     this.topologyRevision += 1;
     if (this.navigationRouteEventHistory.length >= this.navigationRouteEventHistory.capacity) {
@@ -1829,7 +1899,9 @@ export class Simulation {
       this.#reconcileDynamicAuthoringRuntime(previousScenario);
       this.#reconcileElevatorAuthoringRuntime(previousScenario);
       this.navigationField.reset(this.map);
-      this.destinationFields.reset(this.map);
+      if (this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1) {
+        this.destinationFields.reset(this.map);
+      }
       this.reachability.reset(this.map);
       this.broadphase.reset(this.map);
     }
@@ -2263,7 +2335,7 @@ export class Simulation {
         !== candidate.occluderMask[candidate.map.index(cell.cx, cell.cz)]
     ));
     if (!this.scenario.paintStructureCells(cells, definitionId)) return false;
-    if (mapChanged) this.mapRevision += 1;
+    if (mapChanged) this.#markActiveLayerMapChanged();
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
@@ -2283,7 +2355,7 @@ export class Simulation {
       return this.map.cells[index] !== 0 || this.scenario.occluderMask[index] !== 0;
     });
     if (!this.scenario.eraseStructureCells(cells)) return false;
-    if (mapChanged) this.mapRevision += 1;
+    if (mapChanged) this.#markActiveLayerMapChanged();
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
     return true;
@@ -2349,7 +2421,7 @@ export class Simulation {
       }
     }
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
-      this.mapRevision += 1;
+      this.#markActiveLayerMapChanged();
     }
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
@@ -2402,7 +2474,7 @@ export class Simulation {
       }
     }
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
-      this.mapRevision += 1;
+      this.#markActiveLayerMapChanged();
     }
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
@@ -2419,7 +2491,7 @@ export class Simulation {
     if (!this.scenario.removeInstance(authoringId)) return false;
     if (rockIndex >= 0) this.rocks.removeSwap(rockIndex);
     if (definition?.traits.blocksMovement || definition?.traits.blocksSight) {
-      this.mapRevision += 1;
+      this.#markActiveLayerMapChanged();
     }
     this.authoringRevision += 1;
     this.#refreshPreparedAuthoringState();
@@ -2883,6 +2955,7 @@ export class Simulation {
       let state = pool.perceptionState[index];
       if (
         state === PERCEPTION_STATE.unaware
+        && pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.localGoal
         && Math.hypot(
           pool.x[index] - pool.guardX[index],
           pool.z[index] - pool.guardZ[index],
@@ -2937,7 +3010,10 @@ export class Simulation {
           const slot = pool.navigationSlot[index];
           const cx = Math.floor(pool.x[index]);
           const cz = Math.floor(pool.z[index]);
-          const unreachable = this.destinationFields.isCurrent(slot, this.mapRevision)
+          const unreachable = this.#isDestinationFieldCurrent(
+            slot,
+            pool.layerIndex[index],
+          )
             && this.destinationFields.rawCostAt(slot, cx, cz) === NAVIGATION_UNREACHABLE;
           if (!unreachable) {
             pool.guardUnreachableStartTick[index] = 0;
@@ -3158,6 +3234,7 @@ export class Simulation {
       let state = pool.perceptionState[index];
       if (
         state === PERCEPTION_STATE.unaware
+        && pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.localGoal
         && Math.hypot(
           pool.x[index] - pool.guardX[index],
           pool.z[index] - pool.guardZ[index],
@@ -3220,7 +3297,10 @@ export class Simulation {
           const slot = pool.navigationSlot[index];
           const cx = Math.floor(pool.x[index]);
           const cz = Math.floor(pool.z[index]);
-          const unreachable = this.destinationFields.isCurrent(slot, this.mapRevision)
+          const unreachable = this.#isDestinationFieldCurrent(
+            slot,
+            pool.layerIndex[index],
+          )
             && this.destinationFields.rawCostAt(slot, cx, cz) === NAVIGATION_UNREACHABLE;
           if (!unreachable) {
             pool.guardUnreachableStartTick[index] = 0;
@@ -3473,9 +3553,15 @@ export class Simulation {
     }
     if (!usesPerceptionProfile(this.enemyAiProfile)) return;
     const pool = this.enemies;
+    const layerAware = this.authoredNavigationTopologyProfile
+      === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1;
     this.destinationFields.beginTick();
     for (let index = 0; index < pool.activeCount; index += 1) {
       pool.navigationSlot[index] = -1;
+      const layerIndex = pool.layerIndex[index];
+      const layerRevision = layerAware
+        ? this.layerMapRevisions[layerIndex] ?? this.mapRevision
+        : this.mapRevision;
       let retreating = Boolean(pool.retreating[index]);
       if (!retreating && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
         retreating = true;
@@ -3484,11 +3570,12 @@ export class Simulation {
       }
       if (retreating) {
         if (pool.currentVisibility[index]) {
-          pool.navigationSlot[index] = this.destinationFields.requestActor(
+          pool.navigationSlot[index] = this.#requestDestinationActor(
             TARGET_KIND.player,
             this.player.id,
             ACTOR_TEAM.player,
-            this.mapRevision,
+            layerIndex,
+            layerRevision,
             Math.floor(this.player.x),
             Math.floor(this.player.z),
           );
@@ -3498,20 +3585,23 @@ export class Simulation {
           && Number.isFinite(pool.investigationAnchorX[index])
           && Number.isFinite(pool.investigationAnchorZ[index])
         ) {
-          pool.navigationSlot[index] = this.destinationFields.requestGoal(
-            this.mapRevision,
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
             Math.floor(pool.investigationAnchorX[index]),
             Math.floor(pool.investigationAnchorZ[index]),
           );
         } else if (pool.hasLastSeen[index]) {
-          pool.navigationSlot[index] = this.destinationFields.requestGoal(
-            this.mapRevision,
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
             Math.floor(pool.lastSeenX[index]),
             Math.floor(pool.lastSeenZ[index]),
           );
         } else if (pool.hasStimulus[index]) {
-          pool.navigationSlot[index] = this.destinationFields.requestGoal(
-            this.mapRevision,
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
             Math.floor(pool.stimulusX[index]),
             Math.floor(pool.stimulusZ[index]),
           );
@@ -3520,12 +3610,25 @@ export class Simulation {
       }
       let state = pool.perceptionState[index];
       if (state === PERCEPTION_STATE.noticing) state = pool.noticingResumeState[index];
-      if (state === PERCEPTION_STATE.engaged) {
-        pool.navigationSlot[index] = this.destinationFields.requestActor(
+      if (
+        state === PERCEPTION_STATE.unaware
+        && pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.localGoal
+        && pool.currentRoutePort[index] !== NAVIGATION_TOPOLOGY.noPort
+      ) {
+        const port = pool.currentRoutePort[index];
+        pool.navigationSlot[index] = this.#requestDestinationGoal(
+          layerIndex,
+          layerRevision,
+          this.navigationTopology.portCellX[port],
+          this.navigationTopology.portCellZ[port],
+        );
+      } else if (state === PERCEPTION_STATE.engaged) {
+        pool.navigationSlot[index] = this.#requestDestinationActor(
           TARGET_KIND.player,
           this.player.id,
           ACTOR_TEAM.player,
-          this.mapRevision,
+          layerIndex,
+          layerRevision,
           Math.floor(this.player.x),
           Math.floor(this.player.z),
         );
@@ -3540,24 +3643,194 @@ export class Simulation {
           ? pool.searchGoalZ[index]
           : pool.huntAnchorZ[index];
         if (Number.isFinite(goalX) && Number.isFinite(goalZ)) {
-          pool.navigationSlot[index] = this.destinationFields.requestGoal(
-            this.mapRevision,
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
             Math.floor(goalX),
             Math.floor(goalZ),
           );
         }
       } else if (state === PERCEPTION_STATE.returning) {
-        pool.navigationSlot[index] = this.destinationFields.requestGoal(
-          this.mapRevision,
+        pool.navigationSlot[index] = this.#requestDestinationGoal(
+          layerIndex,
+          layerRevision,
           Math.floor(pool.guardX[index]),
           Math.floor(pool.guardZ[index]),
         );
       }
     }
     this.destinationFields.update(
-      this.map,
+      layerAware ? this.layerMaps : this.map,
       PERCEPTIVE_WIZARD.navigationExpansionsPerTick,
     );
+  }
+
+  /** @param {number} kind @param {number} id @param {number} team @param {number} layerIndex @param {number} revision @param {number} cx @param {number} cz */
+  #requestDestinationActor(kind, id, team, layerIndex, revision, cx, cz) {
+    return this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+      ? this.destinationFields.requestActor(kind, id, team, layerIndex, revision, cx, cz)
+      : this.destinationFields.requestActor(kind, id, team, revision, cx, cz);
+  }
+
+  /** @param {number} layerIndex @param {number} revision @param {number} cx @param {number} cz */
+  #requestDestinationGoal(layerIndex, revision, cx, cz) {
+    return this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+      ? this.destinationFields.requestGoal(layerIndex, revision, cx, cz)
+      : this.destinationFields.requestGoal(revision, cx, cz);
+  }
+
+  /** @param {number} slot @param {number} layerIndex */
+  #isDestinationFieldCurrent(slot, layerIndex) {
+    const layerAware = this.authoredNavigationTopologyProfile
+      === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1;
+    return this.destinationFields.isCurrent(
+      slot,
+      layerAware ? this.layerMapRevisions[layerIndex] : this.mapRevision,
+      layerAware ? layerIndex : undefined,
+    );
+  }
+
+  /** @param {string} type @param {number} index @param {number} tick @param {Record<string,unknown>} [details] */
+  #recordNavigationRouteEvent(type, index, tick, details = {}) {
+    if (this.navigationRouteEventHistory.length >= this.navigationRouteEventHistory.capacity) {
+      this.navigationRouteEventDropped += 1;
+    }
+    this.navigationRouteEventHistory.push({
+      tick,
+      type,
+      enemyId: this.enemies.id[index],
+      spawnSequence: this.enemies.spawnSequence[index],
+      topologyRevision: this.topologyRevision,
+      ...details,
+    });
+  }
+
+  /** @param {number} index @param {string} reason @param {number} tick */
+  #clearEnemyPatrol(index, reason, tick) {
+    const pool = this.enemies;
+    if (
+      pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.localGoal
+      && pool.patrolPort[index] === NAVIGATION_TOPOLOGY.noPort
+      && pool.routeFailure[index] === NAVIGATION_ROUTE_FAILURE.none
+    ) return;
+    this.#recordNavigationRouteEvent("route-cleared", index, tick, { reason });
+    pool.clearNavigationRoute(index);
+  }
+
+  /** @param {number} index @param {number} current */
+  #nextPatrolPort(index, current) {
+    const topology = this.navigationTopology;
+    const pool = this.enemies;
+    const previous = pool.previousRoutePort[index];
+    let count = 0;
+    for (let arc = topology.adjacencyOffset[current]; arc < topology.adjacencyOffset[current + 1]; arc += 1) {
+      const target = topology.arcTo[arc];
+      if (
+        topology.arcKind[arc] === NAVIGATION_ARC_KIND.authoredLink
+        && topology.portKind[target] === NAVIGATION_PORT_KIND.node
+        && topology.portLayerIndex[target] === pool.layerIndex[index]
+        && topology.portMetadata[target].patrol === true
+      ) count += 1;
+    }
+    if (count === 0) return NAVIGATION_TOPOLOGY.noPort;
+    const rotation = pool.spawnSequence[index] % count;
+    for (let choice = 0; choice < count; choice += 1) {
+      const ordinal = (rotation + choice) % count;
+      let seen = 0;
+      for (let arc = topology.adjacencyOffset[current]; arc < topology.adjacencyOffset[current + 1]; arc += 1) {
+        const target = topology.arcTo[arc];
+        if (
+          topology.arcKind[arc] !== NAVIGATION_ARC_KIND.authoredLink
+          || topology.portKind[target] !== NAVIGATION_PORT_KIND.node
+          || topology.portLayerIndex[target] !== pool.layerIndex[index]
+          || topology.portMetadata[target].patrol !== true
+        ) continue;
+        if (seen === ordinal && (count === 1 || target !== previous)) return target;
+        seen += 1;
+      }
+    }
+    return previous;
+  }
+
+  /** @param {number} simulationTick */
+  #topologyIntentSystem(simulationTick) {
+    if (
+      this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+      || !usesPerceptionProfile(this.enemyAiProfile)
+    ) return;
+    const pool = this.enemies;
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      const retreating = Boolean(pool.retreating[index])
+        ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
+        : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth;
+      const eligible = pool.perceptionState[index] === PERCEPTION_STATE.unaware
+        && !retreating
+        && pool.supportKind[index] === SUPPORT_KIND.FLOOR
+        && Math.hypot(pool.externalVx[index], pool.externalVz[index]) < 0.2;
+      if (!eligible) {
+        this.#clearEnemyPatrol(index, "higher-priority-intent", simulationTick);
+        continue;
+      }
+      if (
+        pool.topologyRevision[index] !== 0
+        && pool.topologyRevision[index] !== this.topologyRevision
+      ) this.#clearEnemyPatrol(index, "topology-revision", simulationTick);
+      if (pool.patrolPort[index] === NAVIGATION_TOPOLOGY.noPort) {
+        if (simulationTick < pool.routeReplanTick[index]) continue;
+        const layerId = this.layerIds[pool.layerIndex[index]];
+        const nearest = this.navigationTopology.nearestPatrolNode(
+          layerId,
+          Math.floor(pool.x[index]),
+          Math.floor(pool.z[index]),
+        );
+        if (!nearest.ok) {
+          pool.topologyRevision[index] = this.topologyRevision;
+          pool.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.noAnchor;
+          pool.routeReplanTick[index] = simulationTick + NAVIGATION_PATROL.replanCooldownTicks;
+          continue;
+        }
+        const port = nearest.portIndex;
+        pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.localGoal;
+        pool.topologyRevision[index] = this.topologyRevision;
+        pool.patrolPort[index] = port;
+        pool.currentRoutePort[index] = port;
+        pool.previousRoutePort[index] = NAVIGATION_TOPOLOGY.noPort;
+        pool.patrolDwellRemaining[index] = 0;
+        pool.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.none;
+        pool.setNavigationRoute(index, [port]);
+        this.#recordNavigationRouteEvent("route-planned", index, simulationTick, {
+          intent: "patrol",
+          port: this.navigationTopology.portMetadata[port].key,
+        });
+      }
+      const current = pool.currentRoutePort[index];
+      if (current === NAVIGATION_TOPOLOGY.noPort) continue;
+      const distance = Math.hypot(
+        pool.x[index] - this.navigationTopology.portWorldX[current],
+        pool.z[index] - this.navigationTopology.portWorldZ[current],
+      );
+      if (distance > PERCEPTIVE_WIZARD.guardReturnDistanceMeters) continue;
+      if (pool.patrolDwellRemaining[index] === 0) {
+        pool.patrolDwellRemaining[index] = NAVIGATION_PATROL.dwellTicks;
+        this.#recordNavigationRouteEvent("port-reached", index, simulationTick, {
+          port: this.navigationTopology.portMetadata[current].key,
+        });
+        continue;
+      }
+      pool.patrolDwellRemaining[index] -= 1;
+      if (pool.patrolDwellRemaining[index] > 0) continue;
+      const next = this.#nextPatrolPort(index, current);
+      if (next === NAVIGATION_TOPOLOGY.noPort || next === current) continue;
+      pool.previousRoutePort[index] = current;
+      pool.currentRoutePort[index] = next;
+      pool.patrolPort[index] = next;
+      pool.setNavigationRoute(index, [current, next]);
+      pool.routeCursor[index] = 1;
+      this.#recordNavigationRouteEvent("patrol-next", index, simulationTick, {
+        from: this.navigationTopology.portMetadata[current].key,
+        to: this.navigationTopology.portMetadata[next].key,
+      });
+    }
   }
 
   /** @param {number} index @param {number} kind @param {number} x @param {number} z @param {number} [cx] @param {number} [cz] */
@@ -3906,8 +4179,16 @@ export class Simulation {
     const cellX = Math.floor(pool.x[index]);
     const cellZ = Math.floor(pool.z[index]);
     const slot = pool.navigationSlot[index];
-    const step = this.destinationFields.isCurrent(slot)
-      ? this.destinationFields.gradientStep(this.map, slot, cellX, cellZ, gradientMode)
+    const layerIndex = pool.layerIndex[index];
+    const layerAware = this.authoredNavigationTopologyProfile
+      === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1;
+    const map = layerAware ? this.layerMaps[layerIndex] ?? this.map : this.map;
+    const step = this.destinationFields.isCurrent(
+      slot,
+      layerAware ? this.layerMapRevisions[layerIndex] : this.mapRevision,
+      layerAware ? layerIndex : undefined,
+    )
+      ? this.destinationFields.gradientStep(map, slot, cellX, cellZ, gradientMode)
       : null;
     if (step) {
       this.#setEnemyMovementGoal(
@@ -3940,6 +4221,40 @@ export class Simulation {
   /** @param {number} index @param {number} dt @param {number} simulationTick */
   #preparePerceptiveEnemyMovement(index, dt, simulationTick) {
     const pool = this.enemies;
+    if (
+      pool.perceptionState[index] === PERCEPTION_STATE.unaware
+      && pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.localGoal
+      && pool.currentRoutePort[index] !== NAVIGATION_TOPOLOGY.noPort
+    ) {
+      const port = pool.currentRoutePort[index];
+      const targetX = this.navigationTopology.portWorldX[port];
+      const targetZ = this.navigationTopology.portWorldZ[port];
+      const cellX = Math.floor(pool.x[index]);
+      const cellZ = Math.floor(pool.z[index]);
+      const slot = pool.navigationSlot[index];
+      pool.navigationCost[index] = this.destinationFields.rawCostAt(slot, cellX, cellZ);
+      pool.navigationVersion[index] = slot >= 0 ? this.destinationFields.versions[slot] : 0;
+      if (
+        Math.hypot(targetX - pool.x[index], targetZ - pool.z[index])
+        <= PERCEPTIVE_WIZARD.guardReturnDistanceMeters
+      ) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        this.#setEnemyMovementGoal(index, ENEMY_GOAL_GUARD, targetX, targetZ);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+      } else {
+        pool.aiState[index] = ENEMY_AI_APPROACH;
+        this.#movePerceptiveWithField(
+          index,
+          targetX,
+          targetZ,
+          "approach",
+          ENEMY_GOAL_GUARD,
+          ENEMY_WIZARD.desiredSpeed,
+          dt,
+        );
+      }
+      return;
+    }
     if (pool.layerIndex[index] !== this.player.layerIndex) {
       pool.aiState[index] = ENEMY_AI_HOLD;
       this.#clearEnemyMovementGoal(index);
@@ -5781,7 +6096,9 @@ export class Simulation {
     this.map = this.layerMaps[layerIndex];
     this.mapRevision += 1;
     this.navigationField.reset(this.map);
-    this.destinationFields.reset(this.map);
+    if (this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1) {
+      this.destinationFields.reset(this.map);
+    }
     this.reachability.reset(this.map);
     this.broadphase.reset(this.map);
     this.#refreshPreparedAuthoringState();
@@ -8744,6 +9061,9 @@ export class Simulation {
         behaviorState: enemy.behaviorState,
         movementGoal: cloneUnknown(enemy.movementGoal),
         navigationField: cloneUnknown(enemy.navigationField),
+        ...(enemy.navigationRoute
+          ? { navigationRoute: cloneUnknown(enemy.navigationRoute) }
+          : {}),
         strafe: cloneUnknown(enemy.strafe),
         predictedAimPoint: cloneUnknown(enemy.predictedAimPoint),
         aimLeadTime: enemy.aimLeadTime,
@@ -8830,6 +9150,41 @@ export class Simulation {
   }
 
   /** @param {number} index */
+  #enemyNavigationRouteState(index) {
+    const pool = this.enemies;
+    const route = pool.navigationRoute(index);
+    const port = (value) => value === NAVIGATION_TOPOLOGY.noPort
+      ? null
+      : cloneUnknown(this.navigationTopology.portMetadata[value] ?? null);
+    const failureCode = pool.routeFailure[index];
+    return {
+      code: failureCode === NAVIGATION_ROUTE_FAILURE.none
+        ? pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.none ? "inactive" : "ok"
+        : NAVIGATION_ROUTE_FAILURE_NAMES[failureCode] ?? "unknown",
+      phase: NAVIGATION_ROUTE_PHASE_NAMES[pool.topologyPhase[index]] ?? "NONE",
+      phaseCode: pool.topologyPhase[index],
+      topologyRevision: pool.topologyRevision[index] || null,
+      length: pool.routeLength[index],
+      cursor: pool.routeCursor[index],
+      ports: route.map((value) => port(value)).filter(Boolean),
+      patrolPort: port(pool.patrolPort[index]),
+      currentPort: port(pool.currentRoutePort[index]),
+      previousPort: port(pool.previousRoutePort[index]),
+      connectorRuntimeId: pool.routeConnectorRuntimeId[index] || null,
+      waitStartTick: pool.routeWaitStartTick[index] || null,
+      missedCycles: pool.routeMissedCycles[index],
+      replanTick: pool.routeReplanTick[index] || null,
+      dwellRemainingTicks: pool.patrolDwellRemaining[index],
+      knownTargetLayer: pool.knownTargetLayer[index] === NAVIGATION_TOPOLOGY.noLayer
+        ? null
+        : this.layerIds[pool.knownTargetLayer[index]] ?? null,
+      evidence: NAVIGATION_EVIDENCE_NAMES[pool.navigationEvidence[index]] ?? "none",
+      failure: NAVIGATION_ROUTE_FAILURE_NAMES[failureCode] ?? "none",
+      localGoal: port(pool.currentRoutePort[index]),
+    };
+  }
+
+  /** @param {number} index */
   #enemyTacticalState(index) {
     const pool = this.enemies;
     const navigationCost = pool.navigationCost[index];
@@ -8886,6 +9241,10 @@ export class Simulation {
           },
       },
       retreating: Boolean(pool.retreating[index]),
+      ...(this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+        && usesPerceptionProfile(this.enemyAiProfile)
+        ? { navigationRoute: this.#enemyNavigationRouteState(index) }
+        : {}),
     };
   }
 
@@ -9489,7 +9848,23 @@ export class Simulation {
       deadBodyProfile: this.deadBodyProfile,
       movementSoundProfile: this.movementSoundProfile,
       navigation: usesPerceptionProfile(this.enemyAiProfile)
-        ? this.destinationFields.diagnostics(this.mapRevision)
+        ? {
+          ...this.destinationFields.diagnostics(
+            this.mapRevision,
+            this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1,
+          ),
+          ...(this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+            ? {
+              layers: this.layerMaps.map((map, index) => ({
+                layerId: this.layerIds[index],
+                layerIndex: index,
+                revision: this.layerMapRevisions[index],
+                width: map.width,
+                height: map.height,
+              })),
+            }
+            : {}),
+        }
         : {
           mapRevision: this.mapRevision,
           ...this.navigationField.diagnostics(
@@ -10512,7 +10887,9 @@ export class Simulation {
       this.map = this.layerMaps[layerIndex];
       this.mapRevision += 1;
       this.navigationField.reset(this.map);
-      this.destinationFields.reset(this.map);
+      if (this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1) {
+        this.destinationFields.reset(this.map);
+      }
       this.reachability.reset(this.map);
       this.broadphase.reset(this.map);
       this.#refreshPreparedAuthoringState();

@@ -124,3 +124,32 @@ test("disconnected cells remain unreachable and referenced goals cannot be evict
   assert.equal(cache.requestGoal(1, 18, 10), -1);
   assert.equal(cache.slotDiagnostics(slots[0]).references, 1);
 });
+
+test("unequal layers keep independent goal identity under one global expansion budget", () => {
+  const maps = [borderedMap(18, 12), borderedMap(9, 7)];
+  const cache = new DestinationFieldCache(maps);
+  cache.beginTick();
+  const lower = cache.requestGoal(0, 1, 6, 4);
+  const upper = cache.requestGoal(1, 4, 6, 4);
+  assert.notEqual(lower, upper);
+  assert.equal(cache.slotDiagnostics(lower).key, "layer:0:goal:6:4");
+  assert.equal(cache.slotDiagnostics(upper).key, "layer:1:goal:6:4");
+  let guard = 20;
+  while ((!cache.isCurrent(lower, 1, 0) || !cache.isCurrent(upper, 4, 1)) && guard > 0) {
+    const expanded = cache.update(maps, 37);
+    assert.ok(expanded <= 37);
+    guard -= 1;
+  }
+  assert.ok(guard > 0);
+  assert.notEqual(cache.rawCostAt(lower, 14, 8), NAVIGATION_UNREACHABLE);
+  assert.notEqual(cache.rawCostAt(upper, 2, 2), NAVIGATION_UNREACHABLE);
+
+  maps[1].set(4, 3, 1);
+  cache.beginTick();
+  cache.requestGoal(0, 1, 6, 4);
+  cache.requestGoal(1, 5, 6, 4);
+  cache.update(maps, 5);
+  assert.equal(cache.isCurrent(lower, 1, 0), true);
+  assert.equal(cache.slotDiagnostics(upper).stale, true);
+  assert.equal(cache.slotDiagnostics(upper).requestedMapRevision, 5);
+});

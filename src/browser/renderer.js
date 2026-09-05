@@ -657,6 +657,16 @@ export class DebugRenderer {
       context.lineWidth = line * 1.7;
       context.stroke();
     }
+    if (topology.selectedRoute.length > 1) {
+      context.beginPath();
+      context.moveTo(topology.selectedRoute[0].x, topology.selectedRoute[0].z);
+      for (let index = 1; index < topology.selectedRoute.length; index += 1) {
+        context.lineTo(topology.selectedRoute[index].x, topology.selectedRoute[index].z);
+      }
+      context.strokeStyle = "rgba(255, 241, 176, 0.98)";
+      context.lineWidth = line * 2.8;
+      context.stroke();
+    }
     for (const arc of topology.verticalArcs) {
       const port = arc.from.layerId === topology.layerId ? arc.from : arc.to;
       context.beginPath();
@@ -678,6 +688,7 @@ export class DebugRenderer {
       drawPort(node, node.patrol ? "#ffdb77" : "#6fe0bb", 0.18);
     }
     for (const port of topology.ports) drawPort(port, "#b99cff", 0.14);
+    if (topology.localGoal) drawPort(topology.localGoal, "#ff8fcb", 0.24);
     for (const key of [topology.selectedPortKey, topology.pendingLinkStartKey]) {
       const port = [...topology.nodes, ...topology.ports].find((candidate) => candidate.key === key);
       if (!port) continue;

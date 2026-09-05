@@ -41,6 +41,22 @@ function withoutBroadphase(snapshot) {
   return value;
 }
 
+function withoutM1cDiagnostics(snapshot) {
+  const value = withoutBroadphase(snapshot);
+  if (value.navigation) {
+    delete value.navigation.layers;
+    delete value.navigation.layerCount;
+    delete value.navigation.maximumCellCount;
+    for (const slot of value.navigation.slots ?? []) {
+      delete slot.requestedLayerIndex;
+      delete slot.completedLayerIndex;
+      delete slot.completedDimensions;
+    }
+  }
+  for (const enemy of value.enemies ?? []) delete enemy.navigationRoute;
+  return value;
+}
+
 test("schema-v11 recording stores investigative, dead-body, and movement-sound profiles and replays exactly", () => {
   const source = new Simulation({ seed: 0x0800_f17e, particleBurstCount: 0 });
   runFixture(source);
@@ -83,7 +99,9 @@ test("schema-v8 recording selects the frozen perceptive profile", () => {
   recording.schemaVersion = 8;
   const replay = Simulation.replay(recording);
   assert.equal(replay.enemyAiProfile, ENEMY_AI_PROFILE_PERCEPTIVE);
-  assert.deepEqual(withoutBroadphase(replay.snapshot()), withoutBroadphase(source.snapshot()));
+  assert.equal("layers" in replay.snapshot().navigation, false);
+  assert.equal("navigationRoute" in replay.snapshot().enemies[0], false);
+  assert.deepEqual(withoutM1cDiagnostics(replay.snapshot()), withoutM1cDiagnostics(source.snapshot()));
 });
 
 test("schema-v10 keeps full-speed silent movement and direct Fireball hearing", () => {
@@ -100,7 +118,7 @@ test("schema-v10 keeps full-speed silent movement and direct Fireball hearing", 
   const replay = Simulation.replay(recording);
   assert.equal(replay.movementSoundProfile, MOVEMENT_SOUND_PROFILE_NONE);
   assert.equal(replay.soundEventMetrics.emittedFootsteps, 0);
-  assert.deepEqual(withoutBroadphase(replay.snapshot()), withoutBroadphase(source.snapshot()));
+  assert.deepEqual(withoutM1cDiagnostics(replay.snapshot()), withoutM1cDiagnostics(source.snapshot()));
 });
 
 test("schema-v7 and v6 replay construct historical four-entry pools and frozen profiles", () => {
@@ -121,8 +139,8 @@ test("schema-v7 and v6 replay construct historical four-entry pools and frozen p
   assert.equal(tacticalReplay.enemyAiProfile, ENEMY_AI_PROFILE_TACTICAL);
   assert.equal(tacticalReplay.enemies.capacity, ENEMY_WIZARD.legacyCapacity);
   assert.deepEqual(
-    withoutBroadphase(tacticalReplay.snapshot()),
-    withoutBroadphase(tacticalSource.snapshot()),
+    withoutM1cDiagnostics(tacticalReplay.snapshot()),
+    withoutM1cDiagnostics(tacticalSource.snapshot()),
   );
 
   const v6 = structuredClone(v7);

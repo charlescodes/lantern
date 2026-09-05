@@ -2302,8 +2302,19 @@ export class ThreePresentation {
           }, 0x76d2ff, 0.06);
         }
       }
+      for (let index = 1; index < topology.selectedRoute.length; index += 1) {
+        const from = topology.selectedRoute[index - 1];
+        const to = topology.selectedRoute[index];
+        const distance = Math.hypot(to.x - from.x, to.z - from.z);
+        const steps = Math.max(1, Math.ceil(distance / 0.45));
+        for (let step = 0; step <= steps; step += 1) {
+          const t = step / steps;
+          addPoint({ x: from.x + (to.x - from.x) * t, z: from.z + (to.z - from.z) * t }, 0xfff1b0, 0.075);
+        }
+      }
       for (const node of topology.nodes) addPoint(node, node.patrol ? 0xffdb77 : 0x6fe0bb, 0.07);
       for (const port of topology.ports) addPoint(port, 0xb99cff, 0.07);
+      if (topology.localGoal) addPoint(topology.localGoal, 0xff8fcb, 0.085);
       for (const arc of topology.verticalArcs) {
         const port = arc.from.layerId === topology.layerId ? arc.from : arc.to;
         addPoint(port, 0xd8b5ff, 0.08);

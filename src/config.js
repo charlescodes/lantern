@@ -35,6 +35,20 @@ export const NAVIGATION_TOPOLOGY = Object.freeze({
   routeEventSnapshotCount: 32,
 });
 
+export const NAVIGATION_ROUTE_PHASE = Object.freeze({
+  none: 0,
+  approachPort: 1,
+  waitPlatform: 2,
+  board: 3,
+  ride: 4,
+  disembark: 5,
+  localGoal: 6,
+});
+
+export const NAVIGATION_EVIDENCE = Object.freeze({ none: 0 });
+export const NAVIGATION_ROUTE_FAILURE = Object.freeze({ none: 0, noAnchor: 1, disconnected: 2 });
+export const NAVIGATION_PATROL = Object.freeze({ dwellTicks: 60, replanCooldownTicks: 30 });
+
 export const ACTOR_TEAM = Object.freeze({
   player: 1,
   enemy: 2,
