@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createNavigationTopologyView } from "../src/presentation/navigation_topology_view.js";
+import { createNavigationDebugArenaScenario } from "../src/sim/scenario.js";
 
 const topology = {
   revision: 7,
@@ -65,4 +66,31 @@ test("selected runtime patrol route and local goal are detached presentation dat
   view.localGoal.x = 88;
   assert.equal(topology.ports[0].x, 2.5);
   assert.equal(topology.ports[1].x, 5.5);
+});
+
+test("the authored navigation arena produces a bounded layer-scoped overlay view", () => {
+  const scenario = createNavigationDebugArenaScenario();
+  const topologySnapshot = scenario.navigationTopologySnapshot();
+  const document = scenario.toAuthoringJSON();
+  const expectedCounts = [
+    { nodes: 3, ports: 1, links: 4, verticalArcs: 1 },
+    { nodes: 4, ports: 2, links: 5, verticalArcs: 2 },
+    { nodes: 3, ports: 1, links: 3, verticalArcs: 1 },
+  ];
+  for (let layerIndex = 0; layerIndex < document.layers.length; layerIndex += 1) {
+    const view = createNavigationTopologyView({
+      topology: topologySnapshot,
+      editor: { activeLayerId: document.layers[layerIndex].id },
+      developerToolsOpen: true,
+    });
+    assert.equal(view.visible, true);
+    assert.deepEqual({
+      nodes: view.nodes.length,
+      ports: view.ports.length,
+      links: view.links.length,
+      verticalArcs: view.verticalArcs.length,
+    }, expectedCounts[layerIndex]);
+    assert.ok(view.nodes.length + view.ports.length <= topologySnapshot.capacities.portCapacity);
+    assert.ok(view.links.length + view.verticalArcs.length <= topologySnapshot.capacities.arcCapacity);
+  }
 });

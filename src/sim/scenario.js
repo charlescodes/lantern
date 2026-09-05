@@ -16,6 +16,8 @@ import {
   createLayer as createAuthoringLayer,
   placeElevatorConnector,
   placeInstance as placeAuthoringInstance,
+  placeNavigationLink,
+  placeNavigationNode,
   removeInstance as removeAuthoringInstance,
   updateInstanceTransform as updateAuthoringInstanceTransform,
 } from "../authoring/authoring_commands.js";
@@ -551,5 +553,100 @@ export function createHoleDebugArenaScenario() {
   document = placeAuthoringInstance(document, "object.torch", 7.5, 18.5, { layerId: crown }).document;
   document = placeAuthoringInstance(document, "object.table", 14.5, 18.5, { layerId: crown }).document;
   document = placeAuthoringInstance(document, "object.rock.large", 17.5, 18.5, { layerId: crown }).document;
+  return new ArenaScenario(document);
+}
+
+/**
+ * Three-floor authored M1C acceptance arena. The lower patrol is autonomous;
+ * the two timer-driven connectors and their staging chain exercise route
+ * execution without adding pursuit knowledge or elevator requests.
+ */
+export function createNavigationDebugArenaScenario() {
+  const map = createDebugArenaMap();
+  // Keep the encounter inside the lower-floor player's initial sight range;
+  // the solid authored cell remains the ordinary obelisk spawn authority.
+  map.set(14, 18, 1);
+  let document = new ArenaScenario(map, [
+    { kind: "obelisk", x: 14.5, z: 18.5 },
+  ]).toAuthoringJSON();
+  const lower = document.playerStart.layerId;
+  let created = createAuthoringLayer(document, lower, "above", {
+    name: "Navigation middle",
+    baseY: 3,
+  });
+  document = created.document;
+  const middle = created.layerId;
+  created = createAuthoringLayer(document, middle, "above", {
+    name: "Navigation upper",
+    baseY: 6,
+  });
+  document = created.document;
+  const upper = created.layerId;
+  const connectorA = placeElevatorConnector(document, 6, 18, {
+    lowerLayerId: lower,
+    upperLayerId: middle,
+    initialStop: "lower",
+    travelDurationSeconds: 2,
+    dwellSeconds: 1,
+  });
+  document = connectorA.document;
+  const connectorB = placeElevatorConnector(document, 17, 10, {
+    lowerLayerId: middle,
+    upperLayerId: upper,
+    initialStop: "lower",
+    travelDurationSeconds: 2,
+    dwellSeconds: 1,
+  });
+  document = connectorB.document;
+
+  const nodes = {};
+  const addNode = (key, layerId, cx, cz, patrol = false) => {
+    const placed = placeNavigationNode(document, cx, cz, { layerId, patrol });
+    document = placed.document;
+    nodes[key] = placed.nodeId;
+  };
+  addNode("lowerStart", lower, 3, 18, true);
+  addNode("lowerAStage", lower, 7, 18, true);
+  addNode("lowerLoop", lower, 7, 14, true);
+  addNode("middleAStage", middle, 7, 18);
+  addNode("middleEast", middle, 11, 18);
+  addNode("middleNorth", middle, 11, 10);
+  addNode("middleBStage", middle, 16, 10);
+  addNode("upperBStage", upper, 16, 10);
+  addNode("upperNorth", upper, 16, 6);
+  addNode("upperGoal", upper, 20, 6);
+
+  const node = (key) => ({ kind: "node", nodeId: nodes[key] });
+  const endpoint = (connectorId, stop) => ({
+    kind: "connector-endpoint",
+    connectorId,
+    stop,
+  });
+  const addLink = (from, to) => {
+    document = placeNavigationLink(document, from, to).document;
+  };
+  addLink(node("lowerStart"), node("lowerAStage"));
+  addLink(node("lowerAStage"), node("lowerLoop"));
+  addLink(node("lowerLoop"), node("lowerStart"));
+  addLink(node("lowerAStage"), endpoint(connectorA.connectorId, "lower"));
+  addLink(endpoint(connectorA.connectorId, "upper"), node("middleAStage"));
+  addLink(node("middleAStage"), node("middleEast"));
+  addLink(node("middleEast"), node("middleNorth"));
+  addLink(node("middleNorth"), node("middleBStage"));
+  addLink(node("middleBStage"), endpoint(connectorB.connectorId, "lower"));
+  addLink(endpoint(connectorB.connectorId, "upper"), node("upperBStage"));
+  addLink(node("upperBStage"), node("upperNorth"));
+  addLink(node("upperNorth"), node("upperGoal"));
+
+  for (let cx = 2; cx <= 21; cx += 1) {
+    document = paintAuthoringSurface(document, cx, 3, "surface.moss", middle);
+    document = paintAuthoringSurface(document, cx, 20, "surface.moss", upper);
+  }
+  document = placeAuthoringInstance(document, "object.torch", 4.5, 20.5, { layerId: lower }).document;
+  document = placeAuthoringInstance(document, "object.rock.small", 2.5, 2.5, { layerId: lower }).document;
+  document = placeAuthoringInstance(document, "object.torch", 10.5, 16.5, { layerId: middle }).document;
+  document = placeAuthoringInstance(document, "object.table", 14.5, 14.5, { layerId: middle }).document;
+  document = placeAuthoringInstance(document, "object.torch", 19.5, 8.5, { layerId: upper }).document;
+  document = placeAuthoringInstance(document, "object.rock.large", 20.5, 3.5, { layerId: upper }).document;
   return new ArenaScenario(document);
 }

@@ -34,6 +34,7 @@ import {
 import {
   ArenaScenario,
   createHoleDebugArenaScenario,
+  createNavigationDebugArenaScenario,
   createVerticalDebugArenaScenario,
 } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
@@ -49,10 +50,15 @@ if (!canvas) throw new Error("Missing #arena canvas");
 const requestedArena = new URLSearchParams(window.location.search).get("arena");
 const elevatorArenaRequested = requestedArena === "elevator";
 const holeArenaRequested = requestedArena === "holes";
+const navigationArenaRequested = requestedArena === "navigation";
 const simulation = new Simulation({
   ...(elevatorArenaRequested
     ? { scenario: createVerticalDebugArenaScenario() }
-    : holeArenaRequested ? { scenario: createHoleDebugArenaScenario() } : {}),
+    : holeArenaRequested
+      ? { scenario: createHoleDebugArenaScenario() }
+      : navigationArenaRequested
+        ? { scenario: createNavigationDebugArenaScenario() }
+        : {}),
 });
 const initialSnapshot = simulation.snapshot();
 const ui = new ArenaUi();

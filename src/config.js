@@ -46,7 +46,15 @@ export const NAVIGATION_ROUTE_PHASE = Object.freeze({
 });
 
 export const NAVIGATION_EVIDENCE = Object.freeze({ none: 0 });
-export const NAVIGATION_ROUTE_FAILURE = Object.freeze({ none: 0, noAnchor: 1, disconnected: 2 });
+export const NAVIGATION_ROUTE_FAILURE = Object.freeze({
+  none: 0,
+  noAnchor: 1,
+  disconnected: 2,
+  missingConnector: 3,
+  displaced: 4,
+  missedCycles: 5,
+  routeInvalid: 6,
+});
 export const NAVIGATION_PATROL = Object.freeze({ dwellTicks: 60, replanCooldownTicks: 30 });
 
 export const ACTOR_TEAM = Object.freeze({

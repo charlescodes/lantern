@@ -131,6 +131,7 @@ import { MapCellBroadphase } from "./map_cell_broadphase.js";
 import {
   NAVIGATION_ARC_KIND,
   NAVIGATION_PORT_KIND,
+  NAVIGATION_STOP,
 } from "./navigation_topology.js";
 import {
   NAVIGATION_UNREACHABLE,
@@ -255,7 +256,15 @@ const NAVIGATION_ROUTE_PHASE_NAMES = Object.freeze([
   "LOCAL_GOAL",
 ]);
 const NAVIGATION_EVIDENCE_NAMES = Object.freeze(["none"]);
-const NAVIGATION_ROUTE_FAILURE_NAMES = Object.freeze(["none", "no-anchor", "disconnected"]);
+const NAVIGATION_ROUTE_FAILURE_NAMES = Object.freeze([
+  "none",
+  "no-anchor",
+  "disconnected",
+  "missing-connector",
+  "displaced",
+  "missed-cycles",
+  "route-invalid",
+]);
 const SPAWN_OFFSETS = Object.freeze([
   Object.freeze({ x: 0, z: -1, name: "north" }),
   Object.freeze({ x: 1, z: 0, name: "east" }),
@@ -2955,7 +2964,8 @@ export class Simulation {
       let state = pool.perceptionState[index];
       if (
         state === PERCEPTION_STATE.unaware
-        && pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.localGoal
+        && pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.none
+        && pool.routeLength[index] === 0
         && Math.hypot(
           pool.x[index] - pool.guardX[index],
           pool.z[index] - pool.guardZ[index],
@@ -3234,7 +3244,8 @@ export class Simulation {
       let state = pool.perceptionState[index];
       if (
         state === PERCEPTION_STATE.unaware
-        && pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.localGoal
+        && pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.none
+        && pool.routeLength[index] === 0
         && Math.hypot(
           pool.x[index] - pool.guardX[index],
           pool.z[index] - pool.guardZ[index],
@@ -3608,6 +3619,18 @@ export class Simulation {
         }
         if (pool.navigationSlot[index] >= 0) continue;
       }
+      if (this.#isElevatorRoutePhase(pool.topologyPhase[index])) {
+        const target = this.#enemyElevatorRouteMovementPort(index);
+        if (target !== NAVIGATION_TOPOLOGY.noPort) {
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
+            this.navigationTopology.portCellX[target],
+            this.navigationTopology.portCellZ[target],
+          );
+        }
+        continue;
+      }
       let state = pool.perceptionState[index];
       if (state === PERCEPTION_STATE.noticing) state = pool.noticingResumeState[index];
       if (
@@ -3690,6 +3713,16 @@ export class Simulation {
     );
   }
 
+  /** @param {number} index */
+  #enemyElevatorRouteMovementPort(index) {
+    const phase = this.enemies.topologyPhase[index];
+    if (phase === NAVIGATION_ROUTE_PHASE.approachPort) return this.#enemyRoutePort(index);
+    if (phase === NAVIGATION_ROUTE_PHASE.waitPlatform) return this.#enemyRoutePort(index, -1);
+    if (phase === NAVIGATION_ROUTE_PHASE.board) return this.#enemyRoutePort(index);
+    if (phase === NAVIGATION_ROUTE_PHASE.disembark) return this.#enemyRoutePort(index, 1);
+    return NAVIGATION_TOPOLOGY.noPort;
+  }
+
   /** @param {string} type @param {number} index @param {number} tick @param {Record<string,unknown>} [details] */
   #recordNavigationRouteEvent(type, index, tick, details = {}) {
     if (this.navigationRouteEventHistory.length >= this.navigationRouteEventHistory.capacity) {
@@ -3711,6 +3744,18 @@ export class Simulation {
     if (
       pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.localGoal
       && pool.patrolPort[index] === NAVIGATION_TOPOLOGY.noPort
+      && pool.routeFailure[index] === NAVIGATION_ROUTE_FAILURE.none
+    ) return;
+    this.#recordNavigationRouteEvent("route-cleared", index, tick, { reason });
+    pool.clearNavigationRoute(index);
+  }
+
+  /** @param {number} index @param {string} reason @param {number} tick */
+  #clearEnemyNavigationRoute(index, reason, tick) {
+    const pool = this.enemies;
+    if (
+      pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.none
+      && pool.routeLength[index] === 0
       && pool.routeFailure[index] === NAVIGATION_ROUTE_FAILURE.none
     ) return;
     this.#recordNavigationRouteEvent("route-cleared", index, tick, { reason });
@@ -3752,6 +3797,351 @@ export class Simulation {
     return previous;
   }
 
+  /** @param {number} index @param {number} offset */
+  #enemyRoutePort(index, offset = 0) {
+    const pool = this.enemies;
+    const cursor = pool.routeCursor[index] + offset;
+    if (cursor < 0 || cursor >= pool.routeLength[index]) return NAVIGATION_TOPOLOGY.noPort;
+    return pool.routePorts[index * NAVIGATION_TOPOLOGY.portCapacity + cursor];
+  }
+
+  /** @param {number} from @param {number} to */
+  #navigationArcKind(from, to) {
+    if (
+      from === NAVIGATION_TOPOLOGY.noPort
+      || to === NAVIGATION_TOPOLOGY.noPort
+      || from >= this.navigationTopology.portCount
+      || to >= this.navigationTopology.portCount
+    ) return 0;
+    for (
+      let arc = this.navigationTopology.adjacencyOffset[from];
+      arc < this.navigationTopology.adjacencyOffset[from + 1];
+      arc += 1
+    ) {
+      if (this.navigationTopology.arcTo[arc] === to) {
+        return this.navigationTopology.arcKind[arc];
+      }
+    }
+    return 0;
+  }
+
+  /** @param {number} phase */
+  #isElevatorRoutePhase(phase) {
+    return phase >= NAVIGATION_ROUTE_PHASE.approachPort
+      && phase <= NAVIGATION_ROUTE_PHASE.disembark;
+  }
+
+  /** @param {number} index @param {number} tick @param {number} failure @param {string} reason */
+  #failEnemyNavigationRoute(index, tick, failure, reason) {
+    const pool = this.enemies;
+    const enemyId = pool.id[index];
+    this.#recordNavigationRouteEvent("failure", index, tick, {
+      reason,
+      failure: NAVIGATION_ROUTE_FAILURE_NAMES[failure] ?? "unknown",
+    });
+    pool.clearNavigationRoute(index);
+    const current = pool.findIndexById(enemyId);
+    if (current < 0) return;
+    pool.routeFailure[current] = failure;
+    pool.routeReplanTick[current] = tick + NAVIGATION_PATROL.replanCooldownTicks;
+  }
+
+  /** @param {number} index @param {number} tick */
+  #completeEnemyNavigationRoute(index, tick) {
+    this.#recordNavigationRouteEvent("route-complete", index, tick, {
+      port: this.navigationTopology.portMetadata[this.#enemyRoutePort(index)]?.key ?? null,
+    });
+    this.enemies.clearNavigationRoute(index);
+  }
+
+  /**
+   * Advances from a physically reached ordinary route port. Endpoint ports
+   * are entered only after their linked staging node has actually been reached.
+   * @param {number} index @param {number} tick
+   */
+  #advanceEnemyRouteFromReachedPort(index, tick) {
+    const pool = this.enemies;
+    const current = this.#enemyRoutePort(index);
+    const next = this.#enemyRoutePort(index, 1);
+    if (current === NAVIGATION_TOPOLOGY.noPort) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.routeInvalid,
+        "missing-current-port",
+      );
+      return;
+    }
+    if (next === NAVIGATION_TOPOLOGY.noPort) {
+      this.#completeEnemyNavigationRoute(index, tick);
+      return;
+    }
+    const arcKind = this.#navigationArcKind(current, next);
+    if (arcKind !== NAVIGATION_ARC_KIND.authoredLink) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.routeInvalid,
+        "expected-authored-link",
+      );
+      return;
+    }
+    pool.routeCursor[index] += 1;
+    if (this.navigationTopology.portKind[next] === NAVIGATION_PORT_KIND.connectorEndpoint) {
+      const runtimeId = this.navigationTopology.portConnectorRuntimeId[next];
+      if (!runtimeId) {
+        this.#failEnemyNavigationRoute(
+          index,
+          tick,
+          NAVIGATION_ROUTE_FAILURE.missingConnector,
+          "endpoint-missing-runtime-id",
+        );
+        return;
+      }
+      pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.waitPlatform;
+      pool.routeConnectorRuntimeId[index] = runtimeId;
+      pool.routeWaitStartTick[index] = tick;
+      pool.currentRoutePort[index] = current;
+      this.#recordNavigationRouteEvent("platform-wait", index, tick, {
+        connectorRuntimeId: runtimeId,
+        endpoint: this.navigationTopology.portMetadata[next].key,
+      });
+      return;
+    }
+    pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.approachPort;
+    pool.currentRoutePort[index] = next;
+  }
+
+  /** @param {number} index @param {number} tick @param {string} reason */
+  #missEnemyBoardingWindow(index, tick, reason) {
+    const pool = this.enemies;
+    pool.routeMissedCycles[index] = Math.min(0xff, pool.routeMissedCycles[index] + 1);
+    this.#recordNavigationRouteEvent("platform-missed", index, tick, {
+      reason,
+      missedCycles: pool.routeMissedCycles[index],
+    });
+    if (pool.routeMissedCycles[index] < 2) {
+      pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.waitPlatform;
+      pool.currentRoutePort[index] = this.#enemyRoutePort(index, -1);
+      pool.routeWaitStartTick[index] = tick;
+      return;
+    }
+    pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.none;
+    pool.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.missedCycles;
+    pool.routeReplanTick[index] = tick + NAVIGATION_PATROL.replanCooldownTicks;
+    pool.routeConnectorRuntimeId[index] = 0;
+  }
+
+  /** @param {number} index @param {number} tick @param {number} failure @param {string} reason */
+  #suspendEnemyNavigationRoute(index, tick, failure, reason) {
+    const pool = this.enemies;
+    this.#recordNavigationRouteEvent("failure", index, tick, {
+      reason,
+      failure: NAVIGATION_ROUTE_FAILURE_NAMES[failure] ?? "unknown",
+    });
+    pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.none;
+    pool.routeFailure[index] = failure;
+    pool.routeReplanTick[index] = tick + NAVIGATION_PATROL.replanCooldownTicks;
+    pool.routeConnectorRuntimeId[index] = 0;
+  }
+
+  /** @param {number} index @param {number} tick */
+  #elevatorRouteIntent(index, tick) {
+    const pool = this.enemies;
+    const phase = pool.topologyPhase[index];
+    if (phase === NAVIGATION_ROUTE_PHASE.approachPort) {
+      const target = this.#enemyRoutePort(index);
+      if (
+        target === NAVIGATION_TOPOLOGY.noPort
+        || this.navigationTopology.portKind[target] !== NAVIGATION_PORT_KIND.node
+        || this.navigationTopology.portLayerIndex[target] !== pool.layerIndex[index]
+      ) {
+        this.#failEnemyNavigationRoute(
+          index,
+          tick,
+          NAVIGATION_ROUTE_FAILURE.routeInvalid,
+          "approach-port-layer",
+        );
+        return;
+      }
+      pool.currentRoutePort[index] = target;
+      if (Math.hypot(
+        pool.x[index] - this.navigationTopology.portWorldX[target],
+        pool.z[index] - this.navigationTopology.portWorldZ[target],
+      ) > PERCEPTIVE_WIZARD.guardReturnDistanceMeters) return;
+      this.#recordNavigationRouteEvent("port-reached", index, tick, {
+        port: this.navigationTopology.portMetadata[target].key,
+      });
+      this.#advanceEnemyRouteFromReachedPort(index, tick);
+      return;
+    }
+
+    const endpoint = this.#enemyRoutePort(index);
+    if (
+      endpoint === NAVIGATION_TOPOLOGY.noPort
+      || this.navigationTopology.portKind[endpoint] !== NAVIGATION_PORT_KIND.connectorEndpoint
+    ) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.routeInvalid,
+        "missing-route-endpoint",
+      );
+      return;
+    }
+    const runtimeId = this.navigationTopology.portConnectorRuntimeId[endpoint];
+    const elevatorIndex = this.elevators.findIndexById(runtimeId);
+    if (elevatorIndex < 0) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.missingConnector,
+        "connector-not-live",
+      );
+      return;
+    }
+    pool.routeConnectorRuntimeId[index] = runtimeId;
+    const endpointStop = this.navigationTopology.portStop[endpoint] === NAVIGATION_STOP.upper
+      ? ELEVATOR_STOP.UPPER
+      : ELEVATOR_STOP.LOWER;
+    const atEndpoint = this.elevators.motion[elevatorIndex] === ELEVATOR_MOTION.DWELLING
+      && this.elevators.currentStop[elevatorIndex] === endpointStop;
+
+    if (phase === NAVIGATION_ROUTE_PHASE.waitPlatform) {
+      if (!atEndpoint) {
+        if (pool.currentRoutePort[index] === endpoint) {
+          this.#missEnemyBoardingWindow(index, tick, "insufficient-dwell");
+        }
+        return;
+      }
+      // Mark this observed dwell window without changing the layer-local
+      // staging target. If the lift leaves before BOARD begins, the next tick
+      // records exactly one missed full cycle.
+      pool.currentRoutePort[index] = endpoint;
+      const distance = Math.hypot(
+        pool.x[index] - this.navigationTopology.portWorldX[endpoint],
+        pool.z[index] - this.navigationTopology.portWorldZ[endpoint],
+      );
+      const requiredTicks = Math.ceil(
+        distance / ENEMY_WIZARD.desiredSpeed / SIMULATION.dt,
+      ) + 2;
+      if (this.elevators.dwellRemaining[elevatorIndex] < requiredTicks) return;
+      pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.board;
+      pool.currentRoutePort[index] = endpoint;
+      this.#recordNavigationRouteEvent("board", index, tick, {
+        connectorRuntimeId: runtimeId,
+        stop: ELEVATOR_STOP_NAMES[endpointStop],
+        requiredTicks,
+      });
+      return;
+    }
+
+    if (phase === NAVIGATION_ROUTE_PHASE.board) {
+      if (
+        pool.supportKind[index] === SUPPORT_KIND.ELEVATOR
+        && pool.supportId[index] === runtimeId
+      ) {
+        pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.ride;
+        pool.currentRoutePort[index] = endpoint;
+        this.#recordNavigationRouteEvent("ride", index, tick, {
+          connectorRuntimeId: runtimeId,
+          supportId: pool.supportId[index],
+        });
+        return;
+      }
+      if (!atEndpoint) {
+        this.#missEnemyBoardingWindow(index, tick, "platform-departed");
+        return;
+      }
+      const distance = Math.hypot(
+        pool.x[index] - this.navigationTopology.portWorldX[endpoint],
+        pool.z[index] - this.navigationTopology.portWorldZ[endpoint],
+      );
+      const requiredTicks = Math.ceil(
+        distance / ENEMY_WIZARD.desiredSpeed / SIMULATION.dt,
+      ) + 2;
+      if (this.elevators.dwellRemaining[elevatorIndex] < requiredTicks) {
+        this.#missEnemyBoardingWindow(index, tick, "insufficient-dwell");
+      }
+      return;
+    }
+
+    if (phase === NAVIGATION_ROUTE_PHASE.ride) {
+      if (
+        pool.supportKind[index] !== SUPPORT_KIND.ELEVATOR
+        || pool.supportId[index] !== runtimeId
+      ) {
+        pool.routeCursor[index] = Math.max(0, pool.routeCursor[index] - 1);
+        pool.currentRoutePort[index] = this.#enemyRoutePort(index);
+        this.#suspendEnemyNavigationRoute(
+          index,
+          tick,
+          NAVIGATION_ROUTE_FAILURE.displaced,
+          "left-platform-during-ride",
+        );
+        return;
+      }
+      const destination = this.#enemyRoutePort(index, 1);
+      if (
+        destination === NAVIGATION_TOPOLOGY.noPort
+        || this.#navigationArcKind(endpoint, destination) !== NAVIGATION_ARC_KIND.elevator
+      ) {
+        this.#failEnemyNavigationRoute(
+          index,
+          tick,
+          NAVIGATION_ROUTE_FAILURE.routeInvalid,
+          "missing-vertical-arc",
+        );
+        return;
+      }
+      if (
+        pool.layerIndex[index] !== this.navigationTopology.portLayerIndex[destination]
+        || this.elevators.motion[elevatorIndex] !== ELEVATOR_MOTION.DWELLING
+      ) return;
+      pool.routeCursor[index] += 1;
+      pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.disembark;
+      pool.currentRoutePort[index] = this.#enemyRoutePort(index, 1);
+      this.#recordNavigationRouteEvent("disembark", index, tick, {
+        connectorRuntimeId: runtimeId,
+        endpoint: this.navigationTopology.portMetadata[destination].key,
+      });
+      return;
+    }
+
+    if (phase === NAVIGATION_ROUTE_PHASE.disembark) {
+      const target = this.#enemyRoutePort(index, 1);
+      if (
+        target === NAVIGATION_TOPOLOGY.noPort
+        || this.navigationTopology.portKind[target] !== NAVIGATION_PORT_KIND.node
+        || this.#navigationArcKind(endpoint, target) !== NAVIGATION_ARC_KIND.authoredLink
+        || this.navigationTopology.portLayerIndex[target] !== pool.layerIndex[index]
+      ) {
+        this.#failEnemyNavigationRoute(
+          index,
+          tick,
+          NAVIGATION_ROUTE_FAILURE.routeInvalid,
+          "missing-disembark-node",
+        );
+        return;
+      }
+      pool.currentRoutePort[index] = target;
+      if (
+        pool.supportKind[index] !== SUPPORT_KIND.FLOOR
+        || Math.hypot(
+          pool.x[index] - this.navigationTopology.portWorldX[target],
+          pool.z[index] - this.navigationTopology.portWorldZ[target],
+        ) > PERCEPTIVE_WIZARD.guardReturnDistanceMeters
+      ) return;
+      pool.routeCursor[index] += 1;
+      pool.routeConnectorRuntimeId[index] = 0;
+      this.#recordNavigationRouteEvent("port-reached", index, tick, {
+        port: this.navigationTopology.portMetadata[target].key,
+        disembarked: true,
+      });
+      this.#advanceEnemyRouteFromReachedPort(index, tick);
+    }
+  }
+
   /** @param {number} simulationTick */
   #topologyIntentSystem(simulationTick) {
     if (
@@ -3760,6 +4150,55 @@ export class Simulation {
     ) return;
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      const phase = pool.topologyPhase[index];
+      if (this.#isElevatorRoutePhase(phase)) {
+        const retreating = Boolean(pool.retreating[index])
+          ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
+          : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth;
+        if (retreating) {
+          this.#clearEnemyNavigationRoute(index, "higher-priority-intent", simulationTick);
+        } else if (pool.topologyRevision[index] !== this.topologyRevision) {
+          this.#failEnemyNavigationRoute(
+            index,
+            simulationTick,
+            NAVIGATION_ROUTE_FAILURE.routeInvalid,
+            "topology-revision",
+          );
+        } else {
+          this.#elevatorRouteIntent(index, simulationTick);
+        }
+        continue;
+      }
+      if (
+        phase === NAVIGATION_ROUTE_PHASE.none
+        && pool.routeLength[index] > 0
+        && (
+          pool.routeFailure[index] === NAVIGATION_ROUTE_FAILURE.missedCycles
+          || pool.routeFailure[index] === NAVIGATION_ROUTE_FAILURE.displaced
+        )
+      ) {
+        if (
+          simulationTick < pool.routeReplanTick[index]
+          || pool.supportKind[index] !== SUPPORT_KIND.FLOOR
+        ) continue;
+        const failure = pool.routeFailure[index];
+        pool.routeMissedCycles[index] = 0;
+        pool.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.none;
+        pool.routeReplanTick[index] = 0;
+        pool.topologyPhase[index] = failure === NAVIGATION_ROUTE_FAILURE.displaced
+          ? NAVIGATION_ROUTE_PHASE.approachPort
+          : NAVIGATION_ROUTE_PHASE.waitPlatform;
+        if (failure === NAVIGATION_ROUTE_FAILURE.missedCycles) {
+          pool.routeConnectorRuntimeId[index] = this.navigationTopology.portConnectorRuntimeId[
+            this.#enemyRoutePort(index)
+          ];
+        }
+        this.#recordNavigationRouteEvent("replan", index, simulationTick, {
+          reason: NAVIGATION_ROUTE_FAILURE_NAMES[failure],
+        });
+        this.#elevatorRouteIntent(index, simulationTick);
+        continue;
+      }
       const retreating = Boolean(pool.retreating[index])
         ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
         : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth;
@@ -4221,6 +4660,41 @@ export class Simulation {
   /** @param {number} index @param {number} dt @param {number} simulationTick */
   #preparePerceptiveEnemyMovement(index, dt, simulationTick) {
     const pool = this.enemies;
+    if (this.#isElevatorRoutePhase(pool.topologyPhase[index])) {
+      const target = this.#enemyElevatorRouteMovementPort(index);
+      if (
+        pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.ride
+        || target === NAVIGATION_TOPOLOGY.noPort
+      ) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        this.#clearEnemyMovementGoal(index);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+        return;
+      }
+      const targetX = this.navigationTopology.portWorldX[target];
+      const targetZ = this.navigationTopology.portWorldZ[target];
+      const atTarget = Math.hypot(
+        targetX - pool.x[index],
+        targetZ - pool.z[index],
+      ) <= PERCEPTIVE_WIZARD.guardReturnDistanceMeters;
+      if (atTarget && pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.board) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        this.#setEnemyMovementGoal(index, ENEMY_GOAL_GUARD, targetX, targetZ);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+      } else {
+        pool.aiState[index] = ENEMY_AI_APPROACH;
+        this.#movePerceptiveWithField(
+          index,
+          targetX,
+          targetZ,
+          "approach",
+          ENEMY_GOAL_GUARD,
+          ENEMY_WIZARD.desiredSpeed,
+          dt,
+        );
+      }
+      return;
+    }
     if (
       pool.perceptionState[index] === PERCEPTION_STATE.unaware
       && pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.localGoal
