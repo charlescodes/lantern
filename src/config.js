@@ -45,7 +45,11 @@ export const NAVIGATION_ROUTE_PHASE = Object.freeze({
   localGoal: 6,
 });
 
-export const NAVIGATION_EVIDENCE = Object.freeze({ none: 0 });
+export const NAVIGATION_EVIDENCE = Object.freeze({
+  none: 0,
+  directSight: 1,
+  connectorTransition: 2,
+});
 export const NAVIGATION_ROUTE_FAILURE = Object.freeze({
   none: 0,
   noAnchor: 1,

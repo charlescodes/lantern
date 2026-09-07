@@ -249,7 +249,10 @@ export class EnemyWizardPool {
     this.previousRoutePort = new Uint16Array(capacity);
     this.patrolDwellRemaining = new Uint16Array(capacity);
     this.knownTargetLayer = new Uint16Array(capacity);
+    this.knownTargetPort = new Uint16Array(capacity);
     this.navigationEvidence = new Uint8Array(capacity);
+    this.observedConnectorRuntimeId = new Uint32Array(capacity);
+    this.observedConnectorLayer = new Uint16Array(capacity);
     this.routeFailure = new Uint8Array(capacity);
     this.routePorts = new Uint16Array(capacity * NAVIGATION_TOPOLOGY.portCapacity);
     installVerticalBodyColumns(this, capacity);
@@ -258,6 +261,7 @@ export class EnemyWizardPool {
   reset() {
     for (let index = 0; index < this.activeCount; index += 1) {
       this.clearNavigationRoute(index);
+      this.clearNavigationEvidence(index);
     }
     this.activeCount = 0;
     this.dropped = 0;
@@ -397,6 +401,7 @@ export class EnemyWizardPool {
     this.investigationOriginZ[index] = Number.NaN;
     this.navigationSlot[index] = -1;
     this.clearNavigationRoute(index);
+    this.clearNavigationEvidence(index);
     initializeVerticalBody(this, index, value, DEFAULT_ACTOR_VERTICAL_CAPABILITIES);
     this.activeCount += 1;
     return id;
@@ -535,7 +540,10 @@ export class EnemyWizardPool {
         this.previousRoutePort,
         this.patrolDwellRemaining,
         this.knownTargetLayer,
+        this.knownTargetPort,
         this.navigationEvidence,
+        this.observedConnectorRuntimeId,
+        this.observedConnectorLayer,
         this.routeFailure,
         this.worldY,
         this.previousWorldY,
@@ -559,6 +567,7 @@ export class EnemyWizardPool {
       );
     }
     this.clearNavigationRoute(last);
+    this.clearNavigationEvidence(last);
     this.activeCount = last;
     return true;
   }
@@ -578,8 +587,6 @@ export class EnemyWizardPool {
     this.currentRoutePort[index] = NAVIGATION_TOPOLOGY.noPort;
     this.previousRoutePort[index] = NAVIGATION_TOPOLOGY.noPort;
     this.patrolDwellRemaining[index] = 0;
-    this.knownTargetLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
-    this.navigationEvidence[index] = NAVIGATION_EVIDENCE.none;
     this.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.none;
     const offset = index * NAVIGATION_TOPOLOGY.portCapacity;
     this.routePorts.fill(
@@ -587,6 +594,17 @@ export class EnemyWizardPool {
       offset,
       offset + NAVIGATION_TOPOLOGY.portCapacity,
     );
+    return true;
+  }
+
+  /** @param {number} index */
+  clearNavigationEvidence(index) {
+    if (index < 0 || index >= this.capacity) return false;
+    this.knownTargetLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+    this.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
+    this.navigationEvidence[index] = NAVIGATION_EVIDENCE.none;
+    this.observedConnectorRuntimeId[index] = 0;
+    this.observedConnectorLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
     return true;
   }
 

@@ -53,7 +53,10 @@ function withoutM1cDiagnostics(snapshot) {
       delete slot.completedDimensions;
     }
   }
-  for (const enemy of value.enemies ?? []) delete enemy.navigationRoute;
+  for (const enemy of value.enemies ?? []) {
+    delete enemy.navigationRoute;
+    if (enemy.lastSeen) delete enemy.lastSeen.layerId;
+  }
   return value;
 }
 

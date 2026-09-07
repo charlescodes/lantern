@@ -255,7 +255,11 @@ const NAVIGATION_ROUTE_PHASE_NAMES = Object.freeze([
   "DISEMBARK",
   "LOCAL_GOAL",
 ]);
-const NAVIGATION_EVIDENCE_NAMES = Object.freeze(["none"]);
+const NAVIGATION_EVIDENCE_NAMES = Object.freeze([
+  "none",
+  "direct-sight",
+  "connector-transition",
+]);
 const NAVIGATION_ROUTE_FAILURE_NAMES = Object.freeze([
   "none",
   "no-anchor",
@@ -1810,6 +1814,16 @@ export class Simulation {
         pool.layerIndex[index] = remap(pool.layerIndex[index]);
       }
     }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      const previousTarget = this.enemies.knownTargetLayer[index];
+      if (previousTarget === NAVIGATION_TOPOLOGY.noLayer) continue;
+      const targetLayerId = previousLayerIds[previousTarget];
+      const nextTarget = targetLayerId === undefined
+        ? undefined
+        : this.layerIdToIndex.get(targetLayerId);
+      if (nextTarget === undefined) this.enemies.clearNavigationEvidence(index);
+      else this.enemies.knownTargetLayer[index] = nextTarget;
+    }
     for (let index = 0; index < this.elevators.activeCount; index += 1) {
       const connector = this.scenario.connectors.find(
         (candidate) => candidate.id === this.elevators.authoringId[index],
@@ -1882,6 +1896,10 @@ export class Simulation {
     );
     this.navigationTopology = this.scenario.navigationTopology;
     this.topologyRevision += 1;
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.#clearObservedConnector(index);
+      this.enemies.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
+    }
     if (this.navigationRouteEventHistory.length >= this.navigationRouteEventHistory.capacity) {
       this.navigationRouteEventDropped += 1;
     }
@@ -2741,6 +2759,100 @@ export class Simulation {
     return arbitration;
   }
 
+  /** @param {number} runtimeId @param {number} layerIndex */
+  #connectorEndpointPort(runtimeId, layerIndex) {
+    for (let port = 0; port < this.navigationTopology.portCount; port += 1) {
+      if (
+        this.navigationTopology.portKind[port] === NAVIGATION_PORT_KIND.connectorEndpoint
+        && this.navigationTopology.portConnectorRuntimeId[port] === runtimeId
+        && this.navigationTopology.portLayerIndex[port] === layerIndex
+      ) return port;
+    }
+    return NAVIGATION_TOPOLOGY.noPort;
+  }
+
+  /** @param {number} index */
+  #clearObservedConnector(index) {
+    this.enemies.observedConnectorRuntimeId[index] = 0;
+    this.enemies.observedConnectorLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+  }
+
+  /**
+   * Reconciles only an already armed, directly observed elevator ride. Hidden
+   * player X/Z is never read here; the authored opposite endpoint becomes the
+   * remembered destination.
+   * @param {number} index @param {number} tick
+   */
+  #observePlayerConnectorTransition(index, tick) {
+    const pool = this.enemies;
+    const runtimeId = pool.observedConnectorRuntimeId[index];
+    if (
+      this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+      || runtimeId === 0
+    ) return false;
+    const elevatorIndex = this.elevators.findIndexById(runtimeId);
+    if (
+      elevatorIndex < 0
+      || this.player.supportKind !== SUPPORT_KIND.ELEVATOR
+      || this.player.supportId !== runtimeId
+    ) {
+      this.#clearObservedConnector(index);
+      return false;
+    }
+    const sourceLayer = pool.observedConnectorLayer[index];
+    if (this.player.layerIndex === sourceLayer) return false;
+    const lowerLayer = this.elevators.lowerLayerIndex[elevatorIndex];
+    const upperLayer = this.elevators.upperLayerIndex[elevatorIndex];
+    const destinationLayer = sourceLayer === lowerLayer
+      ? upperLayer
+      : sourceLayer === upperLayer
+        ? lowerLayer
+        : NAVIGATION_TOPOLOGY.noLayer;
+    if (destinationLayer !== this.player.layerIndex) {
+      this.#clearObservedConnector(index);
+      return false;
+    }
+    const endpoint = this.#connectorEndpointPort(runtimeId, destinationLayer);
+    if (endpoint === NAVIGATION_TOPOLOGY.noPort) {
+      this.#clearObservedConnector(index);
+      return false;
+    }
+    const endpointX = this.navigationTopology.portWorldX[endpoint];
+    const endpointZ = this.navigationTopology.portWorldZ[endpoint];
+    pool.knownTargetLayer[index] = destinationLayer;
+    pool.knownTargetPort[index] = endpoint;
+    pool.navigationEvidence[index] = NAVIGATION_EVIDENCE.connectorTransition;
+    pool.hasLastSeen[index] = 1;
+    pool.lastSeenX[index] = endpointX;
+    pool.lastSeenZ[index] = endpointZ;
+    pool.lastSeenVx[index] = 0;
+    pool.lastSeenVz[index] = 0;
+    pool.lastSeenTick[index] = tick;
+    pool.currentVisibility[index] = 0;
+    pool.perceptionState[index] = PERCEPTION_STATE.hunting;
+    pool.huntPhase[index] = HUNT_PHASE.travel;
+    pool.huntAnchorX[index] = endpointX;
+    pool.huntAnchorZ[index] = endpointZ;
+    pool.huntTravelStartTick[index] = tick;
+    pool.searchStartTick[index] = 0;
+    pool.searchEndTick[index] = 0;
+    this.#clearSearchGoal(index);
+    this.#clearObservedConnector(index);
+    this.#recordNavigationRouteEvent("target-layer-inference", index, tick, {
+      connectorRuntimeId: runtimeId,
+      sourceLayer: this.layerIds[sourceLayer] ?? null,
+      targetLayer: this.layerIds[destinationLayer] ?? null,
+      endpoint: this.navigationTopology.portMetadata[endpoint].key,
+      evidence: "connector-transition",
+    });
+    this.#recordPerceptionEvent("loss", index, tick, {
+      reason: "observed-connector-transition",
+      lastSeen: { x: endpointX, z: endpointZ, layerId: this.layerIds[destinationLayer], tick },
+    });
+    this.#planCrossFloorRoute(index, tick, "observed-connector-transition");
+    return true;
+  }
+
   /** @param {number} index @param {number} tick */
   #updateLastSeen(index, tick) {
     const pool = this.enemies;
@@ -2751,6 +2863,25 @@ export class Simulation {
     pool.lastSeenVz[index] = this.player.vz;
     pool.lastSeenTick[index] = tick;
     pool.knowledgeSource[index] = KNOWLEDGE_SOURCE.visual;
+    if (this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1) {
+      pool.knownTargetLayer[index] = this.player.layerIndex;
+      pool.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
+      pool.navigationEvidence[index] = NAVIGATION_EVIDENCE.directSight;
+      const connectorId = this.player.supportKind === SUPPORT_KIND.ELEVATOR
+        ? this.player.supportId
+        : 0;
+      if (
+        connectorId !== 0
+        && this.#connectorEndpointPort(connectorId, this.player.layerIndex)
+          !== NAVIGATION_TOPOLOGY.noPort
+      ) {
+        pool.observedConnectorRuntimeId[index] = connectorId;
+        pool.observedConnectorLayer[index] = this.player.layerIndex;
+      } else {
+        pool.observedConnectorRuntimeId[index] = 0;
+        pool.observedConnectorLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+      }
+    }
     if (
       this.enemyAiProfile !== ENEMY_AI_PROFILE_INVESTIGATIVE
       || pool.investigationPriority[index] === INVESTIGATION_PRIORITY.none
@@ -2795,6 +2926,7 @@ export class Simulation {
     pool.guardReturnStartTick[index] = 0;
     pool.guardUnreachableStartTick[index] = 0;
     pool.navigationSlot[index] = -1;
+    pool.clearNavigationEvidence(index);
     this.#clearSearchGoal(index);
     this.#recordPerceptionEvent("awareness-clear", index, tick, { reason });
   }
@@ -2819,9 +2951,13 @@ export class Simulation {
   /** @param {number} index @param {number} tick */
   #chooseSearchGoal(index, tick) {
     const pool = this.enemies;
+    const map = this.authoredNavigationTopologyProfile
+      === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+      ? this.layerMaps[pool.layerIndex[index]] ?? this.map
+      : this.map;
     const startCx = Math.floor(pool.x[index]);
     const startCz = Math.floor(pool.z[index]);
-    this.reachability.fill(this.map, startCx, startCz);
+    this.reachability.fill(map, startCx, startCz);
     const anchorCx = Math.floor(pool.huntAnchorX[index]);
     const anchorCz = Math.floor(pool.huntAnchorZ[index]);
     const candidateCount = 8 * (
@@ -2955,7 +3091,13 @@ export class Simulation {
   #perceptionSystem(simulationTick) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
-      if (pool.layerIndex[index] !== this.player.layerIndex) {
+      const differentLayer = pool.layerIndex[index] !== this.player.layerIndex;
+      this.#observePlayerConnectorTransition(index, simulationTick);
+      const canSearchRememberedLayer = differentLayer
+        && pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+        && pool.knownTargetLayer[index] === pool.layerIndex[index]
+        && !this.#isElevatorRoutePhase(pool.topologyPhase[index]);
+      if (differentLayer && !canSearchRememberedLayer) {
         pool.currentVisibility[index] = 0;
         pool.lineOfSight[index] = 0;
         pool.visibilitySampleTick[index] = simulationTick;
@@ -3033,8 +3175,9 @@ export class Simulation {
             simulationTick - pool.guardUnreachableStartTick[index]
             >= PERCEPTIVE_WIZARD.travelTimeoutTicks
           ) {
-            pool.guardX[index] = this.map.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
-            pool.guardZ[index] = this.map.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
+            const enemyMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
+            pool.guardX[index] = enemyMap.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
+            pool.guardZ[index] = enemyMap.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
             pool.guardBaseFacingX[index] = pool.facingX[index];
             pool.guardBaseFacingZ[index] = pool.facingZ[index];
             this.#recordPerceptionEvent("return", index, simulationTick, {
@@ -3044,6 +3187,13 @@ export class Simulation {
             this.#clearAwareness(index, simulationTick, "guard-rebased");
           }
         }
+      }
+
+      if (differentLayer) {
+        pool.currentVisibility[index] = 0;
+        pool.lineOfSight[index] = 0;
+        pool.visibilitySampleTick[index] = simulationTick;
+        continue;
       }
 
       if (
@@ -3231,10 +3381,13 @@ export class Simulation {
   #investigativePerceptionSystem(simulationTick) {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
-      // Floors share X/Z coordinates but not direct perception. A later
-      // connector-aware AI can make this transition deliberately; for now a
-      // different layer is a hard awareness boundary.
-      if (pool.layerIndex[index] !== this.player.layerIndex) {
+      const differentLayer = pool.layerIndex[index] !== this.player.layerIndex;
+      this.#observePlayerConnectorTransition(index, simulationTick);
+      const canSearchRememberedLayer = differentLayer
+        && pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+        && pool.knownTargetLayer[index] === pool.layerIndex[index]
+        && !this.#isElevatorRoutePhase(pool.topologyPhase[index]);
+      if (differentLayer && !canSearchRememberedLayer) {
         pool.currentVisibility[index] = 0;
         pool.lineOfSight[index] = 0;
         pool.visibilitySampleTick[index] = simulationTick;
@@ -3321,8 +3474,9 @@ export class Simulation {
             simulationTick - pool.guardUnreachableStartTick[index]
             >= PERCEPTIVE_WIZARD.travelTimeoutTicks
           ) {
-            pool.guardX[index] = this.map.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
-            pool.guardZ[index] = this.map.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
+            const enemyMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
+            pool.guardX[index] = enemyMap.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
+            pool.guardZ[index] = enemyMap.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
             pool.guardBaseFacingX[index] = pool.facingX[index];
             pool.guardBaseFacingZ[index] = pool.facingZ[index];
             this.#recordPerceptionEvent("return", index, simulationTick, {
@@ -3332,6 +3486,14 @@ export class Simulation {
             this.#clearAwareness(index, simulationTick, "guard-rebased");
           }
         }
+      }
+
+      if (differentLayer) {
+        pool.currentVisibility[index] = 0;
+        pool.lineOfSight[index] = 0;
+        pool.visibilitySampleTick[index] = simulationTick;
+        this.#clearCandidate(index);
+        continue;
       }
 
       if (
@@ -3831,6 +3993,68 @@ export class Simulation {
       && phase <= NAVIGATION_ROUTE_PHASE.disembark;
   }
 
+  /** @param {number} index @param {number} tick @param {string} reason */
+  #planCrossFloorRoute(index, tick, reason) {
+    const pool = this.enemies;
+    const targetLayer = pool.knownTargetLayer[index];
+    if (
+      pool.navigationEvidence[index] !== NAVIGATION_EVIDENCE.connectorTransition
+      || targetLayer === NAVIGATION_TOPOLOGY.noLayer
+      || targetLayer === pool.layerIndex[index]
+    ) return false;
+    const sourceLayerId = this.layerIds[pool.layerIndex[index]];
+    const targetLayerId = this.layerIds[targetLayer];
+    const source = this.navigationTopology.nearestNode(
+      sourceLayerId,
+      Math.floor(pool.x[index]),
+      Math.floor(pool.z[index]),
+    );
+    const target = this.navigationTopology.nearestNode(
+      targetLayerId,
+      Math.floor(pool.lastSeenX[index]),
+      Math.floor(pool.lastSeenZ[index]),
+    );
+    if (!source.ok || !target.ok) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.noAnchor,
+        `cross-floor-${!source.ok ? "source" : "target"}-anchor`,
+      );
+      return false;
+    }
+    const route = this.navigationTopology.route(source.portIndex, target.portIndex);
+    if (!route.ok) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.disconnected,
+        "cross-floor-disconnected",
+      );
+      return false;
+    }
+    const ports = route.ports.map((metadata) => this.navigationTopology.portMetadata.findIndex(
+      (candidate) => candidate.key === metadata.key,
+    ));
+    pool.clearNavigationRoute(index);
+    pool.setNavigationRoute(index, ports);
+    pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.approachPort;
+    pool.topologyRevision[index] = this.topologyRevision;
+    pool.currentRoutePort[index] = ports[0];
+    pool.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.none;
+    this.#recordNavigationRouteEvent("route-planned", index, tick, {
+      intent: "observed-cross-floor-pursuit",
+      reason,
+      source: source.port.key,
+      target: target.port.key,
+      rememberedEndpoint: pool.knownTargetPort[index] === NAVIGATION_TOPOLOGY.noPort
+        ? null
+        : this.navigationTopology.portMetadata[pool.knownTargetPort[index]]?.key ?? null,
+      evidence: "connector-transition",
+    });
+    return true;
+  }
+
   /** @param {number} index @param {number} tick @param {number} failure @param {string} reason */
   #failEnemyNavigationRoute(index, tick, failure, reason) {
     const pool = this.enemies;
@@ -3848,10 +4072,26 @@ export class Simulation {
 
   /** @param {number} index @param {number} tick */
   #completeEnemyNavigationRoute(index, tick) {
+    const pool = this.enemies;
+    const beginEndpointSearch = pool.navigationEvidence[index]
+      === NAVIGATION_EVIDENCE.connectorTransition
+      && pool.knownTargetLayer[index] === pool.layerIndex[index]
+      && pool.perceptionState[index] !== PERCEPTION_STATE.engaged;
+    const anchorX = pool.lastSeenX[index];
+    const anchorZ = pool.lastSeenZ[index];
     this.#recordNavigationRouteEvent("route-complete", index, tick, {
       port: this.navigationTopology.portMetadata[this.#enemyRoutePort(index)]?.key ?? null,
     });
-    this.enemies.clearNavigationRoute(index);
+    pool.clearNavigationRoute(index);
+    if (beginEndpointSearch && Number.isFinite(anchorX) && Number.isFinite(anchorZ)) {
+      this.#beginSearch(
+        index,
+        tick,
+        anchorX,
+        anchorZ,
+        "observed-connector-endpoint",
+      );
+    }
   }
 
   /**
@@ -4197,6 +4437,22 @@ export class Simulation {
           reason: NAVIGATION_ROUTE_FAILURE_NAMES[failure],
         });
         this.#elevatorRouteIntent(index, simulationTick);
+        continue;
+      }
+      if (
+        phase === NAVIGATION_ROUTE_PHASE.none
+        && pool.routeLength[index] === 0
+        && pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+        && pool.knownTargetLayer[index] !== NAVIGATION_TOPOLOGY.noLayer
+        && pool.knownTargetLayer[index] !== pool.layerIndex[index]
+        && !(
+          Boolean(pool.retreating[index])
+            ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
+            : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth
+        )
+      ) {
+        if (simulationTick < pool.routeReplanTick[index]) continue;
+        this.#planCrossFloorRoute(index, simulationTick, "evidence-replan");
         continue;
       }
       const retreating = Boolean(pool.retreating[index])
@@ -4729,7 +4985,10 @@ export class Simulation {
       }
       return;
     }
-    if (pool.layerIndex[index] !== this.player.layerIndex) {
+    const canSearchRememberedLayer = pool.navigationEvidence[index]
+      === NAVIGATION_EVIDENCE.connectorTransition
+      && pool.knownTargetLayer[index] === pool.layerIndex[index];
+    if (pool.layerIndex[index] !== this.player.layerIndex && !canSearchRememberedLayer) {
       pool.aiState[index] = ENEMY_AI_HOLD;
       this.#clearEnemyMovementGoal(index);
       this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
@@ -9652,6 +9911,16 @@ export class Simulation {
       knownTargetLayer: pool.knownTargetLayer[index] === NAVIGATION_TOPOLOGY.noLayer
         ? null
         : this.layerIds[pool.knownTargetLayer[index]] ?? null,
+      knownTargetPort: port(pool.knownTargetPort[index]),
+      observedConnectorRuntimeId: pool.observedConnectorRuntimeId[index] || null,
+      observedConnectorLayer: pool.observedConnectorLayer[index]
+        === NAVIGATION_TOPOLOGY.noLayer
+        ? null
+        : this.layerIds[pool.observedConnectorLayer[index]] ?? null,
+      sourceAnchor: route.length > 0 ? port(route[0]) : null,
+      targetAnchor: route.length > 0
+        ? port(route[route.length - 1])
+        : port(pool.knownTargetPort[index]),
       evidence: NAVIGATION_EVIDENCE_NAMES[pool.navigationEvidence[index]] ?? "none",
       failure: NAVIGATION_ROUTE_FAILURE_NAMES[failureCode] ?? "none",
       localGoal: port(pool.currentRoutePort[index]),
@@ -9784,6 +10053,14 @@ export class Simulation {
         ? {
           position: { x: pool.lastSeenX[index], z: pool.lastSeenZ[index] },
           velocity: { x: pool.lastSeenVx[index], z: pool.lastSeenVz[index] },
+          ...(this.authoredNavigationTopologyProfile
+            === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+            ? {
+              layerId: pool.knownTargetLayer[index] === NAVIGATION_TOPOLOGY.noLayer
+                ? null
+                : this.layerIds[pool.knownTargetLayer[index]] ?? null,
+            }
+            : {}),
           tick: pool.lastSeenTick[index],
         }
         : null,
