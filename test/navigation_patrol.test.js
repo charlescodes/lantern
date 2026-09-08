@@ -194,7 +194,7 @@ test("spawn rotation is deterministic and patrol avoids an immediate reversal", 
   assert.equal(simulation.enemies.currentRoutePort[0], expected);
 });
 
-test("schema-v15 patrol state and route events replay exactly", () => {
+test("schema-v16 patrol state and route events replay exactly", () => {
   const simulation = new Simulation({
     scenario: new ArenaScenario(replayPatrolDocument()),
     gameplayProfile: GAMEPLAY_PROFILE_OBELISK_DUEL,

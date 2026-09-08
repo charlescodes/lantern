@@ -15,12 +15,17 @@ import {
   DYNAMIC_PHYSICS,
   ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE,
   ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1,
+  ENEMY_ARCHETYPE,
+  ENEMY_ARCHETYPE_NAMES,
+  ENEMY_ARCHETYPE_PROFILE_NONE,
+  ENEMY_ARCHETYPE_PROFILE_V1,
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_NONE,
   ENEMY_AI_PROFILE_PERCEPTIVE,
   ENEMY_AI_PROFILE_TACTICAL,
   ENEMY_WIZARD,
+  ENEMY_URCHIN,
   EXPLOSION,
   GAMEPLAY_PROFILE_OBELISK_DUEL,
   GAMEPLAY_PROFILE_PRE_COMBAT,
@@ -41,6 +46,8 @@ import {
   PERCEPTIVE_WIZARD,
   PLAYER,
   PROJECTILE_OWNER_KIND,
+  PROJECTILE_KIND,
+  PROJECTILE_KIND_NAMES,
   PROJECTILE,
   ROCK,
   ROCK_ARCHETYPES,
@@ -138,7 +145,7 @@ import {
   SharedNavigationField,
 } from "./navigation_field.js";
 import {
-  EnemyWizardPool,
+  EnemyPool,
   ParticlePool,
   ProjectilePool,
   RockPool,
@@ -762,7 +769,36 @@ function bodyKindName(code) {
 
 /** @param {number} code */
 function ownerKindName(code) {
-  return code === PROJECTILE_OWNER_KIND.enemyWizard ? "enemyWizard" : "player";
+  if (code === PROJECTILE_OWNER_KIND.enemyWizard) return "enemyWizard";
+  if (code === PROJECTILE_OWNER_KIND.enemyUrchin) return "enemyUrchin";
+  return "player";
+}
+
+/** @param {number} code */
+function enemyKindName(code) {
+  return code === ENEMY_ARCHETYPE.urchin ? "enemyUrchin" : "enemyWizard";
+}
+
+/** @param {number} code */
+function enemyBodyKindName(code) {
+  return code === ENEMY_ARCHETYPE.urchin ? "enemyUrchinBody" : "enemyWizardBody";
+}
+
+/** @param {number} code */
+function enemyDefinition(code) {
+  return code === ENEMY_ARCHETYPE.urchin ? ENEMY_URCHIN : ENEMY_WIZARD;
+}
+
+/** @param {EnemyPool} pool @param {number} index */
+function enemyRetreatEnterHealth(pool, index) {
+  return TACTICAL_WIZARD.retreatEnterHealth
+    * pool.maximumHealth[index] / COMBAT.maximumHealth;
+}
+
+/** @param {EnemyPool} pool @param {number} index */
+function enemyRetreatExitHealth(pool, index) {
+  return TACTICAL_WIZARD.retreatExitHealth
+    * pool.maximumHealth[index] / COMBAT.maximumHealth;
 }
 
 /** @param {number} code */
@@ -798,6 +834,8 @@ export class Simulation {
    * elevatorProjectileCollisionProfile?:string,
    * breakawayFloorProfile?:string,
    * authoredNavigationTopologyProfile?:string,
+   * enemyArchetypeProfile?:string,
+   * encounterEnemyArchetype?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -817,6 +855,26 @@ export class Simulation {
       );
     }
     this.navigationTopology = this.scenario.navigationTopology;
+    this.enemyArchetypeProfile = options.enemyArchetypeProfile ?? ENEMY_ARCHETYPE_PROFILE_V1;
+    if (
+      this.enemyArchetypeProfile !== ENEMY_ARCHETYPE_PROFILE_V1
+      && this.enemyArchetypeProfile !== ENEMY_ARCHETYPE_PROFILE_NONE
+    ) {
+      throw new RangeError(`Unsupported enemy-archetype profile: ${this.enemyArchetypeProfile}`);
+    }
+    this.encounterEnemyArchetype = options.encounterEnemyArchetype ?? "wizard";
+    if (
+      this.encounterEnemyArchetype !== "wizard"
+      && this.encounterEnemyArchetype !== "urchin"
+    ) {
+      throw new RangeError(`Unsupported encounter enemy archetype: ${this.encounterEnemyArchetype}`);
+    }
+    if (
+      this.enemyArchetypeProfile === ENEMY_ARCHETYPE_PROFILE_NONE
+      && this.encounterEnemyArchetype !== "wizard"
+    ) {
+      throw new RangeError("The legacy enemy-archetype profile only supports wizards");
+    }
     this.topologyRevision = 1;
     this.breakawayFloorProfile = options.breakawayFloorProfile
       ?? BREAKAWAY_FLOOR_PROFILE_V1;
@@ -971,7 +1029,7 @@ export class Simulation {
     }
     this.rocks = new RockPool(rockCapacity);
     this.elevators = new ElevatorPool(VERTICAL_PHYSICS.elevatorCapacity);
-    this.enemies = new EnemyWizardPool(enemyCapacity);
+    this.enemies = new EnemyPool(enemyCapacity);
     this.dynamicDeadBodies = new DynamicDeadBodyPool(dynamicDeadBodyCapacity);
     this.inertDeadBodies = new InertDeadBodyRing(inertDeadBodyCapacity);
     this.mapRevision = 1;
@@ -1080,6 +1138,8 @@ export class Simulation {
     this.commandLogMovementSoundProfile = this.movementSoundProfile;
     this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
     this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
+    this.commandLogEnemyArchetypeProfile = this.enemyArchetypeProfile;
+    this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
     this.commandLogSoundEventCapacity = this.soundEvents.capacity;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1279,6 +1339,8 @@ export class Simulation {
       this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
       this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
       this.commandLogAuthoredNavigationTopologyProfile = this.authoredNavigationTopologyProfile;
+      this.commandLogEnemyArchetypeProfile = this.enemyArchetypeProfile;
+      this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -3586,6 +3648,10 @@ export class Simulation {
     this.encounter.attempts += 1;
     const x = obelisk.x + offset.x;
     const z = obelisk.z + offset.z;
+    const archetype = this.encounterEnemyArchetype === "urchin"
+      ? ENEMY_ARCHETYPE.urchin
+      : ENEMY_ARCHETYPE.wizard;
+    const definition = enemyDefinition(archetype);
     const event = {
       type: "spawn",
       tick: simulationTick,
@@ -3601,7 +3667,7 @@ export class Simulation {
       this.#recordCombatEvent(event);
       return;
     }
-    if (!this.#enemySpawnIsSafe(x, z, layerIndex)) {
+    if (!this.#enemySpawnIsSafe(x, z, layerIndex, definition.radius)) {
       this.encounter.skippedBlocked += 1;
       this.#recordCombatEvent(event);
       return;
@@ -3630,12 +3696,13 @@ export class Simulation {
     const id = this.enemies.spawn({
       spawnSequence,
       spawnTick: simulationTick,
+      archetype,
       x,
       z,
-      radius: ENEMY_WIZARD.radius,
-      massKg: ENEMY_WIZARD.massKg,
-      maximumHealth: COMBAT.maximumHealth,
-      shotReadyTick: simulationTick + ENEMY_WIZARD.shotIntervalTicks,
+      radius: definition.radius,
+      massKg: definition.massKg,
+      maximumHealth: definition.maximumHealth ?? COMBAT.maximumHealth,
+      shotReadyTick: simulationTick + definition.shotIntervalTicks,
       facingX: heading.x,
       facingZ: heading.z,
       guardX: x,
@@ -3660,21 +3727,21 @@ export class Simulation {
     this.encounter.nextSpawnSequence += 1;
     this.encounter.successfulSpawns += 1;
     event.result = "spawned";
-    event.enemy = { kind: "enemyWizard", id, spawnSequence };
+    event.enemy = { kind: enemyKindName(archetype), id, spawnSequence };
     this.#recordCombatEvent(event);
   }
 
-  /** @param {number} x @param {number} z @param {number} layerIndex */
-  #enemySpawnIsSafe(x, z, layerIndex) {
+  /** @param {number} x @param {number} z @param {number} layerIndex @param {number} radius */
+  #enemySpawnIsSafe(x, z, layerIndex, radius) {
     const map = this.layerMaps[layerIndex];
-    if (!map || firstSolidContact(map, x, z, ENEMY_WIZARD.radius, this._gridContact)) {
+    if (!map || firstSolidContact(map, x, z, radius, this._gridContact)) {
       return false;
     }
     if (
       this.player.layerIndex === layerIndex
       &&
       Math.hypot(x - this.player.x, z - this.player.z)
-      < ENEMY_WIZARD.radius + this.player.radius
+      < radius + this.player.radius
     ) {
       return false;
     }
@@ -3683,7 +3750,7 @@ export class Simulation {
       if (this.#circleDynamicBodyContact(
         x,
         z,
-        ENEMY_WIZARD.radius,
+        radius,
         index,
         this._bodyContact,
       )) {
@@ -3694,7 +3761,7 @@ export class Simulation {
       if (this.enemies.layerIndex[index] !== layerIndex) continue;
       if (
         Math.hypot(x - this.enemies.x[index], z - this.enemies.z[index])
-        < ENEMY_WIZARD.radius + this.enemies.radius[index]
+        < radius + this.enemies.radius[index]
       ) {
         return false;
       }
@@ -3705,7 +3772,7 @@ export class Simulation {
         Math.hypot(
           x - this.dynamicDeadBodies.x[index],
           z - this.dynamicDeadBodies.z[index],
-        ) < ENEMY_WIZARD.radius + this.dynamicDeadBodies.radius[index]
+        ) < radius + this.dynamicDeadBodies.radius[index]
       ) {
         return false;
       }
@@ -3736,9 +3803,9 @@ export class Simulation {
         ? this.layerMapRevisions[layerIndex] ?? this.mapRevision
         : this.mapRevision;
       let retreating = Boolean(pool.retreating[index]);
-      if (!retreating && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
+      if (!retreating && pool.health[index] <= enemyRetreatEnterHealth(pool, index)) {
         retreating = true;
-      } else if (retreating && pool.health[index] >= TACTICAL_WIZARD.retreatExitHealth) {
+      } else if (retreating && pool.health[index] >= enemyRetreatExitHealth(pool, index)) {
         retreating = false;
       }
       if (retreating) {
@@ -4263,7 +4330,7 @@ export class Simulation {
         pool.z[index] - this.navigationTopology.portWorldZ[endpoint],
       );
       const requiredTicks = Math.ceil(
-        distance / ENEMY_WIZARD.desiredSpeed / SIMULATION.dt,
+        distance / enemyDefinition(pool.archetype[index]).desiredSpeed / SIMULATION.dt,
       ) + 2;
       if (this.elevators.dwellRemaining[elevatorIndex] < requiredTicks) return;
       pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.board;
@@ -4298,7 +4365,7 @@ export class Simulation {
         pool.z[index] - this.navigationTopology.portWorldZ[endpoint],
       );
       const requiredTicks = Math.ceil(
-        distance / ENEMY_WIZARD.desiredSpeed / SIMULATION.dt,
+        distance / enemyDefinition(pool.archetype[index]).desiredSpeed / SIMULATION.dt,
       ) + 2;
       if (this.elevators.dwellRemaining[elevatorIndex] < requiredTicks) {
         this.#missEnemyBoardingWindow(index, tick, "insufficient-dwell");
@@ -4393,8 +4460,8 @@ export class Simulation {
       const phase = pool.topologyPhase[index];
       if (this.#isElevatorRoutePhase(phase)) {
         const retreating = Boolean(pool.retreating[index])
-          ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
-          : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth;
+          ? pool.health[index] < enemyRetreatExitHealth(pool, index)
+          : pool.health[index] <= enemyRetreatEnterHealth(pool, index);
         if (retreating) {
           this.#clearEnemyNavigationRoute(index, "higher-priority-intent", simulationTick);
         } else if (pool.topologyRevision[index] !== this.topologyRevision) {
@@ -4447,8 +4514,8 @@ export class Simulation {
         && pool.knownTargetLayer[index] !== pool.layerIndex[index]
         && !(
           Boolean(pool.retreating[index])
-            ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
-            : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth
+            ? pool.health[index] < enemyRetreatExitHealth(pool, index)
+            : pool.health[index] <= enemyRetreatEnterHealth(pool, index)
         )
       ) {
         if (simulationTick < pool.routeReplanTick[index]) continue;
@@ -4456,8 +4523,8 @@ export class Simulation {
         continue;
       }
       const retreating = Boolean(pool.retreating[index])
-        ? pool.health[index] < TACTICAL_WIZARD.retreatExitHealth
-        : pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth;
+        ? pool.health[index] < enemyRetreatExitHealth(pool, index)
+        : pool.health[index] <= enemyRetreatEnterHealth(pool, index);
       const eligible = pool.perceptionState[index] === PERCEPTION_STATE.unaware
         && !retreating
         && pool.supportKind[index] === SUPPORT_KIND.FLOOR
@@ -4557,8 +4624,8 @@ export class Simulation {
     const deltaVz = desiredVz - pool.locomotionVz[index];
     const deltaLength = Math.hypot(deltaVx, deltaVz);
     const rate = Math.hypot(desiredVx, desiredVz) <= 1e-9
-      ? ENEMY_WIZARD.braking
-      : ENEMY_WIZARD.acceleration;
+      ? enemyDefinition(pool.archetype[index]).braking
+      : enemyDefinition(pool.archetype[index]).acceleration;
     const maximumDelta = rate * dt;
     if (deltaLength <= maximumDelta || deltaLength <= 1e-9) {
       pool.locomotionVx[index] = desiredVx;
@@ -4716,11 +4783,11 @@ export class Simulation {
       return;
     }
     this.#advanceEnemyStrafeDecision(index, simulationTick);
-    if (!pool.retreating[index] && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
+    if (!pool.retreating[index] && pool.health[index] <= enemyRetreatEnterHealth(pool, index)) {
       pool.retreating[index] = 1;
     } else if (
       pool.retreating[index]
-      && pool.health[index] >= TACTICAL_WIZARD.retreatExitHealth
+      && pool.health[index] >= enemyRetreatExitHealth(pool, index)
     ) {
       pool.retreating[index] = 0;
     }
@@ -4787,12 +4854,12 @@ export class Simulation {
       gradientMode = "retreat";
       directDx = -dx;
       directDz = -dz;
-    } else if (distance > ENEMY_WIZARD.approachBeyondMeters) {
+    } else if (distance > enemyDefinition(pool.archetype[index]).approachBeyondMeters) {
       pool.aiState[index] = ENEMY_AI_APPROACH;
       gradientMode = "approach";
       directDx = dx;
       directDz = dz;
-    } else if (distance < ENEMY_WIZARD.withdrawInsideMeters) {
+    } else if (distance < enemyDefinition(pool.archetype[index]).withdrawInsideMeters) {
       pool.aiState[index] = ENEMY_AI_WITHDRAW;
       gradientMode = "retreat";
       directDx = -dx;
@@ -4838,7 +4905,7 @@ export class Simulation {
         index,
         step.x - pool.x[index],
         step.z - pool.z[index],
-        ENEMY_WIZARD.desiredSpeed,
+        enemyDefinition(pool.archetype[index]).desiredSpeed,
         dt,
       );
       return;
@@ -4849,7 +4916,13 @@ export class Simulation {
       pool.x[index] + directDx,
       pool.z[index] + directDz,
     );
-    this.#moveEnemyAlong(index, directDx, directDz, ENEMY_WIZARD.desiredSpeed, dt);
+    this.#moveEnemyAlong(
+      index,
+      directDx,
+      directDz,
+      enemyDefinition(pool.archetype[index]).desiredSpeed,
+      dt,
+    );
   }
 
   /**
@@ -4945,7 +5018,7 @@ export class Simulation {
           targetZ,
           "approach",
           ENEMY_GOAL_GUARD,
-          ENEMY_WIZARD.desiredSpeed,
+          enemyDefinition(pool.archetype[index]).desiredSpeed,
           dt,
         );
       }
@@ -4979,7 +5052,7 @@ export class Simulation {
           targetZ,
           "approach",
           ENEMY_GOAL_GUARD,
-          ENEMY_WIZARD.desiredSpeed,
+          enemyDefinition(pool.archetype[index]).desiredSpeed,
           dt,
         );
       }
@@ -4995,11 +5068,11 @@ export class Simulation {
       return;
     }
     this.#advanceEnemyStrafeDecision(index, simulationTick);
-    if (!pool.retreating[index] && pool.health[index] <= TACTICAL_WIZARD.retreatEnterHealth) {
+    if (!pool.retreating[index] && pool.health[index] <= enemyRetreatEnterHealth(pool, index)) {
       pool.retreating[index] = 1;
     } else if (
       pool.retreating[index]
-      && pool.health[index] >= TACTICAL_WIZARD.retreatExitHealth
+      && pool.health[index] >= enemyRetreatExitHealth(pool, index)
     ) {
       pool.retreating[index] = 0;
     }
@@ -5084,7 +5157,7 @@ export class Simulation {
           hostileZ,
           "retreat",
           ENEMY_GOAL_MEMORY,
-          ENEMY_WIZARD.desiredSpeed,
+          enemyDefinition(pool.archetype[index]).desiredSpeed,
           dt,
         );
         return;
@@ -5097,7 +5170,7 @@ export class Simulation {
       const dx = this.player.x - pool.x[index];
       const dz = this.player.z - pool.z[index];
       const distance = Math.hypot(dx, dz);
-      if (distance > ENEMY_WIZARD.approachBeyondMeters) {
+      if (distance > enemyDefinition(pool.archetype[index]).approachBeyondMeters) {
         pool.aiState[index] = ENEMY_AI_APPROACH;
         this.#movePerceptiveWithField(
           index,
@@ -5105,10 +5178,10 @@ export class Simulation {
           this.player.z,
           "approach",
           ENEMY_GOAL_DIRECT,
-          ENEMY_WIZARD.desiredSpeed,
+          enemyDefinition(pool.archetype[index]).desiredSpeed,
           dt,
         );
-      } else if (distance < ENEMY_WIZARD.withdrawInsideMeters) {
+      } else if (distance < enemyDefinition(pool.archetype[index]).withdrawInsideMeters) {
         pool.aiState[index] = ENEMY_AI_WITHDRAW;
         this.#movePerceptiveWithField(
           index,
@@ -5116,7 +5189,7 @@ export class Simulation {
           this.player.z,
           "retreat",
           ENEMY_GOAL_DIRECT,
-          ENEMY_WIZARD.desiredSpeed,
+          enemyDefinition(pool.archetype[index]).desiredSpeed,
           dt,
         );
       } else if (distance > 1e-9) {
@@ -5160,7 +5233,7 @@ export class Simulation {
           targetZ,
           "approach",
           searching ? ENEMY_GOAL_SEARCH : ENEMY_GOAL_MEMORY,
-          ENEMY_WIZARD.desiredSpeed,
+          enemyDefinition(pool.archetype[index]).desiredSpeed,
           dt,
         );
       } else {
@@ -5179,7 +5252,7 @@ export class Simulation {
         pool.guardZ[index],
         "approach",
         ENEMY_GOAL_GUARD,
-        ENEMY_WIZARD.desiredSpeed,
+        enemyDefinition(pool.archetype[index]).desiredSpeed,
         dt,
       );
       return;
@@ -5209,17 +5282,18 @@ export class Simulation {
       let desiredVx = 0;
       let desiredVz = 0;
       let state = ENEMY_AI_HOLD;
-      if (distance > ENEMY_WIZARD.approachBeyondMeters) {
+      const definition = enemyDefinition(pool.archetype[index]);
+      if (distance > definition.approachBeyondMeters) {
         state = ENEMY_AI_APPROACH;
         if (distance > 1e-9) {
-          desiredVx = (dx / distance) * ENEMY_WIZARD.desiredSpeed;
-          desiredVz = (dz / distance) * ENEMY_WIZARD.desiredSpeed;
+          desiredVx = (dx / distance) * definition.desiredSpeed;
+          desiredVz = (dz / distance) * definition.desiredSpeed;
         }
-      } else if (distance < ENEMY_WIZARD.withdrawInsideMeters) {
+      } else if (distance < definition.withdrawInsideMeters) {
         state = ENEMY_AI_WITHDRAW;
         if (distance > 1e-9) {
-          desiredVx = (-dx / distance) * ENEMY_WIZARD.desiredSpeed;
-          desiredVz = (-dz / distance) * ENEMY_WIZARD.desiredSpeed;
+          desiredVx = (-dx / distance) * definition.desiredSpeed;
+          desiredVz = (-dz / distance) * definition.desiredSpeed;
         }
       }
       pool.aiState[index] = state;
@@ -5241,8 +5315,8 @@ export class Simulation {
       const deltaVz = desiredVz - pool.locomotionVz[index];
       const deltaLength = Math.hypot(deltaVx, deltaVz);
       const rate = state === ENEMY_AI_HOLD
-        ? ENEMY_WIZARD.braking
-        : ENEMY_WIZARD.acceleration;
+        ? definition.braking
+        : definition.acceleration;
       const maximumDelta = rate * dt;
       if (deltaLength <= maximumDelta || deltaLength <= 1e-9) {
         pool.locomotionVx[index] = desiredVx;
@@ -5349,6 +5423,8 @@ export class Simulation {
     if (!definition) throw new Error("Current Fireball definition is unavailable");
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
+      const isUrchin = pool.archetype[index] === ENEMY_ARCHETYPE.urchin;
+      const projectileDefinition = isUrchin ? ENEMY_URCHIN.projectile : definition.projectile;
       if (pool.layerIndex[index] !== this.player.layerIndex) {
         pool.lineOfSight[index] = 0;
         continue;
@@ -5389,8 +5465,8 @@ export class Simulation {
           targetZ: this.player.z,
           targetVx: this.player.vx,
           targetVz: this.player.vz,
-          projectileSpeed: Number(definition.projectile.speed),
-          projectileLifetime: Number(definition.projectile.lifetime),
+          projectileSpeed: Number(projectileDefinition.speed),
+          projectileLifetime: Number(projectileDefinition.lifetime),
         });
         aimX = prediction.x;
         aimZ = prediction.z;
@@ -5404,8 +5480,8 @@ export class Simulation {
           targetZ: this.player.z,
           targetVx: this.player.vx,
           targetVz: this.player.vz,
-          projectileSpeed: Number(definition.projectile.speed),
-          projectileLifetime: Number(definition.projectile.lifetime),
+          projectileSpeed: Number(projectileDefinition.speed),
+          projectileLifetime: Number(projectileDefinition.lifetime),
         });
         aimX = prediction.x;
         aimZ = prediction.z;
@@ -5445,44 +5521,56 @@ export class Simulation {
       const nx = dx / distance;
       const nz = dz / distance;
       const offset = pool.radius[index]
-        + Number(definition.projectile.radius)
-        + Number(definition.projectile.spawnGap);
-      const effectSeed = deriveEnemyCastSeed(
-        this.seed,
-        pool.spawnSequence[index],
-        spell.code,
-        pool.castSequence[index],
-      );
-      const effectId = this.nextEffectId;
+        + Number(projectileDefinition.radius)
+        + Number(projectileDefinition.spawnGap);
+      const effectSeed = isUrchin
+        ? 0
+        : deriveEnemyCastSeed(
+            this.seed,
+            pool.spawnSequence[index],
+            spell.code,
+            pool.castSequence[index],
+          );
+      const effectId = isUrchin ? 0 : this.nextEffectId;
       const projectileId = this.projectiles.spawn({
         x: pool.x[index] + nx * offset,
         z: pool.z[index] + nz * offset,
-        vx: nx * Number(definition.projectile.speed),
-        vz: nz * Number(definition.projectile.speed),
-        lifetime: Number(definition.projectile.lifetime),
-        radius: Number(definition.projectile.radius),
+        vx: nx * Number(projectileDefinition.speed),
+        vz: nz * Number(projectileDefinition.speed),
+        lifetime: Number(projectileDefinition.lifetime),
+        radius: Number(projectileDefinition.radius),
         ownerId: pool.id[index],
-        ownerKind: PROJECTILE_OWNER_KIND.enemyWizard,
+        ownerKind: isUrchin
+          ? PROJECTILE_OWNER_KIND.enemyUrchin
+          : PROJECTILE_OWNER_KIND.enemyWizard,
         ownerTeam: ACTOR_TEAM.enemy,
-        spellCode: spell.code,
-        definitionRevision: spell.currentRevision,
+        projectileKind: isUrchin ? PROJECTILE_KIND.thrownStone : PROJECTILE_KIND.fireball,
+        spellCode: isUrchin ? 0 : spell.code,
+        definitionRevision: isUrchin ? 0 : spell.currentRevision,
         effectId,
         effectSeed,
         layerIndex: pool.layerIndex[index],
       });
       if (projectileId === 0) continue;
-      pool.cooldown[index] = Number(definition.cast.cooldown);
+      pool.cooldown[index] = isUrchin
+        ? Number(ENEMY_URCHIN.projectile.cooldown)
+        : Number(definition.cast.cooldown);
       pool.castSequence[index] = (pool.castSequence[index] + 1) >>> 0;
-      pool.shotReadyTick[index] = simulationTick + ENEMY_WIZARD.shotIntervalTicks;
-      this.nextEffectId = (this.nextEffectId + 1) >>> 0 || 1;
+      pool.shotReadyTick[index] = simulationTick
+        + enemyDefinition(pool.archetype[index]).shotIntervalTicks;
+      if (!isUrchin) this.nextEffectId = (this.nextEffectId + 1) >>> 0 || 1;
       this.#recordCombatEvent({
-        type: "cast",
+        type: isUrchin ? "attack" : "cast",
         tick: simulationTick,
-        caster: { kind: "enemyWizard", id: pool.id[index], team: "enemy" },
-        spellId: spell.id,
-        definitionRevision: spell.currentRevision,
-        effectId,
-        effectSeed,
+        caster: { kind: enemyKindName(pool.archetype[index]), id: pool.id[index], team: "enemy" },
+        ...(isUrchin
+          ? { attackId: "thrown-stone" }
+          : {
+              spellId: spell.id,
+              definitionRevision: spell.currentRevision,
+              effectId,
+              effectSeed,
+            }),
         projectileId,
         target: { kind: "player", id: this.player.id },
         ...(
@@ -5531,6 +5619,7 @@ export class Simulation {
     const pool = this.dynamicDeadBodies;
     this.inertDeadBodies.push({
       id: pool.id[index],
+      archetype: pool.archetype[index],
       spawnSequence: pool.spawnSequence[index],
       deathTick: pool.deathTick[index],
       settledTick: simulationTick,
@@ -5569,6 +5658,7 @@ export class Simulation {
           );
           const bodyIndex = this.dynamicDeadBodies.spawn({
             id: this.enemies.id[index],
+            archetype: this.enemies.archetype[index],
             spawnSequence: this.enemies.spawnSequence[index],
             deathTick: simulationTick,
             x: this.enemies.x[index],
@@ -7023,8 +7113,10 @@ export class Simulation {
     const playerDamping = Math.exp(-PLAYER.externalDamping * dt);
     player.externalVx *= playerDamping;
     player.externalVz *= playerDamping;
-    const enemyDamping = Math.exp(-ENEMY_WIZARD.externalDamping * dt);
     for (let index = 0; index < enemies.activeCount; index += 1) {
+      const enemyDamping = Math.exp(
+        -enemyDefinition(enemies.archetype[index]).externalDamping * dt,
+      );
       enemies.externalVx[index] *= enemyDamping;
       enemies.externalVz[index] *= enemyDamping;
       this.#syncEnemyVelocity(index);
@@ -8341,7 +8433,7 @@ export class Simulation {
               testZ - this.dynamicDeadBodies.z[bodyIndex],
             ) <= pool.radius[index] + this.dynamicDeadBodies.radius[bodyIndex]
           ) {
-            hitKind = "enemyWizardBody";
+            hitKind = enemyBodyKindName(this.dynamicDeadBodies.archetype[bodyIndex]);
             hitDeadBodyIndex = bodyIndex;
             hitX = testX;
             hitZ = testZ;
@@ -8370,7 +8462,7 @@ export class Simulation {
                 testZ - this.enemies.z[enemyIndex],
               ) <= pool.radius[index] + this.enemies.radius[enemyIndex]
             ) {
-              hitKind = "enemyWizard";
+              hitKind = enemyKindName(this.enemies.archetype[enemyIndex]);
               hitActorIndex = enemyIndex;
               hitX = testX;
               hitZ = testZ;
@@ -8382,6 +8474,21 @@ export class Simulation {
       }
 
       if (hitKind) {
+        if (pool.projectileKind[index] === PROJECTILE_KIND.thrownStone) {
+          if (hitKind === "player") {
+            this.#damagePlayer(ENEMY_URCHIN.projectile.damage, {
+              owner: {
+                kind: ownerKindName(pool.ownerKind[index]),
+                id: pool.ownerId[index],
+                team: teamName(pool.ownerTeam[index]),
+              },
+              projectileId: pool.id[index],
+              effectId: null,
+            }, "direct");
+          }
+          pool.removeSwap(index);
+          continue;
+        }
         const event = this.#createExplosionEvent(
           index,
           hitKind,
@@ -8631,11 +8738,13 @@ export class Simulation {
     } else if (
       hitKind === "player"
       || hitKind === "enemyWizard"
+      || hitKind === "enemyUrchin"
       || hitKind === "enemyWizardBody"
+      || hitKind === "enemyUrchinBody"
     ) {
       const body = hitKind === "player"
         ? this.player
-        : hitKind === "enemyWizard"
+        : hitKind === "enemyWizard" || hitKind === "enemyUrchin"
           ? {
             id: this.enemies.id[actorIndex],
             x: this.enemies.x[actorIndex],
@@ -8811,7 +8920,8 @@ export class Simulation {
       fallbackNx: -event.nx,
       fallbackNz: -event.nz,
     });
-    const directHit = event.hit?.kind === "enemyWizard"
+    const targetKind = enemyKindName(pool.archetype[index]);
+    const directHit = event.hit?.kind === targetKind
       && Number(event.hit.id) === pool.id[index];
     if (!response && !directHit) return;
     const hasBlastResponse = Boolean(response);
@@ -8836,7 +8946,7 @@ export class Simulation {
     }
     const damage = this.#combatDamageFor(
       event,
-      "enemyWizard",
+      targetKind,
       pool.id[index],
       "enemy",
       response.surfaceDistance,
@@ -8847,7 +8957,7 @@ export class Simulation {
       : pool.health[index];
     event.responses.push(
       this.#describeExplosionResponse(
-        "enemyWizard",
+        targetKind,
         pool.id[index],
         pool.x[index],
         pool.z[index],
@@ -8991,7 +9101,7 @@ export class Simulation {
     pool.lastDamageTick[index] = this.tickCount + 1;
     this.#applyUnseenDamageStimulus(index, source, this.tickCount + 1);
     const target = {
-      kind: "enemyWizard",
+      kind: enemyKindName(pool.archetype[index]),
       id: pool.id[index],
       team: "enemy",
       spawnSequence: pool.spawnSequence[index],
@@ -9082,7 +9192,8 @@ export class Simulation {
       fallbackNx: -event.nx,
       fallbackNz: -event.nz,
     });
-    const directHit = event.hit?.kind === "enemyWizardBody"
+    const targetKind = enemyBodyKindName(pool.archetype[index]);
+    const directHit = event.hit?.kind === targetKind
       && Number(event.hit.id) === pool.id[index];
     if (!response && !directHit) return;
     const hasBlastResponse = Boolean(response);
@@ -9115,7 +9226,7 @@ export class Simulation {
     pool.touched[index] = 1;
     event.responses.push(
       this.#describeExplosionResponse(
-        "enemyWizardBody",
+        targetKind,
         pool.id[index],
         pool.x[index],
         pool.z[index],
@@ -10257,6 +10368,9 @@ export class Simulation {
 
     const enemies = new Array(this.enemies.activeCount);
     for (let index = 0; index < enemies.length; index += 1) {
+      const archetypeCode = this.enemies.archetype[index];
+      const archetype = ENEMY_ARCHETYPE_NAMES[archetypeCode] ?? "wizard";
+      const definition = enemyDefinition(archetypeCode);
       const health = this.enemies.health[index];
       const maximumHealth = this.enemies.maximumHealth[index];
       const damageFreeTicks = this.enemies.damageFreeTicks[index];
@@ -10265,7 +10379,9 @@ export class Simulation {
         ? this.#enemyPerceptionState(index)
         : null;
       enemies[index] = {
-        kind: "enemyWizard",
+        kind: enemyKindName(archetypeCode),
+        archetype,
+        archetypeCode,
         id: this.enemies.id[index],
         index,
         spawnSequence: this.enemies.spawnSequence[index],
@@ -10283,6 +10399,7 @@ export class Simulation {
         externalVx: this.enemies.externalVx[index],
         externalVz: this.enemies.externalVz[index],
         radius: this.enemies.radius[index],
+        presentationHeight: definition.presentationHeight ?? 1.6,
         massKg: this.enemies.massKg[index],
         team: "enemy",
         health,
@@ -10297,7 +10414,9 @@ export class Simulation {
             && health < maximumHealth
             && damageFreeTicks >= COMBAT.regenerationDelayTicks,
         },
-        cooldowns: { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
+        cooldowns: archetypeCode === ENEMY_ARCHETYPE.urchin
+          ? { "thrown-stone": this.enemies.cooldown[index] }
+          : { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
         castSequence: this.enemies.castSequence[index],
         shotReadyTick: this.enemies.shotReadyTick[index],
         ticksUntilShot: Math.max(
@@ -10329,7 +10448,9 @@ export class Simulation {
     const dynamicDeadBodies = new Array(this.dynamicDeadBodies.activeCount);
     for (let index = 0; index < dynamicDeadBodies.length; index += 1) {
       dynamicDeadBodies[index] = {
-        kind: "enemyWizardBody",
+        kind: enemyBodyKindName(this.dynamicDeadBodies.archetype[index]),
+        archetype: ENEMY_ARCHETYPE_NAMES[this.dynamicDeadBodies.archetype[index]] ?? "wizard",
+        presentationHeight: enemyDefinition(this.dynamicDeadBodies.archetype[index]).presentationHeight ?? 1.6,
         id: this.dynamicDeadBodies.id[index],
         index,
         spawnSequence: this.dynamicDeadBodies.spawnSequence[index],
@@ -10366,7 +10487,9 @@ export class Simulation {
     for (let ordinal = 0; ordinal < inertDeadBodies.length; ordinal += 1) {
       const index = this.inertDeadBodies.storageIndex(ordinal);
       inertDeadBodies[ordinal] = {
-        kind: "enemyWizardBody",
+        kind: enemyBodyKindName(this.inertDeadBodies.archetype[index]),
+        archetype: ENEMY_ARCHETYPE_NAMES[this.inertDeadBodies.archetype[index]] ?? "wizard",
+        presentationHeight: enemyDefinition(this.inertDeadBodies.archetype[index]).presentationHeight ?? 1.6,
         id: this.inertDeadBodies.id[index],
         index: ordinal,
         spawnSequence: this.inertDeadBodies.spawnSequence[index],
@@ -10403,6 +10526,8 @@ export class Simulation {
 
     const projectiles = new Array(this.projectiles.activeCount);
     for (let index = 0; index < projectiles.length; index += 1) {
+      const projectileKindCode = this.projectiles.projectileKind[index];
+      const projectileKind = PROJECTILE_KIND_NAMES[projectileKindCode] ?? "fireball";
       projectiles[index] = {
         kind: "projectile",
         id: this.projectiles.id[index],
@@ -10414,8 +10539,11 @@ export class Simulation {
           id: this.projectiles.ownerId[index],
           team: teamName(this.projectiles.ownerTeam[index]),
         },
-        spellId: this.spells.getByCode(this.projectiles.spellCode[index])?.id
-          ?? FIREBALL_SPELL_ID,
+        projectileKind,
+        projectileKindCode,
+        spellId: projectileKindCode === PROJECTILE_KIND.fireball
+          ? this.spells.getByCode(this.projectiles.spellCode[index])?.id ?? FIREBALL_SPELL_ID
+          : null,
         spellCode: this.projectiles.spellCode[index],
         definitionRevision: this.projectiles.definitionRevision[index],
         effectId: this.projectiles.effectId[index],
@@ -10906,7 +11034,7 @@ export class Simulation {
       const index = this.rocks.findIndexById(Number(selection.id));
       return index < 0 ? null : this.#describeRock(index);
     }
-    if (selection.kind === "enemyWizard") {
+    if (selection.kind === "enemyWizard" || selection.kind === "enemyUrchin") {
       const index = this.enemies.findIndexById(Number(selection.id));
       return index < 0 ? null : this.#describeEnemy(index);
     }
@@ -11000,6 +11128,8 @@ export class Simulation {
 
   /** @param {number} index */
   #describeEnemy(index) {
+    const archetypeCode = this.enemies.archetype[index];
+    const archetype = ENEMY_ARCHETYPE_NAMES[archetypeCode] ?? "wizard";
     const health = this.enemies.health[index];
     const maximumHealth = this.enemies.maximumHealth[index];
     const damageFreeTicks = this.enemies.damageFreeTicks[index];
@@ -11008,7 +11138,9 @@ export class Simulation {
       ? this.#enemyPerceptionState(index)
       : null;
     return {
-      kind: "enemyWizard",
+      kind: enemyKindName(archetypeCode),
+      archetype,
+      archetypeCode,
       id: this.enemies.id[index],
       index,
       spawnSequence: this.enemies.spawnSequence[index],
@@ -11046,7 +11178,9 @@ export class Simulation {
       health,
       maximumHealth,
       team: "enemy",
-      cooldowns: { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
+      cooldowns: archetypeCode === ENEMY_ARCHETYPE.urchin
+        ? { "thrown-stone": this.enemies.cooldown[index] }
+        : { [FIREBALL_SPELL_ID]: this.enemies.cooldown[index] },
       castSequence: this.enemies.castSequence[index],
       shotReadyTick: this.enemies.shotReadyTick[index],
       aiState: tacticalState.behaviorState,
@@ -11145,6 +11279,8 @@ export class Simulation {
   /** @param {number} index */
   #describeProjectile(index) {
     const spellCode = this.projectiles.spellCode[index];
+    const projectileKindCode = this.projectiles.projectileKind[index];
+    const projectileKind = PROJECTILE_KIND_NAMES[projectileKindCode] ?? "fireball";
     return {
       kind: "projectile",
       id: this.projectiles.id[index],
@@ -11156,7 +11292,11 @@ export class Simulation {
         id: this.projectiles.ownerId[index],
         team: teamName(this.projectiles.ownerTeam[index]),
       },
-      spell: this.spells.getByCode(spellCode)?.id ?? FIREBALL_SPELL_ID,
+      projectileKind,
+      projectileKindCode,
+      spell: projectileKindCode === PROJECTILE_KIND.fireball
+        ? this.spells.getByCode(spellCode)?.id ?? FIREBALL_SPELL_ID
+        : null,
       spellCode,
       definitionRevision: this.projectiles.definitionRevision[index],
       effectId: this.projectiles.effectId[index],
@@ -11703,6 +11843,8 @@ export class Simulation {
         breakawayFloorProfile: this.commandLogBreakawayFloorProfile,
         authoredNavigationTopologyProfile:
           this.commandLogAuthoredNavigationTopologyProfile,
+        enemyArchetypeProfile: this.commandLogEnemyArchetypeProfile,
+        encounterEnemyArchetype: this.commandLogEncounterEnemyArchetype,
         navigationTopologyCapacities: {
           authoredNodes: NAVIGATION_TOPOLOGY.authoredNodeCapacity,
           authoredLinks: NAVIGATION_TOPOLOGY.authoredLinkCapacity,
@@ -11735,7 +11877,9 @@ export class Simulation {
         || Number(recording.initialAuthoringMap.version) !== AUTHORING_MAP_VERSION
       )
     ) {
-      throw new TypeError("Schema-v15 recording is missing its authoring-map v6 baseline");
+      throw new TypeError(
+        `Schema-v${recordingSchema} recording is missing its authoring-map v6 baseline`,
+      );
     }
     const scenario = ArenaScenario.fromJSON(
       recordingSchema >= 12 && recording.initialAuthoringMap
@@ -11764,6 +11908,8 @@ export class Simulation {
     let elevatorProjectileCollisionProfile = ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE;
     let breakawayFloorProfile = BREAKAWAY_FLOOR_PROFILE_NONE;
     let authoredNavigationTopologyProfile = AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE;
+    let enemyArchetypeProfile = ENEMY_ARCHETYPE_PROFILE_NONE;
+    let encounterEnemyArchetype = "wizard";
     let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
@@ -11824,6 +11970,7 @@ export class Simulation {
       || recordingSchema === 13
       || recordingSchema === 14
       || recordingSchema === 15
+      || recordingSchema === 16
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -11922,7 +12069,7 @@ export class Simulation {
             !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
         ) {
           throw new TypeError(
-            "Schema-v15 recording has invalid or missing authored-navigation topology profile",
+            `Schema-v${recordingSchema} recording has invalid or missing authored-navigation topology profile`,
           );
         }
         const capacities = recording.configuration?.navigationTopologyCapacities;
@@ -11933,7 +12080,19 @@ export class Simulation {
           || Number(capacities?.arcs) !== NAVIGATION_TOPOLOGY.arcCapacity
           || Number(capacities?.routeEvents) !== NAVIGATION_TOPOLOGY.routeEventCapacity
         ) {
-          throw new TypeError("Schema-v15 recording has invalid navigation-topology capacities");
+          throw new TypeError(
+            `Schema-v${recordingSchema} recording has invalid navigation-topology capacities`,
+          );
+        }
+      }
+      if (recordingSchema >= 16) {
+        enemyArchetypeProfile = String(recording.configuration?.enemyArchetypeProfile ?? "");
+        encounterEnemyArchetype = String(recording.configuration?.encounterEnemyArchetype ?? "");
+        if (enemyArchetypeProfile !== ENEMY_ARCHETYPE_PROFILE_V1) {
+          throw new TypeError("Schema-v16 recording has invalid or missing enemy-archetype profile");
+        }
+        if (encounterEnemyArchetype !== "wizard" && encounterEnemyArchetype !== "urchin") {
+          throw new TypeError("Schema-v16 recording has invalid encounter enemy archetype");
         }
       }
     }
@@ -11969,6 +12128,8 @@ export class Simulation {
       elevatorProjectileCollisionProfile,
       breakawayFloorProfile,
       authoredNavigationTopologyProfile,
+      enemyArchetypeProfile,
+      encounterEnemyArchetype,
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

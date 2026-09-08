@@ -545,7 +545,8 @@ export class ThreePresentation {
       this.actorGeometry,
       this.enemyMaterial,
       ENEMY_WIZARD.capacity,
-      "enemy-wizards",
+      "enemies",
+      { instanceColors: true },
     );
     this.enemyMesh.castShadow = true;
     this.enemyMesh.receiveShadow = true;
@@ -576,6 +577,7 @@ export class ThreePresentation {
       this.enemyFacingMaterial,
       ENEMY_WIZARD.capacity,
       "enemy-facing-markers",
+      { instanceColors: true },
     );
     this.enemyFacingMesh.castShadow = true;
     this.enemyFacingMesh.receiveShadow = true;
@@ -1712,10 +1714,14 @@ export class ThreePresentation {
         alpha,
       );
       const localY = worldY - this.activeBaseY;
-      this._position.set(x, localY + PLAYER_HEIGHT_METERS / 2, z);
-      this._scale.set(enemy.radius * 2, PLAYER_HEIGHT_METERS, enemy.radius * 2);
+      const height = Number(enemy.presentationHeight ?? PLAYER_HEIGHT_METERS);
+      const isUrchin = enemy.archetype === "urchin";
+      this._position.set(x, localY + height / 2, z);
+      this._scale.set(enemy.radius * 2, height, enemy.radius * 2);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.enemyMesh.setMatrixAt(count, this._matrix);
+      this._color.setHex(isUrchin ? 0xb99561 : 0xb94852);
+      this.enemyMesh.setColorAt(count, this._color);
       const facing = normalizedEnemyFacing(enemy);
       const markerScale = Math.max(0.5, enemy.radius / ENEMY_WIZARD.radius);
       this._facingDirection.set(facing.x, 0, facing.z).normalize();
@@ -1729,16 +1735,18 @@ export class ThreePresentation {
       );
       this._position.set(
         x + facing.x * markerCenterDistance,
-        localY + PLAYER_HEIGHT_METERS * 0.66,
+        localY + height * 0.66,
         z + facing.z * markerCenterDistance,
       );
       this._scale.setScalar(markerScale);
       this._matrix.compose(this._position, this._facingQuaternion, this._scale);
       this.enemyFacingMesh.setMatrixAt(count, this._matrix);
+      this._color.setHex(isUrchin ? 0xead09c : 0xff9b9e);
+      this.enemyFacingMesh.setColorAt(count, this._color);
       count += 1;
     }
-    publishInstancedPool(this.enemyMesh, count);
-    publishInstancedPool(this.enemyFacingMesh, count);
+    publishInstancedPool(this.enemyMesh, count, { instanceColors: true });
+    publishInstancedPool(this.enemyFacingMesh, count, { instanceColors: true });
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
@@ -1750,7 +1758,8 @@ export class ThreePresentation {
         this.actorGeometry,
         this.deadBodyMaterial,
         Math.max(1, capacity),
-        "enemy-wizard-dead-bodies",
+        "enemy-dead-bodies",
+        { instanceColors: true },
       );
       this.deadBodyMesh.castShadow = true;
       this.deadBodyMesh.receiveShadow = true;
@@ -1784,7 +1793,7 @@ export class ThreePresentation {
       this._position.set(pose.x, pose.centerY + worldY - this.activeBaseY, pose.z);
       this._scale.set(
         body.radius * 2,
-        ENEMY_BODY_HEIGHT_METERS,
+        Number(body.presentationHeight ?? ENEMY_BODY_HEIGHT_METERS),
         body.radius * 2,
       );
       this._matrix.compose(
@@ -1793,9 +1802,11 @@ export class ThreePresentation {
         this._scale,
       );
       this.deadBodyMesh.setMatrixAt(bodyCount, this._matrix);
+      this._color.setHex(body.archetype === "urchin" ? 0x725c3d : 0x583237);
+      this.deadBodyMesh.setColorAt(bodyCount, this._color);
       bodyCount += 1;
     }
-    publishInstancedPool(this.deadBodyMesh, bodyCount);
+    publishInstancedPool(this.deadBodyMesh, bodyCount, { instanceColors: true });
   }
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
@@ -1826,8 +1837,9 @@ export class ThreePresentation {
       const rightOffset = actor.radius
         + HEALTH_BAR.actorGapMeters
         + HEALTH_BAR.widthMeters / 2;
+      const actorHeight = Number(actor.presentationHeight ?? PLAYER_HEIGHT_METERS);
       this._healthCenter
-        .set(x, worldY - this.activeBaseY + PLAYER_HEIGHT_METERS * 0.57, z)
+        .set(x, worldY - this.activeBaseY + actorHeight * 0.57, z)
         .addScaledVector(this._cameraRight, rightOffset);
 
       this._scale.set(HEALTH_BAR.widthMeters, HEALTH_BAR.heightMeters, 1);
@@ -2063,6 +2075,14 @@ export class ThreePresentation {
       this._scale.setScalar(projectile.radius * 1.15);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.projectileMesh.setMatrixAt(count, this._matrix);
+      if (projectile.projectileKind === "thrown-stone") {
+        this._color.setHex(0x77644d);
+        this.projectileMesh.setColorAt(count, this._color);
+        this._emissiveColor.setRGB(0, 0, 0);
+        setInstancedEmissiveAt(this.projectileMesh, count, this._emissiveColor, 0);
+        count += 1;
+        continue;
+      }
       const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
       writeFireballPaletteColor(this._color, definition, {
         kind: FIREBALL_COLOR_PROJECTILE,

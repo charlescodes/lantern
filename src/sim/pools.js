@@ -1,10 +1,12 @@
 // @ts-check
 
 import {
+  ENEMY_ARCHETYPE,
   NAVIGATION_EVIDENCE,
   NAVIGATION_ROUTE_FAILURE,
   NAVIGATION_ROUTE_PHASE,
   NAVIGATION_TOPOLOGY,
+  PROJECTILE_KIND,
 } from "../config.js";
 
 import {
@@ -34,6 +36,7 @@ export class ProjectilePool {
     this.ownerId = new Uint32Array(capacity);
     this.ownerKind = new Uint8Array(capacity);
     this.ownerTeam = new Uint8Array(capacity);
+    this.projectileKind = new Uint8Array(capacity);
     this.spellCode = new Uint8Array(capacity);
     this.definitionRevision = new Uint32Array(capacity);
     this.effectId = new Uint32Array(capacity);
@@ -47,7 +50,7 @@ export class ProjectilePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
+  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,projectileKind?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -69,6 +72,7 @@ export class ProjectilePool {
     this.ownerId[index] = value.ownerId ?? 0;
     this.ownerKind[index] = value.ownerKind ?? 1;
     this.ownerTeam[index] = value.ownerTeam ?? 1;
+    this.projectileKind[index] = value.projectileKind ?? PROJECTILE_KIND.fireball;
     this.spellCode[index] = value.spellCode ?? 0;
     this.definitionRevision[index] = value.definitionRevision ?? 0;
     this.effectId[index] = value.effectId ?? 0;
@@ -96,6 +100,7 @@ export class ProjectilePool {
       this.ownerId[index] = this.ownerId[last];
       this.ownerKind[index] = this.ownerKind[last];
       this.ownerTeam[index] = this.ownerTeam[last];
+      this.projectileKind[index] = this.projectileKind[last];
       this.spellCode[index] = this.spellCode[last];
       this.definitionRevision[index] = this.definitionRevision[last];
       this.effectId[index] = this.effectId[last];
@@ -115,7 +120,7 @@ export class ProjectilePool {
   }
 }
 
-export class EnemyWizardPool {
+export class EnemyPool {
   /** @param {number} capacity */
   constructor(capacity) {
     this.capacity = capacity;
@@ -123,6 +128,7 @@ export class EnemyWizardPool {
     this.dropped = 0;
     this.nextId = 1;
     this.id = new Uint32Array(capacity);
+    this.archetype = new Uint8Array(capacity);
     this.spawnSequence = new Uint32Array(capacity);
     this.spawnTick = new Uint32Array(capacity);
     this.x = new Float32Array(capacity);
@@ -268,7 +274,7 @@ export class EnemyWizardPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
+  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -278,6 +284,7 @@ export class EnemyWizardPool {
     const id = this.nextId;
     this.nextId = (this.nextId + 1) >>> 0 || 1;
     this.id[index] = id;
+    this.archetype[index] = value.archetype ?? ENEMY_ARCHETYPE.wizard;
     this.spawnSequence[index] = value.spawnSequence;
     this.spawnTick[index] = value.spawnTick;
     this.x[index] = value.x;
@@ -414,6 +421,7 @@ export class EnemyWizardPool {
     if (index !== last) {
       for (const component of [
         this.id,
+        this.archetype,
         this.spawnSequence,
         this.spawnTick,
         this.x,
@@ -762,6 +770,10 @@ export class RockPool {
     return -1;
   }
 }
+
+// Historical tests and integrations can keep the pre-archetype import while
+// new code uses the generic pool name.
+export { EnemyPool as EnemyWizardPool };
 
 export class ParticlePool {
   /** @param {number} capacity */

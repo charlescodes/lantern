@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -22,6 +22,30 @@ export const BREAKAWAY_FLOOR_PROFILE_V1 = "breakaway-floor-v1";
 export const BREAKAWAY_FLOOR_PROFILE_NONE = "none";
 export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1 = "authored-navigation-topology-v1";
 export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE = "none";
+export const ENEMY_ARCHETYPE_PROFILE_V1 = "enemy-archetypes-v1";
+export const ENEMY_ARCHETYPE_PROFILE_NONE = "none";
+
+export const ENEMY_ARCHETYPE = Object.freeze({
+  wizard: 1,
+  urchin: 2,
+});
+
+export const ENEMY_ARCHETYPE_NAMES = Object.freeze([
+  null,
+  "wizard",
+  "urchin",
+]);
+
+export const PROJECTILE_KIND = Object.freeze({
+  fireball: 1,
+  thrownStone: 2,
+});
+
+export const PROJECTILE_KIND_NAMES = Object.freeze([
+  null,
+  "fireball",
+  "thrown-stone",
+]);
 
 export const NAVIGATION_TOPOLOGY = Object.freeze({
   authoredNodeCapacity: 128,
@@ -69,6 +93,7 @@ export const ACTOR_TEAM = Object.freeze({
 export const PROJECTILE_OWNER_KIND = Object.freeze({
   player: 1,
   enemyWizard: 2,
+  enemyUrchin: 3,
 });
 
 export const SIMULATION = Object.freeze({
@@ -119,6 +144,8 @@ export const ENEMY_WIZARD = Object.freeze({
   encounterMaximumAlive: 4,
   radius: PLAYER.radius,
   massKg: PLAYER.massKg,
+  presentationHeight: 1.6,
+  maximumHealth: COMBAT.maximumHealth,
   desiredSpeed: PLAYER.desiredSpeed,
   acceleration: PLAYER.acceleration,
   braking: PLAYER.braking,
@@ -127,6 +154,28 @@ export const ENEMY_WIZARD = Object.freeze({
   withdrawInsideMeters: 6,
   shotIntervalTicks: 75,
   spawnIntervalTicks: 1_800,
+});
+
+export const ENEMY_URCHIN = Object.freeze({
+  radius: 0.2,
+  massKg: 35,
+  presentationHeight: 0.8,
+  maximumHealth: 50,
+  desiredSpeed: ENEMY_WIZARD.desiredSpeed,
+  acceleration: ENEMY_WIZARD.acceleration,
+  braking: ENEMY_WIZARD.braking,
+  externalDamping: ENEMY_WIZARD.externalDamping,
+  approachBeyondMeters: ENEMY_WIZARD.approachBeyondMeters,
+  withdrawInsideMeters: ENEMY_WIZARD.withdrawInsideMeters,
+  shotIntervalTicks: ENEMY_WIZARD.shotIntervalTicks,
+  projectile: Object.freeze({
+    radius: 0.1,
+    speed: 9,
+    lifetime: 4,
+    spawnGap: 0.02,
+    damage: 2,
+    cooldown: 0.2,
+  }),
 });
 
 export const DEAD_BODY = Object.freeze({

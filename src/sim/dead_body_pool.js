@@ -29,6 +29,7 @@ export class DynamicDeadBodyPool {
     this.timeoutSettles = 0;
     this.speedClamped = 0;
     this.id = new Uint32Array(capacity);
+    this.archetype = new Uint8Array(capacity);
     this.spawnSequence = new Uint32Array(capacity);
     this.deathTick = new Uint32Array(capacity);
     this.x = new Float32Array(capacity);
@@ -57,12 +58,13 @@ export class DynamicDeadBodyPool {
     this.speedClamped = 0;
   }
 
-  /** @param {{id:number,spawnSequence:number,deathTick:number,x:number,z:number,vx:number,vz:number,facingX:number,facingZ:number,radius:number,massKg:number,worldY?:number,layerIndex?:number,verticalVelocityY?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
+  /** @param {{id:number,archetype?:number,spawnSequence:number,deathTick:number,x:number,z:number,vx:number,vz:number,facingX:number,facingZ:number,radius:number,massKg:number,worldY?:number,layerIndex?:number,verticalVelocityY?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) return -1;
     const index = this.activeCount;
     const facingLength = Math.hypot(value.facingX, value.facingZ);
     this.id[index] = value.id;
+    this.archetype[index] = value.archetype ?? 1;
     this.spawnSequence[index] = value.spawnSequence;
     this.deathTick[index] = value.deathTick;
     this.x[index] = value.x;
@@ -90,6 +92,7 @@ export class DynamicDeadBodyPool {
     if (index !== last) {
       for (const component of [
         this.id,
+        this.archetype,
         this.spawnSequence,
         this.deathTick,
         this.x,
@@ -149,6 +152,7 @@ export class InertDeadBodyRing {
     this.length = 0;
     this.overwritten = 0;
     this.id = new Uint32Array(capacity);
+    this.archetype = new Uint8Array(capacity);
     this.spawnSequence = new Uint32Array(capacity);
     this.deathTick = new Uint32Array(capacity);
     this.settledTick = new Uint32Array(capacity);
@@ -169,10 +173,11 @@ export class InertDeadBodyRing {
     this.overwritten = 0;
   }
 
-  /** @param {{id:number,spawnSequence:number,deathTick:number,settledTick:number,x:number,z:number,facingX:number,facingZ:number,radius:number,massKg:number,worldY?:number,layerIndex?:number,settleReason:number}} value */
+  /** @param {{id:number,archetype?:number,spawnSequence:number,deathTick:number,settledTick:number,x:number,z:number,facingX:number,facingZ:number,radius:number,massKg:number,worldY?:number,layerIndex?:number,settleReason:number}} value */
   push(value) {
     const index = (this.start + this.length) % this.capacity;
     this.id[index] = value.id;
+    this.archetype[index] = value.archetype ?? 1;
     this.spawnSequence[index] = value.spawnSequence;
     this.deathTick[index] = value.deathTick;
     this.settledTick[index] = value.settledTick;

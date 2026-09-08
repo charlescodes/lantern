@@ -57,7 +57,10 @@ const simulation = new Simulation({
     : holeArenaRequested
       ? { scenario: createHoleDebugArenaScenario() }
       : navigationArenaRequested
-        ? { scenario: createNavigationDebugArenaScenario() }
+        ? {
+          scenario: createNavigationDebugArenaScenario(),
+          encounterEnemyArchetype: "urchin",
+        }
         : {}),
 });
 const initialSnapshot = simulation.snapshot();

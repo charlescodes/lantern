@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Seed |
 | Authority | Non-authoritative soft specification |
-| Last reviewed | 2026-08-13 |
+| Last reviewed | 2026-09-07 |
 | Scheduling | Unprioritized; no dates, releases, or commitments |
 
 This is the low-friction home for gameplay sparks that are worth keeping but
@@ -44,6 +44,13 @@ story and leave the unrelated ideas here.
 - **Flying creatures.** They do not set off ground traps, creating an immediate
   distinction from walking creatures.
 - **Archers.** A clear ranged enemy archetype.
+- **Authored or mixed obelisk rosters.** A later encounter-authoring slice could
+  let an obelisk spawn one creature type or a bounded composition of types.
+  The roster format, selection cadence, and composition rules remain open.
+- **Stones becoming inert clutter.** Thrown stones could eventually bounce a
+  bounded number of times and settle into a capped inert-rock pool. Whether
+  settled stones block movement, can be reused, or merely decorate the floor
+  remains open.
 - **Shield enemies.** They can block incoming attacks and should be genuinely
   annoying. Their projectile awareness might reuse the same perception seam as
   enemies that see a Fireball coming and decide to dodge.

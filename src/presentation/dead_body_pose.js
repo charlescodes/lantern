@@ -31,6 +31,7 @@ export function enemyDeadBodyPose(body, alpha = 0, output) {
   pose.facing.x = facingLength > 1e-9 ? facingX / facingLength : 1;
   pose.facing.z = facingLength > 1e-9 ? facingZ / facingLength : 0;
   const radius = Math.max(0.05, Number(body.radius) || 0.3);
+  const height = Math.max(radius * 2, Number(body.presentationHeight) || ENEMY_BODY_HEIGHT_METERS);
   const ageTicks = Math.max(0, Number(body.ageTicks) || 0) + interpolant;
   const progress = smoothstep(ageTicks / DEAD_BODY.fallTicks);
   const x = Number(body.x) || 0;
@@ -45,10 +46,10 @@ export function enemyDeadBodyPose(body, alpha = 0, output) {
   pose.z = previousZ + (z - previousZ) * interpolant;
   pose.progress = progress;
   pose.angleRadians = progress * Math.PI / 2;
-  pose.centerY = ENEMY_BODY_HEIGHT_METERS / 2
-    + (radius - ENEMY_BODY_HEIGHT_METERS / 2) * progress;
+  pose.centerY = height / 2
+    + (radius - height / 2) * progress;
   pose.footprintLength = radius * 2
-    + (ENEMY_BODY_HEIGHT_METERS - radius * 2) * progress;
+    + (height - radius * 2) * progress;
   pose.footprintWidth = radius * 2;
   return pose;
 }

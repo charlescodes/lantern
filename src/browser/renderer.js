@@ -53,6 +53,12 @@ const COLORS = Object.freeze({
   enemyEdge: "#ff9b9e",
   enemyBody: "#583237",
   enemyBodyEdge: "#9a676c",
+  urchin: "#b99561",
+  urchinEdge: "#ead09c",
+  urchinBody: "#725c3d",
+  urchinBodyEdge: "#b99a69",
+  stone: "#77644d",
+  stoneEdge: "#b9a58a",
   obeliskBase: "#232a33",
   obelisk: "#7669a8",
   obeliskEdge: "#c8baff",
@@ -1125,6 +1131,16 @@ export class DebugRenderer {
     const line = this.camera.viewportLengthToWorld(1);
     for (const projectile of snapshot.projectiles) {
       if (projectile.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
+      if (projectile.projectileKind === "thrown-stone") {
+        context.beginPath();
+        context.arc(projectile.x, projectile.z, projectile.radius, 0, Math.PI * 2);
+        context.fillStyle = COLORS.stone;
+        context.fill();
+        context.strokeStyle = COLORS.stoneEdge;
+        context.lineWidth = line;
+        context.stroke();
+        continue;
+      }
       const definition = fireballDefinitionFromSnapshot(snapshot, projectile);
       writeFireballPaletteColor(this._fireColor, definition, {
         kind: FIREBALL_COLOR_PROJECTILE,
@@ -1201,14 +1217,15 @@ export class DebugRenderer {
       const z = enemy.previousZ + (enemy.z - enemy.previousZ) * alpha;
       context.beginPath();
       context.arc(x, z, enemy.radius, 0, Math.PI * 2);
-      context.fillStyle = COLORS.enemy;
+      const isUrchin = enemy.archetype === "urchin";
+      context.fillStyle = isUrchin ? COLORS.urchin : COLORS.enemy;
       context.fill();
-      context.strokeStyle = COLORS.enemyEdge;
+      context.strokeStyle = isUrchin ? COLORS.urchinEdge : COLORS.enemyEdge;
       context.lineWidth = line * 2;
       context.stroke();
       context.beginPath();
       context.arc(x, z, line * 2.2, 0, Math.PI * 2);
-      context.fillStyle = "#351318";
+      context.fillStyle = isUrchin ? "#49371f" : "#351318";
       context.fill();
       const marker = enemyFacingTriangle(enemy, x, z);
       context.beginPath();
@@ -1216,9 +1233,9 @@ export class DebugRenderer {
       context.lineTo(marker.left.x, marker.left.z);
       context.lineTo(marker.right.x, marker.right.z);
       context.closePath();
-      context.fillStyle = COLORS.enemyEdge;
+      context.fillStyle = isUrchin ? COLORS.urchinEdge : COLORS.enemyEdge;
       context.fill();
-      context.strokeStyle = "#5b1b22";
+      context.strokeStyle = isUrchin ? "#72552e" : "#5b1b22";
       context.lineWidth = line;
       context.stroke();
       if (developerToolsOpen && snapshot.debugFlags.velocityVectors) {
@@ -1286,9 +1303,10 @@ export class DebugRenderer {
         true,
       );
       context.closePath();
-      context.fillStyle = COLORS.enemyBody;
+      const isUrchin = body.archetype === "urchin";
+      context.fillStyle = isUrchin ? COLORS.urchinBody : COLORS.enemyBody;
       context.fill();
-      context.strokeStyle = COLORS.enemyBodyEdge;
+      context.strokeStyle = isUrchin ? COLORS.urchinBodyEdge : COLORS.enemyBodyEdge;
       context.lineWidth = line * 1.5;
       context.stroke();
       if (

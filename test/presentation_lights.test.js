@@ -195,6 +195,12 @@ test("projectile slot zero becomes its explosion pulse without changing identity
   assert.equal(explosion.filter((light) => light.projectileId === 7).length, 8);
 });
 
+test("thrown stones never lease presentation lights", () => {
+  const budget = new PresentationLightBudget();
+  const stone = { ...projectile(91, 3, 4), projectileKind: "thrown-stone" };
+  assert.deepEqual(budget.allocate(snapshot({ projectiles: [stone] })), []);
+});
+
 test("an impact leases the seven largest associated newly observed sparks", () => {
   const budget = new PresentationLightBudget({ capacity: 8 });
   const particles = [

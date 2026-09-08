@@ -239,7 +239,9 @@ export class PresentationLightBudget {
       || value.layerId === layerId
     );
     const visibleParticles = snapshot.particles.filter(onActiveLayer);
-    const visibleProjectiles = snapshot.projectiles.filter(onActiveLayer);
+    const visibleProjectiles = snapshot.projectiles.filter((projectile) => (
+      onActiveLayer(projectile) && projectile.projectileKind !== "thrown-stone"
+    ));
     const visibleRecentEvents = snapshot.recentEvents.filter(onActiveLayer);
     const transientTimelineCleared = this.lastTick !== null
       && visibleRecentEvents.length === 0
