@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -22,6 +22,8 @@ export const BREAKAWAY_FLOOR_PROFILE_V1 = "breakaway-floor-v1";
 export const BREAKAWAY_FLOOR_PROFILE_NONE = "none";
 export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1 = "authored-navigation-topology-v1";
 export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE = "none";
+export const HOLE_PURSUIT_PROFILE_V1 = "observed-hole-pursuit-v1";
+export const HOLE_PURSUIT_PROFILE_NONE = "none";
 export const ENEMY_ARCHETYPE_PROFILE_V1 = "enemy-archetypes-v1";
 export const ENEMY_ARCHETYPE_PROFILE_NONE = "none";
 
@@ -67,12 +69,15 @@ export const NAVIGATION_ROUTE_PHASE = Object.freeze({
   ride: 4,
   disembark: 5,
   localGoal: 6,
+  approachDrop: 7,
+  fallDrop: 8,
 });
 
 export const NAVIGATION_EVIDENCE = Object.freeze({
   none: 0,
   directSight: 1,
   connectorTransition: 2,
+  holeTransition: 3,
 });
 export const NAVIGATION_ROUTE_FAILURE = Object.freeze({
   none: 0,

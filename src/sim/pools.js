@@ -259,6 +259,14 @@ export class EnemyPool {
     this.navigationEvidence = new Uint8Array(capacity);
     this.observedConnectorRuntimeId = new Uint32Array(capacity);
     this.observedConnectorLayer = new Uint16Array(capacity);
+    // A witnessed floor aperture is identified by its stable layer plus its
+    // authored cell. Dense runtime-hole indices are intentionally not kept.
+    this.observedHoleLayer = new Uint16Array(capacity);
+    this.observedHoleCellX = new Int16Array(capacity);
+    this.observedHoleCellZ = new Int16Array(capacity);
+    this.observedHoleX = new Float32Array(capacity);
+    this.observedHoleZ = new Float32Array(capacity);
+    this.holePursuitStartTick = new Uint32Array(capacity);
     this.routeFailure = new Uint8Array(capacity);
     this.routePorts = new Uint16Array(capacity * NAVIGATION_TOPOLOGY.portCapacity);
     installVerticalBodyColumns(this, capacity);
@@ -552,6 +560,12 @@ export class EnemyPool {
         this.navigationEvidence,
         this.observedConnectorRuntimeId,
         this.observedConnectorLayer,
+        this.observedHoleLayer,
+        this.observedHoleCellX,
+        this.observedHoleCellZ,
+        this.observedHoleX,
+        this.observedHoleZ,
+        this.holePursuitStartTick,
         this.routeFailure,
         this.worldY,
         this.previousWorldY,
@@ -613,6 +627,19 @@ export class EnemyPool {
     this.navigationEvidence[index] = NAVIGATION_EVIDENCE.none;
     this.observedConnectorRuntimeId[index] = 0;
     this.observedConnectorLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+    this.clearHolePursuit(index);
+    return true;
+  }
+
+  /** @param {number} index */
+  clearHolePursuit(index) {
+    if (index < 0 || index >= this.capacity) return false;
+    this.observedHoleLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+    this.observedHoleCellX[index] = -1;
+    this.observedHoleCellZ[index] = -1;
+    this.observedHoleX[index] = Number.NaN;
+    this.observedHoleZ[index] = Number.NaN;
+    this.holePursuitStartTick[index] = 0;
     return true;
   }
 

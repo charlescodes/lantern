@@ -1,7 +1,7 @@
 # M1C Authored Navigation Topology
 
 > **Status:** complete · **Current boundary:** Lantern `0.9.3`, recording
-> schema v16, authoring-map v6 · **Implementation:** M1C.1-M1C.5 complete;
+> schema v17, authoring-map v6 · **Implementation:** M1C.1-M1C.5 complete;
 > manual navigation acceptance recorded on 2026-09-08, with multi-enemy elevator
 > crowding deferred to [its bug report](../bugs/elevator-enemy-queueing.md)
 

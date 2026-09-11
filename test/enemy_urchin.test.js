@@ -208,7 +208,7 @@ test("two direct Fireballs defeat a half-health Urchin and preserve corpse ident
   assert.equal(snapshot.deadBodies.dynamic[0].presentationHeight, ENEMY_URCHIN.presentationHeight);
 });
 
-test("schema-v16 records the encounter archetype and older schemas remain wizard-only", () => {
+test("current schema records the encounter archetype and older schemas remain wizard-only", () => {
   const simulation = new Simulation({
     scenario: createNavigationDebugArenaScenario(),
     encounterEnemyArchetype: "urchin",

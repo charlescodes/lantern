@@ -63,7 +63,7 @@ TrueSight never gives knowledge to AI
 
 ```text
 FUNCTION boot()
-    simulation      := new Simulation(default scenario, schema-v16 profiles)
+    simulation      := new Simulation(default scenario, schema-v17 profiles)
     initialSnapshot := simulation.snapshot()
 
     options   := parse renderer/backend/visual flags from URL

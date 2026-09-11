@@ -30,6 +30,8 @@ import {
   GAMEPLAY_PROFILE_OBELISK_DUEL,
   GAMEPLAY_PROFILE_PRE_COMBAT,
   HISTORY,
+  HOLE_PURSUIT_PROFILE_NONE,
+  HOLE_PURSUIT_PROFILE_V1,
   MAP_VERSION,
   MOVEMENT_SOUND,
   MOVEMENT_SOUND_PROFILE_NONE,
@@ -261,11 +263,14 @@ const NAVIGATION_ROUTE_PHASE_NAMES = Object.freeze([
   "RIDE",
   "DISEMBARK",
   "LOCAL_GOAL",
+  "APPROACH_DROP",
+  "FALL_DROP",
 ]);
 const NAVIGATION_EVIDENCE_NAMES = Object.freeze([
   "none",
   "direct-sight",
   "connector-transition",
+  "hole-transition",
 ]);
 const NAVIGATION_ROUTE_FAILURE_NAMES = Object.freeze([
   "none",
@@ -834,6 +839,7 @@ export class Simulation {
    * elevatorProjectileCollisionProfile?:string,
    * breakawayFloorProfile?:string,
    * authoredNavigationTopologyProfile?:string,
+   * holePursuitProfile?:string,
    * enemyArchetypeProfile?:string,
    * encounterEnemyArchetype?:string,
    * soundEventCapacity?:number,
@@ -853,6 +859,22 @@ export class Simulation {
       throw new RangeError(
         `Unsupported authored-navigation topology profile: ${this.authoredNavigationTopologyProfile}`,
       );
+    }
+    this.holePursuitProfile = options.holePursuitProfile
+      ?? (this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+        ? HOLE_PURSUIT_PROFILE_V1
+        : HOLE_PURSUIT_PROFILE_NONE);
+    if (
+      this.holePursuitProfile !== HOLE_PURSUIT_PROFILE_V1
+      && this.holePursuitProfile !== HOLE_PURSUIT_PROFILE_NONE
+    ) {
+      throw new RangeError(`Unsupported hole-pursuit profile: ${this.holePursuitProfile}`);
+    }
+    if (
+      this.holePursuitProfile === HOLE_PURSUIT_PROFILE_V1
+      && this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+    ) {
+      throw new RangeError("Observed hole pursuit requires authored-navigation topology v1");
     }
     this.navigationTopology = this.scenario.navigationTopology;
     this.enemyArchetypeProfile = options.enemyArchetypeProfile ?? ENEMY_ARCHETYPE_PROFILE_V1;
@@ -1341,6 +1363,7 @@ export class Simulation {
       this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
       this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
       this.commandLogAuthoredNavigationTopologyProfile = this.authoredNavigationTopologyProfile;
+      this.commandLogHolePursuitProfile = this.holePursuitProfile;
       this.commandLogEnemyArchetypeProfile = this.enemyArchetypeProfile;
       this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
@@ -1887,6 +1910,20 @@ export class Simulation {
         : this.layerIdToIndex.get(targetLayerId);
       if (nextTarget === undefined) this.enemies.clearNavigationEvidence(index);
       else this.enemies.knownTargetLayer[index] = nextTarget;
+    }
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      const previousHoleLayer = this.enemies.observedHoleLayer[index];
+      if (previousHoleLayer === NAVIGATION_TOPOLOGY.noLayer) continue;
+      const holeLayerId = previousLayerIds[previousHoleLayer];
+      const nextHoleLayer = holeLayerId === undefined
+        ? undefined
+        : this.layerIdToIndex.get(holeLayerId);
+      if (nextHoleLayer !== undefined) {
+        this.enemies.observedHoleLayer[index] = nextHoleLayer;
+      } else {
+        this.enemies.clearNavigationRoute(index);
+        this.enemies.clearNavigationEvidence(index);
+      }
     }
     for (let index = 0; index < this.elevators.activeCount; index += 1) {
       const connector = this.scenario.connectors.find(
@@ -2841,6 +2878,118 @@ export class Simulation {
     this.enemies.observedConnectorLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
   }
 
+  /** @param {number} phase */
+  #isHolePursuitPhase(phase) {
+    return phase === NAVIGATION_ROUTE_PHASE.approachDrop
+      || phase === NAVIGATION_ROUTE_PHASE.fallDrop;
+  }
+
+  /** @param {number} index */
+  #observedHole(index) {
+    const pool = this.enemies;
+    const layerIndex = pool.observedHoleLayer[index];
+    if (layerIndex === NAVIGATION_TOPOLOGY.noLayer) return null;
+    const cellX = pool.observedHoleCellX[index];
+    const cellZ = pool.observedHoleCellZ[index];
+    return (this.layerHoles[layerIndex] ?? []).find((hole) => (
+      hole.cx === cellX && hole.cz === cellZ
+    )) ?? null;
+  }
+
+  /** @param {number} index @param {number} tick @param {string} reason */
+  #cancelHolePursuit(index, tick, reason) {
+    const pool = this.enemies;
+    if (!this.#isHolePursuitPhase(pool.topologyPhase[index])) return;
+    this.#recordNavigationRouteEvent("drop-cancelled", index, tick, { reason });
+    pool.clearNavigationRoute(index);
+    pool.clearHolePursuit(index);
+    pool.navigationEvidence[index] = NAVIGATION_EVIDENCE.none;
+    pool.knownTargetLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+    pool.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
+  }
+
+  /** @param {number} sourceLayer @param {{id:string,cx:number,cz:number,x:number,z:number}} hole @param {number} tick */
+  #observePlayerHoleTransition(sourceLayer, hole, tick) {
+    if (this.holePursuitProfile !== HOLE_PURSUIT_PROFILE_V1) return;
+    const pool = this.enemies;
+    for (let index = 0; index < pool.activeCount; index += 1) {
+      if (
+        pool.layerIndex[index] !== sourceLayer
+        || !pool.currentVisibility[index]
+        || pool.perceptionState[index] !== PERCEPTION_STATE.engaged
+        || pool.confirmedTargetKind[index] !== TARGET_KIND.player
+        || pool.confirmedTargetId[index] !== this.player.id
+      ) continue;
+      const retreating = Boolean(pool.retreating[index])
+        ? pool.health[index] < enemyRetreatExitHealth(pool, index)
+        : pool.health[index] <= enemyRetreatEnterHealth(pool, index);
+      if (retreating) continue;
+      pool.clearNavigationRoute(index);
+      pool.clearHolePursuit(index);
+      pool.observedHoleLayer[index] = sourceLayer;
+      pool.observedHoleCellX[index] = hole.cx;
+      pool.observedHoleCellZ[index] = hole.cz;
+      pool.observedHoleX[index] = hole.x;
+      pool.observedHoleZ[index] = hole.z;
+      pool.holePursuitStartTick[index] = tick;
+      pool.navigationEvidence[index] = NAVIGATION_EVIDENCE.holeTransition;
+      pool.knownTargetLayer[index] = NAVIGATION_TOPOLOGY.noLayer;
+      pool.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
+      pool.hasLastSeen[index] = 1;
+      pool.lastSeenX[index] = hole.x;
+      pool.lastSeenZ[index] = hole.z;
+      pool.lastSeenVx[index] = 0;
+      pool.lastSeenVz[index] = 0;
+      pool.lastSeenTick[index] = tick;
+      pool.currentVisibility[index] = 0;
+      pool.lineOfSight[index] = 0;
+      pool.perceptionState[index] = PERCEPTION_STATE.hunting;
+      pool.huntPhase[index] = HUNT_PHASE.travel;
+      pool.huntAnchorX[index] = hole.x;
+      pool.huntAnchorZ[index] = hole.z;
+      pool.huntTravelStartTick[index] = tick;
+      pool.searchStartTick[index] = 0;
+      pool.searchEndTick[index] = 0;
+      this.#clearSearchGoal(index);
+      pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.approachDrop;
+      pool.topologyRevision[index] = this.topologyRevision;
+      this.#recordNavigationRouteEvent("drop-observed", index, tick, {
+        holeId: hole.id,
+        sourceLayer: this.layerIds[sourceLayer] ?? null,
+        evidence: "hole-transition",
+      });
+      this.#recordPerceptionEvent("loss", index, tick, {
+        reason: "observed-hole-transition",
+        lastSeen: { x: hole.x, z: hole.z, layerId: this.layerIds[sourceLayer], tick },
+      });
+    }
+  }
+
+  /** @param {number} index @param {number} tick */
+  #completeHolePursuitLanding(index, tick) {
+    const pool = this.enemies;
+    if (pool.topologyPhase[index] !== NAVIGATION_ROUTE_PHASE.fallDrop) return;
+    const anchorX = pool.observedHoleX[index];
+    const anchorZ = pool.observedHoleZ[index];
+    const landingLayer = pool.layerIndex[index];
+    pool.clearNavigationRoute(index);
+    pool.clearHolePursuit(index);
+    pool.navigationEvidence[index] = NAVIGATION_EVIDENCE.holeTransition;
+    pool.knownTargetLayer[index] = landingLayer;
+    pool.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
+    pool.hasLastSeen[index] = 1;
+    pool.lastSeenX[index] = anchorX;
+    pool.lastSeenZ[index] = anchorZ;
+    pool.lastSeenVx[index] = 0;
+    pool.lastSeenVz[index] = 0;
+    pool.lastSeenTick[index] = tick;
+    this.#recordNavigationRouteEvent("drop-landed", index, tick, {
+      targetLayer: this.layerIds[landingLayer] ?? null,
+      anchor: { x: anchorX, z: anchorZ },
+    });
+    this.#beginSearch(index, tick, anchorX, anchorZ, "observed-hole-landing");
+  }
+
   /**
    * Reconciles only an already armed, directly observed elevator ride. Hidden
    * player X/Z is never read here; the authored opposite endpoint becomes the
@@ -2920,6 +3069,10 @@ export class Simulation {
   /** @param {number} index @param {number} tick */
   #updateLastSeen(index, tick) {
     const pool = this.enemies;
+    if (
+      this.#isHolePursuitPhase(pool.topologyPhase[index])
+      && this.player.verticalMode === VERTICAL_MODE.FALLING
+    ) return;
     pool.hasLastSeen[index] = 1;
     pool.lastSeenX[index] = this.player.x;
     pool.lastSeenZ[index] = this.player.z;
@@ -2928,6 +3081,12 @@ export class Simulation {
     pool.lastSeenTick[index] = tick;
     pool.knowledgeSource[index] = KNOWLEDGE_SOURCE.visual;
     if (this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1) {
+      if (
+        this.#isHolePursuitPhase(pool.topologyPhase[index])
+      ) {
+        pool.clearNavigationRoute(index);
+        pool.clearHolePursuit(index);
+      }
       pool.knownTargetLayer[index] = this.player.layerIndex;
       pool.knownTargetPort[index] = NAVIGATION_TOPOLOGY.noPort;
       pool.navigationEvidence[index] = NAVIGATION_EVIDENCE.directSight;
@@ -3158,7 +3317,10 @@ export class Simulation {
       const differentLayer = pool.layerIndex[index] !== this.player.layerIndex;
       this.#observePlayerConnectorTransition(index, simulationTick);
       const canSearchRememberedLayer = differentLayer
-        && pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+        && (
+          pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+          || pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.holeTransition
+        )
         && pool.knownTargetLayer[index] === pool.layerIndex[index]
         && !this.#isElevatorRoutePhase(pool.topologyPhase[index]);
       if (differentLayer && !canSearchRememberedLayer) {
@@ -3448,7 +3610,10 @@ export class Simulation {
       const differentLayer = pool.layerIndex[index] !== this.player.layerIndex;
       this.#observePlayerConnectorTransition(index, simulationTick);
       const canSearchRememberedLayer = differentLayer
-        && pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+        && (
+          pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+          || pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.holeTransition
+        )
         && pool.knownTargetLayer[index] === pool.layerIndex[index]
         && !this.#isElevatorRoutePhase(pool.topologyPhase[index]);
       if (differentLayer && !canSearchRememberedLayer) {
@@ -3850,6 +4015,18 @@ export class Simulation {
         }
         if (pool.navigationSlot[index] >= 0) continue;
       }
+      if (this.#isHolePursuitPhase(pool.topologyPhase[index])) {
+        const hole = this.#observedHole(index);
+        if (hole && pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.approachDrop) {
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
+            Math.floor(hole.x),
+            Math.floor(hole.z),
+          );
+        }
+        continue;
+      }
       if (this.#isElevatorRoutePhase(pool.topologyPhase[index])) {
         const target = this.#enemyElevatorRouteMovementPort(index);
         if (target !== NAVIGATION_TOPOLOGY.noPort) {
@@ -4060,6 +4237,33 @@ export class Simulation {
   #isElevatorRoutePhase(phase) {
     return phase >= NAVIGATION_ROUTE_PHASE.approachPort
       && phase <= NAVIGATION_ROUTE_PHASE.disembark;
+  }
+
+  /** @param {number} index @param {number} tick */
+  #holePursuitIntent(index, tick) {
+    const pool = this.enemies;
+    const phase = pool.topologyPhase[index];
+    const sourceLayer = pool.observedHoleLayer[index];
+    const timedOut = tick - pool.holePursuitStartTick[index]
+      >= PERCEPTIVE_WIZARD.travelTimeoutTicks;
+    const retreating = Boolean(pool.retreating[index])
+      ? pool.health[index] < enemyRetreatExitHealth(pool, index)
+      : pool.health[index] <= enemyRetreatEnterHealth(pool, index);
+    if (timedOut || retreating || pool.dodgeTicksRemaining[index] > 0) {
+      this.#cancelHolePursuit(index, tick, timedOut ? "travel-timeout" : "higher-priority-intent");
+      return;
+    }
+    if (phase === NAVIGATION_ROUTE_PHASE.approachDrop) {
+      const hole = this.#observedHole(index);
+      if (
+        !hole
+        || sourceLayer !== pool.layerIndex[index]
+        || pool.supportKind[index] !== SUPPORT_KIND.FLOOR
+        || !this.#bodyFitsHoleAt(BODY_ENEMY_WIZARD, index, sourceLayer, hole.x, hole.z)
+      ) {
+        this.#cancelHolePursuit(index, tick, "opening-unavailable");
+      }
+    }
   }
 
   /** @param {number} index @param {number} tick @param {string} reason */
@@ -4460,6 +4664,10 @@ export class Simulation {
     const pool = this.enemies;
     for (let index = 0; index < pool.activeCount; index += 1) {
       const phase = pool.topologyPhase[index];
+      if (this.#isHolePursuitPhase(phase)) {
+        this.#holePursuitIntent(index, simulationTick);
+        continue;
+      }
       if (this.#isElevatorRoutePhase(phase)) {
         const retreating = Boolean(pool.retreating[index])
           ? pool.health[index] < enemyRetreatExitHealth(pool, index)
@@ -4991,6 +5199,32 @@ export class Simulation {
   /** @param {number} index @param {number} dt @param {number} simulationTick */
   #preparePerceptiveEnemyMovement(index, dt, simulationTick) {
     const pool = this.enemies;
+    if (this.#isHolePursuitPhase(pool.topologyPhase[index])) {
+      if (pool.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.fallDrop) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        this.#clearEnemyMovementGoal(index);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+        return;
+      }
+      const hole = this.#observedHole(index);
+      if (!hole) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        this.#clearEnemyMovementGoal(index);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+        return;
+      }
+      pool.aiState[index] = ENEMY_AI_APPROACH;
+      this.#movePerceptiveWithField(
+        index,
+        hole.x,
+        hole.z,
+        "approach",
+        ENEMY_GOAL_MEMORY,
+        enemyDefinition(pool.archetype[index]).desiredSpeed,
+        dt,
+      );
+      return;
+    }
     if (this.#isElevatorRoutePhase(pool.topologyPhase[index])) {
       const target = this.#enemyElevatorRouteMovementPort(index);
       if (
@@ -5060,8 +5294,10 @@ export class Simulation {
       }
       return;
     }
-    const canSearchRememberedLayer = pool.navigationEvidence[index]
-      === NAVIGATION_EVIDENCE.connectorTransition
+    const canSearchRememberedLayer = (
+      pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.connectorTransition
+      || pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.holeTransition
+    )
       && pool.knownTargetLayer[index] === pool.layerIndex[index];
     if (pool.layerIndex[index] !== this.player.layerIndex && !canSearchRememberedLayer) {
       pool.aiState[index] = ENEMY_AI_HOLD;
@@ -6677,6 +6913,23 @@ export class Simulation {
     this.#setBodyValue(kind, index, "verticalMode", VERTICAL_MODE.FALLING);
     this.#setBodyValue(kind, index, "verticalVelocityY", 0);
     this.#setBodyValue(kind, index, "latestApertureFit", 1);
+    const transitionTick = this.tickCount + 1;
+    if (hole && kind === BODY_PLAYER) {
+      this.#observePlayerHoleTransition(layerIndex, hole, transitionTick);
+    } else if (
+      hole
+      && kind === BODY_ENEMY_WIZARD
+      && this.enemies.topologyPhase[index] === NAVIGATION_ROUTE_PHASE.approachDrop
+      && this.enemies.observedHoleLayer[index] === layerIndex
+      && this.enemies.observedHoleCellX[index] === hole.cx
+      && this.enemies.observedHoleCellZ[index] === hole.cz
+    ) {
+      this.enemies.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.fallDrop;
+      this.#recordNavigationRouteEvent("drop-entered", index, transitionTick, {
+        holeId: hole.id,
+        sourceLayer: this.layerIds[layerIndex] ?? null,
+      });
+    }
     this.holeMetrics.captured += 1;
     this.#recordHoleEvent(
       hole ? "HOLE_CAPTURED" : "ELEVATOR_SHAFT_CAPTURED",
@@ -6827,6 +7080,9 @@ export class Simulation {
       this.#resolveLandingOverlap(kind, index);
       if (floorLayer === 0 || this.layerBaseY.every((height) => height >= planeY)) this.holeMetrics.bottomLanding += 1;
       else this.holeMetrics.intermediateLanding += 1;
+      if (kind === BODY_ENEMY_WIZARD) {
+        this.#completeHolePursuitLanding(index, this.tickCount + 1);
+      }
       this.#recordHoleEvent("FLOOR_LANDED", kind, index, { crossingFraction: fraction, floorsPassed: passed });
       return;
     }
@@ -6847,6 +7103,9 @@ export class Simulation {
       this.#setBodyValue(kind, index, "supportKind", SUPPORT_KIND.FLOOR);
       this.#setBodyValue(kind, index, "supportId", 0);
       this.holeMetrics.voidRescue += 1;
+      if (kind === BODY_ENEMY_WIZARD) {
+        this.#cancelHolePursuit(index, this.tickCount + 1, "void-rescue");
+      }
       this.#recordHoleEvent("VOID_RESCUE", kind, index);
     }
   }
@@ -10080,6 +10339,14 @@ export class Simulation {
         === NAVIGATION_TOPOLOGY.noLayer
         ? null
         : this.layerIds[pool.observedConnectorLayer[index]] ?? null,
+      observedHole: pool.observedHoleLayer[index] === NAVIGATION_TOPOLOGY.noLayer
+        ? null
+        : {
+          layerId: this.layerIds[pool.observedHoleLayer[index]] ?? null,
+          cell: { x: pool.observedHoleCellX[index], z: pool.observedHoleCellZ[index] },
+          position: { x: pool.observedHoleX[index], z: pool.observedHoleZ[index] },
+          startTick: pool.holePursuitStartTick[index] || null,
+        },
       sourceAnchor: route.length > 0 ? port(route[0]) : null,
       targetAnchor: route.length > 0
         ? port(route[route.length - 1])
@@ -11895,6 +12162,7 @@ export class Simulation {
         breakawayFloorProfile: this.commandLogBreakawayFloorProfile,
         authoredNavigationTopologyProfile:
           this.commandLogAuthoredNavigationTopologyProfile,
+        holePursuitProfile: this.commandLogHolePursuitProfile,
         enemyArchetypeProfile: this.commandLogEnemyArchetypeProfile,
         encounterEnemyArchetype: this.commandLogEncounterEnemyArchetype,
         navigationTopologyCapacities: {
@@ -11960,6 +12228,7 @@ export class Simulation {
     let elevatorProjectileCollisionProfile = ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE;
     let breakawayFloorProfile = BREAKAWAY_FLOOR_PROFILE_NONE;
     let authoredNavigationTopologyProfile = AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE;
+    let holePursuitProfile = HOLE_PURSUIT_PROFILE_NONE;
     let enemyArchetypeProfile = ENEMY_ARCHETYPE_PROFILE_NONE;
     let encounterEnemyArchetype = "wizard";
     let soundEventCapacity;
@@ -12023,6 +12292,7 @@ export class Simulation {
       || recordingSchema === 14
       || recordingSchema === 15
       || recordingSchema === 16
+      || recordingSchema === 17
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -12147,6 +12417,12 @@ export class Simulation {
           throw new TypeError("Schema-v16 recording has invalid encounter enemy archetype");
         }
       }
+      if (recordingSchema >= 17) {
+        holePursuitProfile = String(recording.configuration?.holePursuitProfile ?? "");
+        if (holePursuitProfile !== HOLE_PURSUIT_PROFILE_V1) {
+          throw new TypeError("Schema-v17 recording has invalid or missing hole-pursuit profile");
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -12180,6 +12456,7 @@ export class Simulation {
       elevatorProjectileCollisionProfile,
       breakawayFloorProfile,
       authoredNavigationTopologyProfile,
+      holePursuitProfile,
       enemyArchetypeProfile,
       encounterEnemyArchetype,
       soundEventCapacity,

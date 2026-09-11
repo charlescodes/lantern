@@ -64,7 +64,7 @@ test("schema-v11 recording stores investigative, dead-body, and movement-sound p
   const source = new Simulation({ seed: 0x0800_f17e, particleBurstCount: 0 });
   runFixture(source);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 16);
+  assert.equal(recording.schemaVersion, 17);
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
   assert.equal(
@@ -163,7 +163,7 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
   source.tick(null);
   const recording = source.exportCommandLog();
   recording.schemaVersion = 8;
-  assert.equal(SCHEMA_VERSION, 16);
+  assert.equal(SCHEMA_VERSION, 17);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),
@@ -190,7 +190,7 @@ test("schema-v11 rejects perceptive profile metadata at the new boundary", () =>
   const source = new Simulation({ particleBurstCount: 0 });
   source.tick(null);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 16);
+  assert.equal(recording.schemaVersion, 17);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),

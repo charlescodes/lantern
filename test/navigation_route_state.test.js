@@ -57,6 +57,12 @@ test("swap removal keeps the surviving stable enemy route and evidence", () => {
   pool.navigationEvidence[2] = NAVIGATION_EVIDENCE.connectorTransition;
   pool.observedConnectorRuntimeId[2] = 77;
   pool.observedConnectorLayer[2] = 1;
+  pool.observedHoleLayer[2] = 1;
+  pool.observedHoleCellX[2] = 5;
+  pool.observedHoleCellZ[2] = 7;
+  pool.observedHoleX[2] = 5.5;
+  pool.observedHoleZ[2] = 7.5;
+  pool.holePursuitStartTick[2] = 90;
   assert.equal(pool.removeSwap(pool.findIndexById(first)), true);
   const index = pool.findIndexById(survivor);
   assert.equal(index, 0);
@@ -70,6 +76,12 @@ test("swap removal keeps the surviving stable enemy route and evidence", () => {
   assert.equal(pool.navigationEvidence[index], NAVIGATION_EVIDENCE.connectorTransition);
   assert.equal(pool.observedConnectorRuntimeId[index], 77);
   assert.equal(pool.observedConnectorLayer[index], 1);
+  assert.equal(pool.observedHoleLayer[index], 1);
+  assert.equal(pool.observedHoleCellX[index], 5);
+  assert.equal(pool.observedHoleCellZ[index], 7);
+  assert.equal(pool.observedHoleX[index], 5.5);
+  assert.equal(pool.observedHoleZ[index], 7.5);
+  assert.equal(pool.holePursuitStartTick[index], 90);
   const clearedOffset = 2 * NAVIGATION_TOPOLOGY.portCapacity;
   assert.equal(pool.routePorts[clearedOffset], NAVIGATION_TOPOLOGY.noPort);
 });
@@ -95,6 +107,10 @@ test("reset and respawn restore every route column to its inert sentinel", () =>
   assert.equal(pool.navigationEvidence[0], NAVIGATION_EVIDENCE.none);
   assert.equal(pool.observedConnectorRuntimeId[0], 0);
   assert.equal(pool.observedConnectorLayer[0], NAVIGATION_TOPOLOGY.noLayer);
+  assert.equal(pool.observedHoleLayer[0], NAVIGATION_TOPOLOGY.noLayer);
+  assert.equal(pool.observedHoleCellX[0], -1);
+  assert.equal(pool.observedHoleCellZ[0], -1);
+  assert.equal(pool.holePursuitStartTick[0], 0);
   assert.equal(pool.patrolDwellRemaining[0], 0);
   assert.deepEqual(pool.navigationRoute(0), []);
 });
