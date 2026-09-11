@@ -6,6 +6,11 @@ import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
 import { ENEMY_WIZARD, ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
 import {
+  DamageNumberOverlay,
+  DamageNumberPool,
+  damageNumberViewportFromNdc,
+} from "./damage_numbers.js";
+import {
   getPlaceableDefinition,
   isDynamicBodyDefinition,
   isDynamicCircleDefinition,
@@ -175,6 +180,7 @@ export class ThreePresentation {
    * @param {number} [warmupStartedAt]
    * @param {PresentationFlags} [flags]
    * @param {import('../visibility/true_sight.js').TrueSightFrame|null} [initialSightFrame]
+   * @param {HTMLCanvasElement|null} [damageNumberCanvas]
    */
   constructor(
     canvas,
@@ -183,6 +189,7 @@ export class ThreePresentation {
     warmupStartedAt = performance.now(),
     flags = new PresentationFlags(options),
     initialSightFrame = null,
+    damageNumberCanvas = null,
   ) {
     this.canvas = canvas;
     this.camera = camera;
@@ -227,6 +234,8 @@ export class ThreePresentation {
     this.scorchMarks = new ScorchMarkPool();
     this.scorchGeometryRevision = -1;
     this.kineticFragments = new KineticFragmentPool();
+    this.damageNumbers = new DamageNumberPool();
+    this.damageNumberOverlay = new DamageNumberOverlay(damageNumberCanvas);
     this.profiler = new PresentationProfiler();
     this.warmup = new PresentationWarmupStatus(
       true,
@@ -750,6 +759,7 @@ export class ThreePresentation {
 
     this._matrix = new THREE.Matrix4();
     this._position = new THREE.Vector3();
+    this._damageNumberProjection = new THREE.Vector3();
     this._quaternion = new THREE.Quaternion();
     this._authoringQuaternion = new THREE.Quaternion();
     this._billboardQuaternion = new THREE.Quaternion();
@@ -802,6 +812,7 @@ export class ThreePresentation {
       this.scorchMarks.prime(initialSnapshot);
       this.#syncScorchGeometry();
       this.kineticFragments.prime(initialSnapshot);
+      this.damageNumbers.prime(initialSnapshot);
 
       const scenePass = pass(this.scene, this.threeCamera);
       const sceneColor = scenePass.getTextureNode("output");
@@ -853,6 +864,7 @@ export class ThreePresentation {
     this.resize();
     this.#syncCamera();
     this.#syncSightFrame(view.sightFrame ?? null);
+    if (this.flags.values.damageNumbers) this.damageNumbers.ingest(snapshot);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
     this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
     this.#updateWallOcclusion(snapshot.player, alpha);
@@ -886,6 +898,24 @@ export class ThreePresentation {
     } else {
       this.webRenderer.render(this.scene, this.threeCamera);
     }
+    if (this.flags.values.damageNumbers) {
+      this.damageNumberOverlay.render(this.damageNumbers, alpha, {
+        layerIndex: Number(snapshot.player?.layerIndex) || 0,
+        sightFrame: view.sightFrame ?? null,
+        dprCap: this.pixelDensityCap,
+        project: (point) => {
+          this._damageNumberProjection.set(point.x, point.y, point.z);
+          this._damageNumberProjection.project(this.threeCamera);
+          return damageNumberViewportFromNdc(
+            this._damageNumberProjection,
+            this.width,
+            this.height,
+          );
+        },
+      });
+    } else {
+      this.damageNumberOverlay.clear();
+    }
     completeInstancedPoolSubmission(this.particleMesh);
     completeInstancedPoolSubmission(this.projectileMesh);
     completeInstancedPoolSubmission(this.kineticFragmentMesh);
@@ -913,6 +943,10 @@ export class ThreePresentation {
       this.activeLightCount = applyLightPool(this.dynamicLights, [], false);
     }
     if (name === "shadows") this.#applyShadowFlag();
+    if (name === "damageNumbers" && !this.flags.values.damageNumbers) {
+      this.damageNumbers.clearForToggle();
+      this.damageNumberOverlay.clear();
+    }
     return true;
   }
 
@@ -975,6 +1009,7 @@ export class ThreePresentation {
       },
       scorchMarks: this.scorchMarks.diagnostics(),
       kineticFragments: this.kineticFragments.diagnostics(),
+      damageNumbers: this.damageNumbers.diagnostics(),
       wallOcclusion: {
         total: this.wallCells.length,
         opaque: this.wallCells.length - this.fadedWallCount,

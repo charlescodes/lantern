@@ -73,6 +73,7 @@ export function renderLabDiagnosticsText(presentation, runtime) {
   const transportLine = transport
     ? `TrueSight GPU ${capacity.width ?? "--"}×${capacity.height ?? "--"} fixed  active ${active.width ?? "--"}×${active.height ?? "--"}  ${transport.allocatedBytes ?? "--"} B  v${transport.textureVersion ?? "--"}  ${transport.uploadCount ?? 0} uploads`
     : "TrueSight GPU n/a (Canvas2D)";
+  const damageNumbers = presentation.damageNumbers ?? {};
   return [
     `backend       ${presentation.activeBackend ?? "initializing"}`,
     `resolution    CSS ${css.width ?? "--"}×${css.height ?? "--"}  backing ${backing.width ?? "--"}×${backing.height ?? "--"}`,
@@ -84,6 +85,7 @@ export function renderLabDiagnosticsText(presentation, runtime) {
     `TrueSight CPU ${formatted(trueSightCpu.p50)} / ${formatted(trueSightCpu.p95)} / ${formatted(trueSightCpu.p99)} ms`,
     `TrueSight     ${trueSight.rayCount ?? 0} rays  ${trueSight.polygonVertexCount ?? 0} vertices  ${trueSight.visibleWallCount ?? 0} walls  ${trueSight.maskWidth ?? "--"}×${trueSight.maskHeight ?? "--"}`,
     transportLine,
+    `Damage nums   ${damageNumbers.active ?? 0}/${damageNumbers.capacity ?? 0} active/capacity  ${damageNumbers.dropped ?? 0} dropped  ${damageNumbers.ingestedEvents ?? 0} ingested  ${damageNumbers.resets ?? 0} resets`,
     `GPU timing    ${presentation.gpuTimingAvailable ? "available during capture" : "unavailable"}${presentation.gpuRenderMs === null || presentation.gpuRenderMs === undefined ? "" : `  latest ${formatted(presentation.gpuRenderMs)} ms`}`,
   ].join("\n");
 }

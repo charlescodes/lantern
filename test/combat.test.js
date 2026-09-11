@@ -500,6 +500,24 @@ test("direct and splash damage are symmetric, wall-blocked, and team immune whil
     directEvent.responses.find((response) => response.kind === "enemyWizard").damage,
     25,
   );
+  const directDamage = direct.snapshot().recentCombatEvents.find(
+    (event) => event.type === "damage" && event.target.id === enemyId,
+  );
+  assert.equal(directDamage.id, 1);
+  assert.equal(directDamage.damageKind, "direct");
+  assert.deepEqual(directDamage.position, {
+    x: direct.enemies.x[enemyIndex],
+    z: direct.enemies.z[enemyIndex],
+  });
+  assert.equal(
+    directDamage.visualCenterY,
+    direct.enemies.worldY[enemyIndex] + ENEMY_WIZARD.presentationHeight / 2,
+  );
+  assert.equal(directDamage.layerIndex, direct.enemies.layerIndex[enemyIndex]);
+  assert.ok(Math.abs(Math.hypot(
+    directDamage.launchDirection.x,
+    directDamage.launchDirection.z,
+  ) - 1) < 1e-9);
 
   const splashMap = borderedMap(12, 10, { x: 2.5, z: 4.5 });
   splashMap.set(6, 4, 1);
@@ -529,6 +547,18 @@ test("direct and splash damage are symmetric, wall-blocked, and team immune whil
   ) < 1e-9);
   assert.ok(shieldedResponse?.blocked);
   assert.equal(shieldedResponse.damage, 0);
+  const splashDamage = splash.snapshot().recentCombatEvents.find(
+    (event) => event.type === "damage" && event.target.id === nearId,
+  );
+  assert.equal(splashDamage.damageKind, "splash");
+  assert.ok(splashDamage.amount > 0);
+  assert.ok(splashDamage.launchDirection);
+  assert.equal(
+    splash.snapshot().recentCombatEvents.some(
+      (event) => event.type === "damage" && event.target.id === shieldedId,
+    ),
+    false,
+  );
 
   const friendly = sandboxSimulation();
   const casterId = spawnEnemy(friendly, 4.5, 4.5);
@@ -568,6 +598,44 @@ test("direct and splash damage are symmetric, wall-blocked, and team immune whil
   enemyIndex = passThrough.enemies.findIndexById(passId);
   assert.equal(passThrough.enemies.health[enemyIndex], 100);
   assert.equal(passThrough.projectiles.activeCount, 1);
+});
+
+test("same-tick lethal hits retain one sequential damage event per applied hit", () => {
+  const simulation = sandboxSimulation();
+  const enemyId = spawnEnemy(simulation, 5.5, 4.5);
+  for (let index = 0; index < 4; index += 1) {
+    spawnFireball(simulation, {
+      x: 5.5,
+      z: 4.5,
+      ownerId: simulation.player.id,
+      ownerKind: PROJECTILE_OWNER_KIND.player,
+      ownerTeam: ACTOR_TEAM.player,
+      effectId: index + 1,
+    });
+  }
+  simulation.tick(null);
+  const events = simulation.snapshot().recentCombatEvents;
+  const damage = events.filter((event) => event.type === "damage");
+  assert.equal(damage.length, 4);
+  assert.deepEqual(damage.map((event) => event.id), [1, 2, 3, 4]);
+  assert.ok(damage.every((event) => event.tick === 1));
+  assert.equal(damage.at(-1).healthAfter, 0);
+  assert.equal(events.filter((event) => event.type === "death").length, 1);
+
+  simulation.reset(simulation.seed);
+  const resetEnemyId = spawnEnemy(simulation, 5.5, 4.5);
+  spawnFireball(simulation, {
+    x: 5.5,
+    z: 4.5,
+    ownerId: simulation.player.id,
+    ownerKind: PROJECTILE_OWNER_KIND.player,
+    ownerTeam: ACTOR_TEAM.player,
+  });
+  simulation.tick(null);
+  const resetDamage = simulation.snapshot().recentCombatEvents.find(
+    (event) => event.type === "damage" && event.target.id === resetEnemyId,
+  );
+  assert.equal(resetDamage.id, 1);
 });
 
 test("zero authored blast radius keeps fixed direct damage and finite physical state", () => {

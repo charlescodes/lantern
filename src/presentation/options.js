@@ -8,6 +8,7 @@ export const PRESENTATION_FLAG_NAMES = Object.freeze([
   "trueSight",
   "sightFade",
   "sightDebug",
+  "damageNumbers",
 ]);
 
 export const PRESENTATION_RELOAD_OPTION_NAMES = Object.freeze([
@@ -70,6 +71,7 @@ export function parsePresentationOptions(search = "") {
     trueSight: booleanOption(parameters, "trueSight", true),
     sightFade: booleanOption(parameters, "sightFade", true),
     sightDebug: booleanOption(parameters, "sightDebug", false),
+    damageNumbers: booleanOption(parameters, "damageNumbers", true),
   });
 }
 
@@ -90,6 +92,7 @@ export function presentationOptionsToSearch(options) {
   parameters.set("trueSight", options.trueSight ? "1" : "0");
   parameters.set("sightFade", options.sightFade ? "1" : "0");
   parameters.set("sightDebug", options.sightDebug ? "1" : "0");
+  parameters.set("damageNumbers", options.damageNumbers ? "1" : "0");
   return `?${parameters.toString()}`;
 }
 
@@ -123,7 +126,7 @@ export function updatePresentationSearch(search, name, value) {
 
 export class PresentationFlags {
   /**
-   * @param {{dynamicLights?:boolean,lightColorVariation?:boolean,bloom?:boolean,shadows?:boolean,trueSight?:boolean,sightFade?:boolean,sightDebug?:boolean}} [initial]
+   * @param {{dynamicLights?:boolean,lightColorVariation?:boolean,bloom?:boolean,shadows?:boolean,trueSight?:boolean,sightFade?:boolean,sightDebug?:boolean,damageNumbers?:boolean}} [initial]
    */
   constructor(initial = {}) {
     this.values = {
@@ -134,6 +137,7 @@ export class PresentationFlags {
       trueSight: initial.trueSight ?? true,
       sightFade: initial.sightFade ?? true,
       sightDebug: initial.sightDebug ?? false,
+      damageNumbers: initial.damageNumbers ?? true,
     };
   }
 

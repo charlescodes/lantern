@@ -63,6 +63,7 @@
     <main class="workspace">
       <section id="arena-viewport" class="arena-shell" aria-label="Lantern simulation viewport">
         <canvas id="arena" tabindex="0"></canvas>
+        <canvas id="damage-number-overlay" aria-hidden="true"></canvas>
         <canvas id="ai-view-overlay" data-developer-surface aria-hidden="true" hidden></canvas>
         <div id="defeat-overlay" class="defeat-overlay" role="status" hidden>
           <strong>DEFEATED</strong>
@@ -389,6 +390,9 @@
             </label>
             <label class="render-check">
               <input type="checkbox" data-presentation-option="sightDebug"> Sight debug
+            </label>
+            <label class="render-check">
+              <input type="checkbox" data-presentation-option="damageNumbers"> Damage numbers
             </label>
           </div>
         </section>

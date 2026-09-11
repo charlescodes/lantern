@@ -27,6 +27,7 @@ const BALANCED = {
   trueSight: true,
   sightFade: true,
   sightDebug: false,
+  damageNumbers: true,
 };
 
 test("presentation defaults keep Canvas2D routing and Balanced 3D settings", () => {
@@ -40,7 +41,7 @@ test("all 3D startup and live URL values parse canonically", () => {
     parsePresentationOptions(
       "?renderer=3d&backend=webgl&lights=64&dpr=2&aa=0"
       + "&dynamicLights=0&lightColorVariation=0&bloom=1&shadows=1"
-      + "&trueSight=0&sightFade=0&sightDebug=1",
+      + "&trueSight=0&sightFade=0&sightDebug=1&damageNumbers=0",
     ),
     {
       renderer: "3d",
@@ -56,6 +57,7 @@ test("all 3D startup and live URL values parse canonically", () => {
       trueSight: false,
       sightFade: false,
       sightDebug: true,
+      damageNumbers: false,
     },
   );
 });
@@ -82,7 +84,7 @@ test("canonical search output is stable and removes unsupported values", () => {
     canonical,
     "?renderer=3d&backend=webgl&lights=16&dpr=1&aa=0"
     + "&dynamicLights=1&lightColorVariation=1&bloom=1&shadows=0"
-    + "&trueSight=1&sightFade=1&sightDebug=0",
+    + "&trueSight=1&sightFade=1&sightDebug=0&damageNumbers=1",
   );
   assert.equal(
     presentationOptionsToSearch(parsePresentationOptions(canonical)),
@@ -103,6 +105,7 @@ test("option metadata separates reload-required topology from live controls", ()
     "trueSight",
     "sightFade",
     "sightDebug",
+    "damageNumbers",
   ]) {
     assert.equal(presentationOptionMode(name), "live");
   }
@@ -123,6 +126,7 @@ test("presentation flags are bounded to visual-only live controls", () => {
     "trueSight",
     "sightFade",
     "sightDebug",
+    "damageNumbers",
   ]);
   const flags = new PresentationFlags();
   assert.deepEqual(flags.snapshot(), {
@@ -133,6 +137,7 @@ test("presentation flags are bounded to visual-only live controls", () => {
     trueSight: true,
     sightFade: true,
     sightDebug: false,
+    damageNumbers: true,
   });
   assert.equal(flags.set("lightColorVariation", false), true);
   assert.equal(flags.set("simulationLighting", true), false);
@@ -144,5 +149,6 @@ test("presentation flags are bounded to visual-only live controls", () => {
     trueSight: true,
     sightFade: true,
     sightDebug: false,
+    damageNumbers: true,
   });
 });

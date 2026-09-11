@@ -69,7 +69,7 @@ test("navigation encounters spawn independently tuned half-height Urchins", () =
   assert.deepEqual(enemy.cooldowns, { "thrown-stone": 0 });
 });
 
-test("thrown stones deal two damage without impulse or presentation effects and disappear", () => {
+test("thrown stones deal two damage without impulse or spell effects and disappear", () => {
   const simulation = new Simulation({
     scenario: createNavigationDebugArenaScenario(),
     encounterEnemyArchetype: "urchin",
@@ -100,8 +100,18 @@ test("thrown stones deal two damage without impulse or presentation effects and 
   assert.equal(snapshot.soundEvents.current.length, 0);
   const damage = snapshot.recentCombatEvents.find((event) => event.type === "damage");
   assert.equal(damage.amount, 2);
+  assert.equal(damage.id, 1);
   assert.equal(damage.owner.kind, "enemyUrchin");
   assert.equal(damage.effectId, null);
+  assert.deepEqual(damage.position, {
+    x: snapshot.player.x,
+    z: snapshot.player.z,
+  });
+  assert.equal(damage.visualCenterY, snapshot.player.worldY + 0.8);
+  assert.equal(damage.layerIndex, snapshot.player.layerIndex);
+  assert.equal(damage.layerId, snapshot.player.layerId);
+  assert.ok(Math.abs(damage.launchDirection.x - 1) < 1e-6);
+  assert.ok(Math.abs(damage.launchDirection.z) < 1e-6);
 });
 
 test("thrown stones disappear silently on walls and at their bounded lifetime", () => {

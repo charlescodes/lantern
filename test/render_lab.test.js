@@ -74,3 +74,20 @@ test("Render Lab reports fixed TrueSight texture transport diagnostics", () => {
     /TrueSight GPU n\/a \(Canvas2D\)/,
   );
 });
+
+test("Render Lab reports bounded damage-number diagnostics", () => {
+  const text = renderLabDiagnosticsText({
+    activeBackend: "canvas2d",
+    damageNumbers: {
+      capacity: 128,
+      active: 7,
+      dropped: 2,
+      ingestedEvents: 41,
+      resets: 3,
+    },
+  }, {});
+  assert.match(
+    text,
+    /Damage nums\s+7\/128 active\/capacity  2 dropped  41 ingested  3 resets/,
+  );
+});

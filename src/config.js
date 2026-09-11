@@ -135,7 +135,7 @@ export const COMBAT = Object.freeze({
   regenerationPerSecond: 1,
   defeatedTicks: 90,
   eventCapacity: 256,
-  snapshotEventCount: 32,
+  snapshotEventCount: 256,
 });
 
 export const ENEMY_WIZARD = Object.freeze({

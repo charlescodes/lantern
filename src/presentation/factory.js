@@ -11,6 +11,7 @@ import { CanvasPresentation } from "./canvas_presentation.js";
  * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
  * @param {import('./options.js').PresentationFlags} flags
  * @param {import('../visibility/true_sight.js').TrueSightFrame} initialSightFrame
+ * @param {HTMLCanvasElement|null} [damageNumberCanvas]
  */
 export async function createPresentation(
   canvas,
@@ -18,6 +19,7 @@ export async function createPresentation(
   initialSnapshot,
   flags,
   initialSightFrame,
+  damageNumberCanvas = null,
 ) {
   if (options.renderer === "3d") {
     const warmupStartedAt = performance.now();
@@ -30,6 +32,7 @@ export async function createPresentation(
       warmupStartedAt,
       flags,
       initialSightFrame,
+      damageNumberCanvas,
     );
     await presentation.initialize(initialSnapshot);
     return { camera, presentation };
@@ -43,6 +46,7 @@ export async function createPresentation(
       initialSnapshot,
       options,
       flags,
+      damageNumberCanvas,
     ),
   };
 }

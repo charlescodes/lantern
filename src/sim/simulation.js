@@ -1147,6 +1147,7 @@ export class Simulation {
     this.commandLogInertDeadBodyCapacity = this.inertDeadBodies.capacity;
     this.tickCount = 0;
     this.nextExplosionId = 1;
+    this.nextDamageEventId = 1;
     this.levelState = "running";
     this.defeatedTicksRemaining = 0;
     this.encounter = {
@@ -1293,6 +1294,7 @@ export class Simulation {
     this.rng.reset(this.seed);
     this.tickCount = 0;
     this.nextExplosionId = 1;
+    this.nextDamageEventId = 1;
     this.mapRevision = 1;
     this.layerMapRevisions.fill(1);
     this.topologyRevision = 1;
@@ -8484,6 +8486,10 @@ export class Simulation {
               },
               projectileId: pool.id[index],
               effectId: null,
+              travelDirection: {
+                x: pool.vx[index],
+                z: pool.vz[index],
+              },
             }, "direct");
           }
           pool.removeSwap(index);
@@ -8995,6 +9001,34 @@ export class Simulation {
     };
   }
 
+  /**
+   * Captures presentation metadata before health mutation can remove a target.
+   * @param {number} x @param {number} z @param {number} worldY
+   * @param {number} presentationHeight @param {number} layerIndex
+   * @param {Record<string, any>} source
+   */
+  #damagePresentationMetadata(x, z, worldY, presentationHeight, layerIndex, source) {
+    let directionX = 0;
+    let directionZ = 0;
+    if (Number.isFinite(Number(source.originX)) && Number.isFinite(Number(source.originZ))) {
+      directionX = x - Number(source.originX);
+      directionZ = z - Number(source.originZ);
+    } else if (source.travelDirection) {
+      directionX = Number(source.travelDirection.x) || 0;
+      directionZ = Number(source.travelDirection.z) || 0;
+    }
+    const length = Math.hypot(directionX, directionZ);
+    return {
+      position: { x, z },
+      visualCenterY: worldY + presentationHeight / 2,
+      layerIndex,
+      layerId: this.layerIds[layerIndex] ?? null,
+      launchDirection: length > 1e-9
+        ? { x: directionX / length, z: directionZ / length }
+        : null,
+    };
+  }
+
   /** @param {number} amount @param {Record<string, any>} source @param {string} kind */
   #damagePlayer(amount, source, kind) {
     if (!(amount > 0) || this.player.health <= 0) return this.player.health;
@@ -9004,6 +9038,7 @@ export class Simulation {
     this.player.lastDamageTick = this.tickCount + 1;
     this.#recordCombatEvent({
       type: "damage",
+      id: this.nextDamageEventId++,
       tick: this.tickCount + 1,
       damageKind: kind,
       amount: Math.min(amount, before),
@@ -9014,6 +9049,14 @@ export class Simulation {
       owner: source.owner ? { ...source.owner } : null,
       projectileId: source.projectileId ?? null,
       effectId: source.effectId ?? null,
+      ...this.#damagePresentationMetadata(
+        this.player.x,
+        this.player.z,
+        this.player.worldY,
+        ENEMY_WIZARD.presentationHeight,
+        this.player.layerIndex,
+        source,
+      ),
     });
     if (this.player.health === 0) {
       this.#recordCombatEvent({
@@ -9108,6 +9151,7 @@ export class Simulation {
     };
     this.#recordCombatEvent({
       type: "damage",
+      id: this.nextDamageEventId++,
       tick: this.tickCount + 1,
       damageKind: kind,
       amount: Math.min(amount, before),
@@ -9118,6 +9162,14 @@ export class Simulation {
       owner: source.owner ? { ...source.owner } : null,
       projectileId: source.projectileId ?? null,
       effectId: source.effectId ?? null,
+      ...this.#damagePresentationMetadata(
+        pool.x[index],
+        pool.z[index],
+        pool.worldY[index],
+        enemyDefinition(pool.archetype[index]).presentationHeight ?? 1.6,
+        pool.layerIndex[index],
+        source,
+      ),
     });
     if (pool.health[index] === 0) {
       this.#recordCombatEvent({

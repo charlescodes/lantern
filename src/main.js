@@ -46,6 +46,9 @@ import {
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("arena"));
 if (!canvas) throw new Error("Missing #arena canvas");
+const damageNumberCanvas = /** @type {HTMLCanvasElement|null} */ (
+  document.getElementById("damage-number-overlay")
+);
 
 const requestedArena = new URLSearchParams(window.location.search).get("arena");
 const elevatorArenaRequested = requestedArena === "elevator";
@@ -91,6 +94,7 @@ try {
     initialSnapshot,
     presentationFlags,
     sightFrame,
+    damageNumberCanvas,
   );
 } catch (error) {
   ui.failPresentationWarmup();

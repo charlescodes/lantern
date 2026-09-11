@@ -1,6 +1,11 @@
 // @ts-check
 
 import { DebugRenderer } from "../browser/renderer.js";
+import {
+  DamageNumberOverlay,
+  DamageNumberPool,
+  projectDamageNumberCanvas,
+} from "./damage_numbers.js";
 import { KineticFragmentPool } from "./kinetic_fragments.js";
 import { parsePresentationOptions, PresentationFlags } from "./options.js";
 import { PresentationProfiler } from "./profiler.js";
@@ -14,6 +19,7 @@ export class CanvasPresentation {
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} initialSnapshot
    * @param {ReturnType<import('./options.js').parsePresentationOptions>} [options]
    * @param {PresentationFlags} [flags]
+   * @param {HTMLCanvasElement|null} [damageNumberCanvas]
    */
   constructor(
     canvas,
@@ -21,6 +27,7 @@ export class CanvasPresentation {
     initialSnapshot,
     options = parsePresentationOptions(),
     flags = new PresentationFlags(options),
+    damageNumberCanvas = null,
   ) {
     this.renderer = new DebugRenderer(canvas, camera, options.dpr);
     this.flags = flags;
@@ -30,6 +37,9 @@ export class CanvasPresentation {
     this.scorchMarks.prime(initialSnapshot);
     this.kineticFragments = new KineticFragmentPool();
     this.kineticFragments.prime(initialSnapshot);
+    this.damageNumbers = new DamageNumberPool();
+    this.damageNumbers.prime(initialSnapshot);
+    this.damageNumberOverlay = new DamageNumberOverlay(damageNumberCanvas);
     this.warmup = new PresentationWarmupStatus(false);
     this.profiler.prime({
       projectileCount: initialSnapshot.projectiles.length,
@@ -43,6 +53,7 @@ export class CanvasPresentation {
     const started = performance.now();
     this.scorchMarks.ingest(snapshot);
     this.kineticFragments.ingest(snapshot);
+    if (this.flags.values.damageNumbers) this.damageNumbers.ingest(snapshot);
     this.renderer.render(
       snapshot,
       alpha,
@@ -51,6 +62,17 @@ export class CanvasPresentation {
       this.scorchMarks,
       this.kineticFragments,
     );
+    if (this.flags.values.damageNumbers) {
+      const baseY = Number(snapshot.map?.baseY) || 0;
+      this.damageNumberOverlay.render(this.damageNumbers, alpha, {
+        layerIndex: Number(snapshot.player?.layerIndex) || 0,
+        sightFrame: view.sightFrame ?? null,
+        dprCap: this.renderer.pixelDensityCap,
+        project: (point) => projectDamageNumberCanvas(this.camera, point, baseY),
+      });
+    } else {
+      this.damageNumberOverlay.clear();
+    }
     const finished = performance.now();
     const submitMs = finished - started;
     this.profiler.record({
@@ -67,7 +89,12 @@ export class CanvasPresentation {
 
   /** @param {string} name @param {unknown} value */
   setPresentationFlag(name, value) {
-    return this.flags.set(name, value);
+    if (!this.flags.set(name, value)) return false;
+    if (name === "damageNumbers" && !this.flags.values.damageNumbers) {
+      this.damageNumbers.clearForToggle();
+      this.damageNumberOverlay.clear();
+    }
+    return true;
   }
 
   /** @param {unknown} value */
@@ -115,6 +142,7 @@ export class CanvasPresentation {
       },
       scorchMarks: this.scorchMarks.diagnostics(),
       kineticFragments: this.kineticFragments.diagnostics(),
+      damageNumbers: this.damageNumbers.diagnostics(),
     };
   }
 
