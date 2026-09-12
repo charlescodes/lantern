@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v17 and authoring-map v6. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v18 and authoring-map v6. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -55,7 +55,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 - [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
 - [Elevator crowding during enemy traversal](./bugs/elevator-enemy-queueing.md) — M1C's single-rider route works, but multi-enemy upward boarding needs a later bounded queue or larger-deck decision.
-- [2026-09-11 playtest defect backlog](./bugs/2026-09-11-playtest-backlog.md) — unprioritized reports covering unreliable downward pursuit, vertically incorrect elevator Fireball impacts, wrong-floor guard return, hole-fall forgiveness, wall-seam scorch clipping, and an aperture-reuse design question.
+- [2026-09-11 playtest defect backlog](./bugs/2026-09-11-playtest-backlog.md) — remaining unprioritized reports on pursuit, guard return, hole-fall forgiveness, scorch seams, and aperture reuse; its lowered-elevator Fireball report is resolved in schema v18.
 
 ## Release and milestone history
 
@@ -91,7 +91,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 These identifiers evolve independently:
 
 - Application/package release: `0.9.3`.
-- Snapshot and command-recording schema: v17.
+- Snapshot and command-recording schema: v18.
 - Authoring-map schema: `lantern-authoring-map` v6; v5, v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
 - Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the recording compatibility projection.
 - Fireball definition format: v1.

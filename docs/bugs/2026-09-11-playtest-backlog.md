@@ -20,14 +20,18 @@ the enemy knew when it stopped.
 
 ## A lowered elevator can block an upper-floor Fireball
 
+**Resolved in development schema v18** under
+`projectile-height-collision-v1`. This report remains as the original
+playtest context and acceptance record.
+
 A Fireball cast by the player or an Urchin can explode at an elevator opening
 even when the elevator is fully down and appears vertically clear of the shot.
 The current vertical contract says an upper-layer projectile must not collide
 with a shaft travelling below that floor, so the reported result is a defect if
 that is the exact impact context.
 
-Expected behavior: a projectile should hit elevator geometry only when that
-geometry actually intersects the projectile's layer or vertical path. This is
+Current behavior: a projectile hits elevator geometry only when that geometry
+intersects the projectile's layer and vertical flight band. This is
 also an example of the broader, already-captured
 [height-aware projectile blocker](../soft-specs/idea-bin.md#spells-and-projectile-readability)
 need; it should not be patched by making every movement blocker a projectile
@@ -83,4 +87,3 @@ That separation is not itself recorded as a bug. Revisit it only if future
 elevator, navigation, collision, or authoring work shows harmful duplication;
 any consolidation must preserve connector topology, elevator support behavior,
 and standalone-hole semantics.
-

@@ -446,7 +446,7 @@ function runSchemaV15NavigationGolden() {
 test("current-schema golden replays two observed connectors and reacquisition twice exactly", () => {
   const simulation = runSchemaV15NavigationGolden();
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 17);
+  assert.equal(recording.schemaVersion, 18);
   const events = simulation.navigationRouteEvents();
   assert.deepEqual(
     events.recent.map((event) => [event.tick, event.type]),

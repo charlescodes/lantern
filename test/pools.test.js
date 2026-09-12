@@ -5,8 +5,8 @@ import { ParticlePool, ProjectilePool, RockPool } from "../src/sim/pools.js";
 
 test("projectile swap-and-pop copies every component, including stable ID", () => {
   const pool = new ProjectilePool(3);
-  pool.spawn({ x: 1, z: 2, vx: 3, vz: 4, lifetime: 5, radius: 0.1 });
-  pool.spawn({ x: 10, z: 20, vx: 30, vz: 40, lifetime: 50, radius: 0.2 });
+  pool.spawn({ x: 1, z: 2, vx: 3, vz: 4, lifetime: 5, radius: 0.1, worldY: 1.25 });
+  pool.spawn({ x: 10, z: 20, vx: 30, vz: 40, lifetime: 50, radius: 0.2, worldY: 2.5 });
   const lastId = pool.spawn({
     x: 100,
     z: 200,
@@ -14,6 +14,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
     vz: 400,
     lifetime: 500,
     radius: 0.3,
+    worldY: 3.75,
     ownerId: 77,
     ownerKind: 2,
     ownerTeam: 2,
@@ -26,6 +27,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
   assert.deepEqual(
     {
       id: pool.id[0], x: pool.x[0], z: pool.z[0], previousX: pool.previousX[0], previousZ: pool.previousZ[0],
+      worldY: pool.worldY[0], previousWorldY: pool.previousWorldY[0],
       vx: pool.vx[0], vz: pool.vz[0], age: pool.age[0], lifetime: pool.lifetime[0], radius: pool.radius[0],
       ownerId: pool.ownerId[0], ownerKind: pool.ownerKind[0], ownerTeam: pool.ownerTeam[0],
     },
@@ -40,6 +42,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
       age: 93,
       lifetime: 500,
       radius: Math.fround(0.3),
+      worldY: Math.fround(3.75), previousWorldY: Math.fround(3.75),
       ownerId: 77,
       ownerKind: 2,
       ownerTeam: 2,
@@ -104,6 +107,7 @@ test("rock swap-and-pop copies authored identity, mass, and velocity", () => {
     x: 5,
     z: 6,
     radius: 0,
+    height: 0.52,
     halfWidth: 0.9,
     halfDepth: 0.36,
     massKg: 7_940,
@@ -124,6 +128,7 @@ test("rock swap-and-pop copies authored identity, mass, and velocity", () => {
       vx: pool.vx[0],
       vz: pool.vz[0],
       radius: pool.radius[0],
+      height: pool.height[0],
       halfWidth: pool.halfWidth[0],
       halfDepth: pool.halfDepth[0],
       massKg: pool.massKg[0],
@@ -140,6 +145,7 @@ test("rock swap-and-pop copies authored identity, mass, and velocity", () => {
       vx: 7,
       vz: 8,
       radius: 0,
+      height: Math.fround(0.52),
       halfWidth: Math.fround(0.9),
       halfDepth: Math.fround(0.36),
       massKg: 7_940,

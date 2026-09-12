@@ -15,6 +15,9 @@ import {
   DYNAMIC_PHYSICS,
   ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE,
   ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1,
+  PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
+  PROJECTILE_HEIGHT_COLLISION_PROFILE_V1,
+  PROJECTILE_FLIGHT_HEIGHT_METERS,
   ENEMY_ARCHETYPE,
   ENEMY_ARCHETYPE_NAMES,
   ENEMY_ARCHETYPE_PROFILE_NONE,
@@ -351,6 +354,10 @@ function dynamicBodyParameters(entity) {
       collider: isBox ? DYNAMIC_COLLIDER_FIXED_BOX : DYNAMIC_COLLIDER_CIRCLE,
       rotation: normalizeQuarterTurns(entity.rotation ?? 0),
       radius: isBox ? 0 : Number(catalogDefinition.traits.radius),
+      height: Number(
+        catalogDefinition.traits.height
+          ?? (isBox ? 0 : Number(catalogDefinition.traits.radius) * 2),
+      ),
       halfWidth: isBox ? Number(catalogDefinition.traits.halfWidth) : 0,
       halfDepth: isBox ? Number(catalogDefinition.traits.halfDepth) : 0,
       massKg: Number(catalogDefinition.traits.massKg),
@@ -367,6 +374,7 @@ function dynamicBodyParameters(entity) {
       collider: DYNAMIC_COLLIDER_CIRCLE,
       rotation: 0,
       radius: rockArchetype.radius,
+      height: rockArchetype.radius * 2,
       halfWidth: 0,
       halfDepth: 0,
       massKg: rockArchetype.massKg,
@@ -837,6 +845,7 @@ export class Simulation {
    * deadBodyProfile?:string,
    * movementSoundProfile?:string,
    * elevatorProjectileCollisionProfile?:string,
+   * projectileHeightCollisionProfile?:string,
    * breakawayFloorProfile?:string,
    * authoredNavigationTopologyProfile?:string,
    * holePursuitProfile?:string,
@@ -995,6 +1004,17 @@ export class Simulation {
       throw new RangeError(
         "Unsupported elevator projectile collision profile: "
           + this.elevatorProjectileCollisionProfile,
+      );
+    }
+    this.projectileHeightCollisionProfile = options.projectileHeightCollisionProfile
+      ?? PROJECTILE_HEIGHT_COLLISION_PROFILE_V1;
+    if (
+      this.projectileHeightCollisionProfile !== PROJECTILE_HEIGHT_COLLISION_PROFILE_V1
+      && this.projectileHeightCollisionProfile !== PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE
+    ) {
+      throw new RangeError(
+        "Unsupported projectile height collision profile: "
+          + this.projectileHeightCollisionProfile,
       );
     }
     const rockCapacity = options.rockCapacity ?? ROCK.capacity;
@@ -1361,6 +1381,7 @@ export class Simulation {
       this.commandLogDeadBodyProfile = this.deadBodyProfile;
       this.commandLogMovementSoundProfile = this.movementSoundProfile;
       this.commandLogElevatorProjectileCollisionProfile = this.elevatorProjectileCollisionProfile;
+      this.commandLogProjectileHeightCollisionProfile = this.projectileHeightCollisionProfile;
       this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
       this.commandLogAuthoredNavigationTopologyProfile = this.authoredNavigationTopologyProfile;
       this.commandLogHolePursuitProfile = this.holePursuitProfile;
@@ -1751,6 +1772,7 @@ export class Simulation {
       x: entity.x,
       z: entity.z,
       radius: definition.radius,
+      height: definition.height,
       halfWidth: definition.halfWidth,
       halfDepth: definition.halfDepth,
       massKg: definition.massKg,
@@ -1813,6 +1835,7 @@ export class Simulation {
       this.rocks.vx[existing] = 0;
       this.rocks.vz[existing] = 0;
       this.rocks.radius[existing] = definition.radius;
+      this.rocks.height[existing] = definition.height;
       this.rocks.halfWidth[existing] = definition.halfWidth;
       this.rocks.halfDepth[existing] = definition.halfDepth;
       this.rocks.massKg[existing] = definition.massKg;
@@ -5770,6 +5793,9 @@ export class Simulation {
             pool.castSequence[index],
           );
       const effectId = isUrchin ? 0 : this.nextEffectId;
+      const projectileKind = isUrchin
+        ? PROJECTILE_KIND.thrownStone
+        : PROJECTILE_KIND.fireball;
       const projectileId = this.projectiles.spawn({
         x: pool.x[index] + nx * offset,
         z: pool.z[index] + nz * offset,
@@ -5782,11 +5808,12 @@ export class Simulation {
           ? PROJECTILE_OWNER_KIND.enemyUrchin
           : PROJECTILE_OWNER_KIND.enemyWizard,
         ownerTeam: ACTOR_TEAM.enemy,
-        projectileKind: isUrchin ? PROJECTILE_KIND.thrownStone : PROJECTILE_KIND.fireball,
+        projectileKind,
         spellCode: isUrchin ? 0 : spell.code,
         definitionRevision: isUrchin ? 0 : spell.currentRevision,
         effectId,
         effectSeed,
+        worldY: pool.worldY[index] + PROJECTILE_FLIGHT_HEIGHT_METERS[projectileKind],
         layerIndex: pool.layerIndex[index],
       });
       if (projectileId === 0) continue;
@@ -8488,6 +8515,7 @@ export class Simulation {
       definitionRevision: spell.currentRevision,
       effectId,
       effectSeed,
+      worldY: player.worldY + PROJECTILE_FLIGHT_HEIGHT_METERS[PROJECTILE_KIND.fireball],
       layerIndex: player.layerIndex,
     });
     if (id !== 0) {
@@ -8519,6 +8547,7 @@ export class Simulation {
       vz: nz * PROJECTILE.speed,
       lifetime: PROJECTILE.lifetime,
       radius: PROJECTILE.radius,
+      worldY: player.worldY + PROJECTILE_FLIGHT_HEIGHT_METERS[PROJECTILE_KIND.fireball],
       ownerId: player.id,
       ownerKind: PROJECTILE_OWNER_KIND.player,
       ownerTeam: ACTOR_TEAM.player,
@@ -8539,14 +8568,37 @@ export class Simulation {
     return definition;
   }
 
+  /** @param {number} projectileY @param {number} radius @param {number} minimumY @param {number} maximumY */
+  #projectileVerticalIntervalContact(projectileY, radius, minimumY, maximumY) {
+    return projectileY + radius >= minimumY - 1e-9
+      && projectileY - radius <= maximumY + 1e-9;
+  }
+
+  /** @param {number} projectileY @param {number} radius @param {number} index */
+  #projectileDynamicBodyHeightContact(projectileY, radius, index) {
+    if (this.projectileHeightCollisionProfile !== PROJECTILE_HEIGHT_COLLISION_PROFILE_V1) {
+      return true;
+    }
+    const minimumY = Math.min(
+      this.rocks.worldY[index],
+      this.rocks.previousWorldY[index],
+    );
+    const maximumY = Math.max(
+      this.rocks.worldY[index] + this.rocks.height[index],
+      this.rocks.previousWorldY[index] + this.rocks.height[index],
+    );
+    return this.#projectileVerticalIntervalContact(projectileY, radius, minimumY, maximumY);
+  }
+
   /**
    * Returns the contacted elevator index, or -1 when this projectile's layer
-   * has no blocking elevator surface. Projectiles are layer-bound 2D bodies:
-   * they meet the lower deck/piston and the upper deck, but never the piston
-   * travelling beneath the upper floor.
-   * @param {number} x @param {number} z @param {number} radius @param {number} layerIndex
+   * has no blocking elevator surface. Height-aware recordings treat the deck
+   * as a thin slab at the current/previous platform Y and the lower shaft as
+   * a circular piston volume swept from the lower floor to the deck underside.
+   * @param {number} x @param {number} z @param {number} worldY
+   * @param {number} radius @param {number} layerIndex
    */
-  #projectileElevatorContact(x, z, radius, layerIndex) {
+  #projectileElevatorContact(x, z, worldY, radius, layerIndex) {
     if (
       this.elevatorProjectileCollisionProfile
         !== ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1
@@ -8562,18 +8614,64 @@ export class Simulation {
         && this.elevators.currentStop[elevatorIndex] === ELEVATOR_STOP.UPPER;
       const isLowerShaft = isLowerLayer && !isLowerDeck;
       if (!isLowerDeck && !isUpperDeck && !isLowerShaft) continue;
-      const hit = (isLowerDeck || isUpperDeck)
-        ? circleBoxContact(
-          x,
-          z,
+      const currentY = this.elevators.worldY[elevatorIndex];
+      const previousY = this.elevators.previousWorldY[elevatorIndex];
+      const thickness = VERTICAL_PHYSICS.elevatorPlatformThicknessMeters;
+      const deckMinimumY = Math.min(currentY, previousY) - thickness;
+      const deckMaximumY = Math.max(currentY, previousY);
+      const pistonMinimumY = this.elevators.lowerY[elevatorIndex];
+      const pistonMaximumY = Math.max(
+        pistonMinimumY,
+        currentY - thickness,
+        previousY - thickness,
+      );
+      if (this.projectileHeightCollisionProfile !== PROJECTILE_HEIGHT_COLLISION_PROFILE_V1) {
+        const hit = (isLowerDeck || isUpperDeck)
+          ? circleBoxContact(
+            x,
+            z,
+            radius,
+            this.elevators.x[elevatorIndex],
+            this.elevators.z[elevatorIndex],
+            this.elevators.platformWidth[elevatorIndex] / 2,
+            this.elevators.platformWidth[elevatorIndex] / 2,
+            this._bodyContact,
+          )
+          : circleCircleContact(
+            x,
+            z,
+            radius,
+            this.elevators.x[elevatorIndex],
+            this.elevators.z[elevatorIndex],
+            this.elevators.platformWidth[elevatorIndex] / 2,
+            this._bodyContact,
+          );
+        if (hit) return elevatorIndex;
+        continue;
+      }
+      const deckHit = this.#projectileVerticalIntervalContact(
+        worldY,
+        radius,
+        deckMinimumY,
+        deckMaximumY,
+      ) && circleBoxContact(
+        x,
+        z,
+        radius,
+        this.elevators.x[elevatorIndex],
+        this.elevators.z[elevatorIndex],
+        this.elevators.platformWidth[elevatorIndex] / 2,
+        this.elevators.platformWidth[elevatorIndex] / 2,
+        this._bodyContact,
+      );
+      if (deckHit) return elevatorIndex;
+      const pistonHit = isLowerShaft
+        && this.#projectileVerticalIntervalContact(
+          worldY,
           radius,
-          this.elevators.x[elevatorIndex],
-          this.elevators.z[elevatorIndex],
-          this.elevators.platformWidth[elevatorIndex] / 2,
-          this.elevators.platformWidth[elevatorIndex] / 2,
-          this._bodyContact,
-        )
-        : circleCircleContact(
+          pistonMinimumY,
+          pistonMaximumY,
+        ) && circleCircleContact(
           x,
           z,
           radius,
@@ -8582,7 +8680,7 @@ export class Simulation {
           this.elevators.platformWidth[elevatorIndex] / 2,
           this._bodyContact,
         );
-      if (hit) return elevatorIndex;
+      if (pistonHit) return elevatorIndex;
     }
     return -1;
   }
@@ -8658,6 +8756,7 @@ export class Simulation {
         hitElevatorIndex = this.#projectileElevatorContact(
           testX,
           testZ,
+          pool.worldY[index],
           pool.radius[index],
           projectileLayerIndex,
         );
@@ -8676,6 +8775,10 @@ export class Simulation {
             pool.radius[index],
             rockIndex,
             this._bodyContact,
+          ) && this.#projectileDynamicBodyHeightContact(
+            pool.worldY[index],
+            pool.radius[index],
+            rockIndex,
           )) {
             hitKind = "rock";
             hitRockIndex = rockIndex;
@@ -10620,7 +10723,7 @@ export class Simulation {
         authoringId: this.scenario.authoringIdForSpawnId(this.rocks.spawnId[index]),
         definitionId,
         shape: definition?.traits.shape ?? "rock",
-        height: Number(definition?.traits.height ?? this.rocks.radius[index] * 2),
+        height: this.rocks.height[index],
         upright: definition?.traits.upright === true,
         collider: this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX
           ? "box"
@@ -10874,6 +10977,8 @@ export class Simulation {
         z: this.projectiles.z[index],
         previousX: this.projectiles.previousX[index],
         previousZ: this.projectiles.previousZ[index],
+        worldY: this.projectiles.worldY[index],
+        previousWorldY: this.projectiles.previousWorldY[index],
         vx: this.projectiles.vx[index],
         vz: this.projectiles.vz[index],
         radius: this.projectiles.radius[index],
@@ -11045,6 +11150,7 @@ export class Simulation {
       enemyAiProfile: this.enemyAiProfile,
       deadBodyProfile: this.deadBodyProfile,
       movementSoundProfile: this.movementSoundProfile,
+      projectileHeightCollisionProfile: this.projectileHeightCollisionProfile,
       navigation: usesPerceptionProfile(this.enemyAiProfile)
         ? {
           ...this.destinationFields.diagnostics(
@@ -11625,7 +11731,7 @@ export class Simulation {
       index,
       position: {
         x: this.projectiles.x[index],
-        y: this.projectiles.radius[index],
+        y: this.projectiles.worldY[index],
         z: this.projectiles.z[index],
       },
       velocity: { x: this.projectiles.vx[index], y: 0, z: this.projectiles.vz[index] },
@@ -12159,6 +12265,8 @@ export class Simulation {
         movementSoundProfile: this.commandLogMovementSoundProfile,
         elevatorProjectileCollisionProfile:
           this.commandLogElevatorProjectileCollisionProfile,
+        projectileHeightCollisionProfile:
+          this.commandLogProjectileHeightCollisionProfile,
         breakawayFloorProfile: this.commandLogBreakawayFloorProfile,
         authoredNavigationTopologyProfile:
           this.commandLogAuthoredNavigationTopologyProfile,
@@ -12226,6 +12334,7 @@ export class Simulation {
     let deadBodyProfile = DEAD_BODY_PROFILE_NONE;
     let movementSoundProfile = MOVEMENT_SOUND_PROFILE_NONE;
     let elevatorProjectileCollisionProfile = ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE;
+    let projectileHeightCollisionProfile = PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE;
     let breakawayFloorProfile = BREAKAWAY_FLOOR_PROFILE_NONE;
     let authoredNavigationTopologyProfile = AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_NONE;
     let holePursuitProfile = HOLE_PURSUIT_PROFILE_NONE;
@@ -12293,6 +12402,7 @@ export class Simulation {
       || recordingSchema === 15
       || recordingSchema === 16
       || recordingSchema === 17
+      || recordingSchema === 18
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -12423,6 +12533,16 @@ export class Simulation {
           throw new TypeError("Schema-v17 recording has invalid or missing hole-pursuit profile");
         }
       }
+      if (recordingSchema >= 18) {
+        projectileHeightCollisionProfile = String(
+          recording.configuration?.projectileHeightCollisionProfile ?? "",
+        );
+        if (projectileHeightCollisionProfile !== PROJECTILE_HEIGHT_COLLISION_PROFILE_V1) {
+          throw new TypeError(
+            "Schema-v18 recording has invalid or missing projectile-height collision profile",
+          );
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -12454,6 +12574,7 @@ export class Simulation {
       deadBodyProfile,
       movementSoundProfile,
       elevatorProjectileCollisionProfile,
+      projectileHeightCollisionProfile,
       breakawayFloorProfile,
       authoredNavigationTopologyProfile,
       holePursuitProfile,

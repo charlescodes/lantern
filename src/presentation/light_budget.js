@@ -602,7 +602,8 @@ export class PresentationLightBudget {
           kind: "projectile",
           sourceId: Number(projectile.id),
           x: Number(projectile.x),
-          y: 0.9,
+          y: Number(projectile.worldY ?? Number(snapshot.map?.baseY ?? 0) + 0.9)
+            - Number(snapshot.map?.baseY ?? 0),
           z: Number(projectile.z),
           color: useRevisionPalette
             ? color

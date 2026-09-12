@@ -1,6 +1,6 @@
 # M1B.1–M1B.4 Generic vertical bodies, elevator, holes, jumping, plates, and breakaways
 
-> **Status:** current 0.9.3 implementation contract · **Authoring format:** `lantern-authoring-map` v5 · **Runtime recording schema:** v14
+> **Status:** current 0.9.3 implementation contract · **Authoring format:** `lantern-authoring-map` v6 · **Runtime recording schema:** v18
 
 M1B.1 keeps Lantern's authoritative X/Z collision model and adds one bounded
 world-Y degree of freedom. It is not a general 3D rigid-body system. Floors and
@@ -74,11 +74,14 @@ so merely brushing the deck edge cannot kick it sideways. Existing riders
 retain ordinary X/Z control. A falling body may still cross the upper shaft and
 acquire the moving platform as a swept support from above.
 
-Schema-v13-and-later Fireballs use the same layer-local blocker interpretation. They
-explode on the square deck at either stop and on the circular lower-floor
-piston/shaft while it travels or dwells at the upper stop. A projectile on the
-upper layer does not collide with a shaft travelling below that floor. Schema
-v12 retains its historical behavior, in which elevator geometry was not a
+Schema v18 adds `projectile-height-collision-v1` on top of schema v13's
+layer-local elevator profile. Fireballs and thrown stones retain their fixed
+launch world Y, so a deck flush with either floor passes beneath the normal
+flight band. The square deck and circular lower-floor piston block only when
+their swept vertical volume overlaps the projectile sphere. A projectile on the
+upper layer still does not collide with a shaft travelling below that floor.
+Schema v13–v17 retain their historical two-dimensional elevator contacts, and
+schema v12 retains its historical behavior in which elevator geometry was not a
 projectile impact target.
 
 Presentation treats an elevator-supported body as visible from either linked
@@ -300,7 +303,10 @@ selection, and the inspector remain generic. Plates cannot be placed on holes or
 elevator apertures. `__lantern.pressurePlates()` and
 `__lantern.pressurePlateEvents()` return detached diagnostics.
 
-The current replay/snapshot schema is v14. Schema v13 adds elevator projectile collision; schema v12 retains its committed-jump edge but no elevator projectile collision; v2–v11 commands have no jump edge
+The current replay/snapshot schema is v18. Schema v18 adds height-aware
+projectile contacts; schema v13 adds elevator projectile collision; schema v12
+retains its committed-jump edge but no elevator projectile collision; v2–v11
+commands have no jump edge
 and retain their frozen behavior. Authoring-map v5 is unchanged because pressure
 plates use the existing sparse-instance format.
 

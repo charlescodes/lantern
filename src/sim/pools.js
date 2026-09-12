@@ -6,6 +6,7 @@ import {
   NAVIGATION_ROUTE_FAILURE,
   NAVIGATION_ROUTE_PHASE,
   NAVIGATION_TOPOLOGY,
+  PROJECTILE_FLIGHT_HEIGHT_METERS,
   PROJECTILE_KIND,
 } from "../config.js";
 
@@ -28,6 +29,8 @@ export class ProjectilePool {
     this.z = new Float32Array(capacity);
     this.previousX = new Float32Array(capacity);
     this.previousZ = new Float32Array(capacity);
+    this.worldY = new Float32Array(capacity);
+    this.previousWorldY = new Float32Array(capacity);
     this.vx = new Float32Array(capacity);
     this.vz = new Float32Array(capacity);
     this.age = new Float32Array(capacity);
@@ -50,7 +53,7 @@ export class ProjectilePool {
     this.nextId = 1;
   }
 
-  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,projectileKind?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
+  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,worldY?:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,projectileKind?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -64,6 +67,11 @@ export class ProjectilePool {
     this.z[index] = value.z;
     this.previousX[index] = value.x;
     this.previousZ[index] = value.z;
+    const projectileKind = value.projectileKind ?? PROJECTILE_KIND.fireball;
+    this.worldY[index] = value.worldY
+      ?? PROJECTILE_FLIGHT_HEIGHT_METERS[projectileKind]
+      ?? PROJECTILE_FLIGHT_HEIGHT_METERS[PROJECTILE_KIND.fireball];
+    this.previousWorldY[index] = this.worldY[index];
     this.vx[index] = value.vx;
     this.vz[index] = value.vz;
     this.age[index] = 0;
@@ -72,7 +80,7 @@ export class ProjectilePool {
     this.ownerId[index] = value.ownerId ?? 0;
     this.ownerKind[index] = value.ownerKind ?? 1;
     this.ownerTeam[index] = value.ownerTeam ?? 1;
-    this.projectileKind[index] = value.projectileKind ?? PROJECTILE_KIND.fireball;
+    this.projectileKind[index] = projectileKind;
     this.spellCode[index] = value.spellCode ?? 0;
     this.definitionRevision[index] = value.definitionRevision ?? 0;
     this.effectId[index] = value.effectId ?? 0;
@@ -92,6 +100,8 @@ export class ProjectilePool {
       this.z[index] = this.z[last];
       this.previousX[index] = this.previousX[last];
       this.previousZ[index] = this.previousZ[last];
+      this.worldY[index] = this.worldY[last];
+      this.previousWorldY[index] = this.previousWorldY[last];
       this.vx[index] = this.vx[last];
       this.vz[index] = this.vz[last];
       this.age[index] = this.age[last];
@@ -704,6 +714,7 @@ export class RockPool {
     this.vx = new Float32Array(capacity);
     this.vz = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
+    this.height = new Float32Array(capacity);
     this.halfWidth = new Float32Array(capacity);
     this.halfDepth = new Float32Array(capacity);
     this.massKg = new Float32Array(capacity);
@@ -719,7 +730,7 @@ export class RockPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnId:number,definitionId?:string|null,archetype:number,collider?:number,rotation?:number,x:number,z:number,radius:number,halfWidth?:number,halfDepth?:number,massKg:number,airbornePassable?:boolean,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
+  /** @param {{spawnId:number,definitionId?:string|null,archetype:number,collider?:number,rotation?:number,x:number,z:number,radius:number,height?:number,halfWidth?:number,halfDepth?:number,massKg:number,airbornePassable?:boolean,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -741,6 +752,7 @@ export class RockPool {
     this.vx[index] = 0;
     this.vz[index] = 0;
     this.radius[index] = value.radius;
+    this.height[index] = value.height ?? value.radius * 2;
     this.halfWidth[index] = value.halfWidth ?? 0;
     this.halfDepth[index] = value.halfDepth ?? 0;
     this.massKg[index] = value.massKg;
@@ -769,6 +781,7 @@ export class RockPool {
       this.vx[index] = this.vx[last];
       this.vz[index] = this.vz[last];
       this.radius[index] = this.radius[last];
+      this.height[index] = this.height[last];
       this.halfWidth[index] = this.halfWidth[last];
       this.halfDepth[index] = this.halfDepth[last];
       this.massKg[index] = this.massKg[last];

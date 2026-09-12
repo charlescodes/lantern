@@ -2106,7 +2106,12 @@ export class ThreePresentation {
       if (projectile.layerId !== visibleLayerId) continue;
       const x = projectile.previousX + (projectile.x - projectile.previousX) * alpha;
       const z = projectile.previousZ + (projectile.z - projectile.previousZ) * alpha;
-      this._position.set(x, FIREBALL_PRESENTATION_HEIGHT_METERS, z);
+      const worldY = interpolateRenderValue(
+        projectile.previousWorldY ?? projectile.worldY ?? this.activeBaseY + FIREBALL_PRESENTATION_HEIGHT_METERS,
+        projectile.worldY ?? this.activeBaseY + FIREBALL_PRESENTATION_HEIGHT_METERS,
+        alpha,
+      );
+      this._position.set(x, worldY - this.activeBaseY, z);
       this._scale.setScalar(projectile.radius * 1.15);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.projectileMesh.setMatrixAt(count, this._matrix);

@@ -68,6 +68,7 @@ test("a projectile explodes on a rock and applies blast rules to rock and owner"
     vz: 0,
     lifetime: 2,
     radius: 0.12,
+    worldY: 0,
     ownerId: simulation.player.id,
   });
 

@@ -13,6 +13,7 @@ import {
   MOVEMENT_SOUND_PROFILE_NONE,
   MOVEMENT_SOUND_PROFILE_V1,
   PROJECTILE,
+  PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
   SCHEMA_VERSION,
 } from "../src/config.js";
 import { Simulation } from "../src/sim/simulation.js";
@@ -64,7 +65,7 @@ test("schema-v11 recording stores investigative, dead-body, and movement-sound p
   const source = new Simulation({ seed: 0x0800_f17e, particleBurstCount: 0 });
   runFixture(source);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 17);
+  assert.equal(recording.schemaVersion, 18);
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.equal(recording.configuration.enemyCapacity, ENEMY_WIZARD.capacity);
   assert.equal(
@@ -96,6 +97,7 @@ test("schema-v8 recording selects the frozen perceptive profile", () => {
     enemyAiProfile: ENEMY_AI_PROFILE_PERCEPTIVE,
     deadBodyProfile: DEAD_BODY_PROFILE_NONE,
     movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
+    projectileHeightCollisionProfile: PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
   });
   runFixture(source);
   const recording = source.exportCommandLog();
@@ -112,6 +114,7 @@ test("schema-v10 keeps full-speed silent movement and direct Fireball hearing", 
     seed: 0x1000_f17e,
     particleBurstCount: 0,
     movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
+    projectileHeightCollisionProfile: PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
   });
   runFixture(source);
   const recording = source.exportCommandLog();
@@ -130,6 +133,7 @@ test("schema-v7 and v6 replay construct historical four-entry pools and frozen p
     enemyAiProfile: ENEMY_AI_PROFILE_TACTICAL,
     deadBodyProfile: DEAD_BODY_PROFILE_NONE,
     movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
+    projectileHeightCollisionProfile: PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
     projectileCapacity: PROJECTILE.legacyCapacity,
     particleBurstCount: 0,
   });
@@ -163,7 +167,7 @@ test("schema-v8 rejects compatibility metadata or profiles that would blur repla
   source.tick(null);
   const recording = source.exportCommandLog();
   recording.schemaVersion = 8;
-  assert.equal(SCHEMA_VERSION, 17);
+  assert.equal(SCHEMA_VERSION, 18);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),
@@ -190,7 +194,7 @@ test("schema-v11 rejects perceptive profile metadata at the new boundary", () =>
   const source = new Simulation({ particleBurstCount: 0 });
   source.tick(null);
   const recording = source.exportCommandLog();
-  assert.equal(recording.schemaVersion, 17);
+  assert.equal(recording.schemaVersion, 18);
   assert.throws(
     () => Simulation.replay({
       ...structuredClone(recording),

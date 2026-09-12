@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -18,6 +18,8 @@ export const MOVEMENT_SOUND_PROFILE_V1 = "proximity-walk-footsteps-v1";
 export const MOVEMENT_SOUND_PROFILE_NONE = "none";
 export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_V1 = "elevator-projectile-collision-v1";
 export const ELEVATOR_PROJECTILE_COLLISION_PROFILE_NONE = "none";
+export const PROJECTILE_HEIGHT_COLLISION_PROFILE_V1 = "projectile-height-collision-v1";
+export const PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE = "none";
 export const BREAKAWAY_FLOOR_PROFILE_V1 = "breakaway-floor-v1";
 export const BREAKAWAY_FLOOR_PROFILE_NONE = "none";
 export const AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1 = "authored-navigation-topology-v1";
@@ -48,6 +50,14 @@ export const PROJECTILE_KIND_NAMES = Object.freeze([
   "fireball",
   "thrown-stone",
 ]);
+
+// Projectile flight stays horizontally simple, but each kind owns a stable
+// authoritative launch offset for vertical contact. New kinds may choose a
+// different fixed band without changing Fireball authoring data.
+export const PROJECTILE_FLIGHT_HEIGHT_METERS = Object.freeze({
+  [PROJECTILE_KIND.fireball]: 0.9,
+  [PROJECTILE_KIND.thrownStone]: 0.9,
+});
 
 export const NAVIGATION_TOPOLOGY = Object.freeze({
   authoredNodeCapacity: 128,
