@@ -13,6 +13,14 @@ it but do not decide it.
 4. Stage exact paths, inspect `git diff --cached`, and never conflate app,
    recording-schema, authoring-map, and historical-profile versions.
 
+## Repository map
+
+`repomix-output.xml` is a user-maintained compressed structural map of the
+repository. When a task needs an overview of the project hierarchy, modules, or
+candidate files, inspect it first; then verify exact behavior and authority in
+the live source, tests, and contracts. Do not regenerate or edit it unless the
+user explicitly asks.
+
 ## Authority order
 
 For shipped behavior, use this order when artifacts disagree:
