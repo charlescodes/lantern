@@ -55,6 +55,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 - [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
 - [Elevator crowding during enemy traversal](./bugs/elevator-enemy-queueing.md) — M1C's single-rider route works, but multi-enemy upward boarding needs a later bounded queue or larger-deck decision.
+- [2026-09-11 playtest defect backlog](./bugs/2026-09-11-playtest-backlog.md) — unprioritized reports covering unreliable downward pursuit, vertically incorrect elevator Fireball impacts, wrong-floor guard return, hole-fall forgiveness, wall-seam scorch clipping, and an aperture-reuse design question.
 
 ## Release and milestone history
 
