@@ -73,7 +73,7 @@ Evidence in the current tree:
 
 - `src/sim`, `src/spells`, and `src/core` do not import Three.js, DOM, Canvas, or presentation modules.
 - Three.js imports are confined to presentation adapters such as [`three_presentation.js`](../src/presentation/three_presentation.js), [`instanced_pool.js`](../src/presentation/instanced_pool.js), and [`true_sight_transport.js`](../src/presentation/true_sight_transport.js).
-- Authoritative actors and projectiles use X/Z positions for horizontal collision. Current schema-v18 projectiles also carry a fixed world-Y flight band for height-aware dynamic-prop and elevator contacts; actors remain layer-local targets. The 3D camera projects pointer commands back onto the `Y=0` ground plane.
+- Authoritative actors and projectiles use X/Z positions for horizontal collision. Schema-v18-and-newer projectiles also carry a fixed world-Y flight band for height-aware dynamic-prop and elevator contacts; actors remain layer-local targets. The 3D camera projects pointer commands back onto the `Y=0` ground plane.
 - Both renderers receive the same simulation snapshot. Three.js does not own an alternate physics body, AI state, health value, or entity ID.
 - AI visual checks use grid geometry and authoritative facing, not player-facing TrueSight or rendered visibility.
 

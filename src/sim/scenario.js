@@ -167,6 +167,20 @@ export class ArenaScenario {
   toJSON() {
     const start = this._compiledLayers.find((layer) => layer.id === this.startLayerId);
     if (!start) throw new RangeError("Player-start layer is unavailable");
+    let includedObelisk = false;
+    const entities = start.entities
+      .filter((entity) => {
+        if (entity.kind === "rock") return true;
+        if (entity.kind !== "obelisk" || includedObelisk) return false;
+        includedObelisk = true;
+        return true;
+      })
+      .map((entity) => ({
+        kind: entity.kind,
+        ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
+        x: entity.x,
+        z: entity.z,
+      }));
     return {
       version: SCENARIO_VERSION,
       authoringMetadata: { ...this.authoringMap.metadata },
@@ -174,14 +188,7 @@ export class ArenaScenario {
       height: start.map.height,
       cells: Array.from(start.map.cells),
       playerSpawn: { ...start.map.playerSpawn },
-      entities: start.entities
-        .filter((entity) => entity.kind === "rock" || entity.kind === "obelisk")
-        .map((entity) => ({
-          kind: entity.kind,
-          ...(entity.kind === "rock" ? { archetype: entity.archetype } : {}),
-          x: entity.x,
-          z: entity.z,
-        })),
+      entities,
     };
   }
 
@@ -419,10 +426,17 @@ export class ArenaScenario {
     return null;
   }
 
-  /** @param {number} cx @param {number} cz */
-  obeliskAtCell(cx, cz) {
-    return this.entities.find(
+  /** @param {number} cx @param {number} cz @param {string} [layerId] */
+  obeliskAtCell(cx, cz, layerId = this.activeLayer.id) {
+    return this.compiledLayer(layerId)?.entities.find(
       (entity) => entity.kind === "obelisk" && Math.floor(entity.x) === cx && Math.floor(entity.z) === cz,
+    ) ?? null;
+  }
+
+  /** @param {number} spawnId */
+  obeliskBySpawnId(spawnId) {
+    return this.allRuntimeEntities().find(
+      (entity) => entity.kind === "obelisk" && entity.spawnId === spawnId,
     ) ?? null;
   }
 
@@ -430,11 +444,7 @@ export class ArenaScenario {
     return this.entities.find((entity) => entity.kind === "obelisk") ?? null;
   }
 
-  /**
-   * The arena encounter is map-owned, not a property of whichever layer the
-   * editor or camera is currently viewing.  Authoring validation keeps this
-   * singleton marker unambiguous.
-   */
+  /** Legacy singleton encounter projection. */
   get encounterObelisk() {
     return this.allRuntimeEntities().find((entity) => entity.kind === "obelisk") ?? null;
   }

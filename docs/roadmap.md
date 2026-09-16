@@ -2,7 +2,7 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v18, authoring-map v6. M1C.1–M1C.5 are
+> `0.9.3`, recording schema v20, authoring-map v7. M1C.1–M1C.5 are
 > implemented; the separate M1C manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 
@@ -39,6 +39,10 @@ multi-stop elevators, cross-floor clairvoyance, or a rewrite of current AI.
 
 ## After M1C
 
+- **Editable, floor-aware obelisks:** complete. Obelisks are ordinary authored
+  instances on explicit layers; schema v19 gives every enemy a stable home and
+  cross-floor return route, while schema v20 enables independent obelisks with
+  authored archetypes, living caps, and spawn cadence.
 - **M1D — Temple of Ix:** make ordinary editable authored maps and a Room Lab,
   then hand-build a complete temple. It should teach and test the established
   traversal systems and eventually offer three alternative exit goals. These

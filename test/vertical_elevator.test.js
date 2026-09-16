@@ -579,7 +579,7 @@ test("schema-v18 requires the height-collision profile while schema-v17 forces i
   const simulation = simulationFor(elevatorDocument().document);
   simulation.tick(null);
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 18);
+  assert.equal(recording.schemaVersion, 20);
   assert.equal(
     recording.configuration.projectileHeightCollisionProfile,
     PROJECTILE_HEIGHT_COLLISION_PROFILE_V1,

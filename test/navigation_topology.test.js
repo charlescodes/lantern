@@ -238,7 +238,7 @@ test("topology probes are detached and current recordings pin capacities", () =>
   probe.ports.push({ broken: true });
   assert.equal(simulation.navigationTopologySnapshot().ports.length, 0);
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 18);
+  assert.equal(recording.schemaVersion, 20);
   assert.equal(recording.configuration.authoredNavigationTopologyProfile, "authored-navigation-topology-v1");
   assert.equal(recording.configuration.navigationTopologyCapacities.ports, 160);
   assert.deepEqual(Simulation.replay(recording).snapshot().player, simulation.snapshot().player);
@@ -247,7 +247,7 @@ test("topology probes are detached and current recordings pin capacities", () =>
   assert.throws(() => Simulation.replay(invalidCapacity), /invalid navigation-topology capacities/);
   const missingMap = structuredClone(recording);
   delete missingMap.initialAuthoringMap;
-  assert.throws(() => Simulation.replay(missingMap), /missing its authoring-map v6 baseline/);
+  assert.throws(() => Simulation.replay(missingMap), /missing a compatible authoring-map baseline/);
 
   for (let index = 0; index < 140; index += 1) {
     simulation.queryNavigationRoute("node:missing-a", "node:missing-b");

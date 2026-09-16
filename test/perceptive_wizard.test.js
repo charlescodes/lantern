@@ -300,7 +300,7 @@ test("visible hostile projectiles can dodge without advancing player exposure", 
 
 const TACTICAL_DODGE_REMAINING_AFTER_FIRST_TICK = 17;
 
-test("search lasts exactly eight seconds, then return clears memory or rebases after timeout", () => {
+test("search lasts exactly eight seconds, then an unreachable authored home waits and retries", () => {
   const map = borderedMap();
   for (let z = 1; z < map.height - 1; z += 1) map.set(6, z, 1);
   const simulation = simulationFor(map);
@@ -350,11 +350,11 @@ test("search lasts exactly eight seconds, then return clears memory or rebases a
     unreachableStartTick + PERCEPTIVE_WIZARD.travelTimeoutTicks,
   );
   enemy = simulation.snapshot().enemies[0];
-  assert.equal(enemy.perceptionState, "unaware");
-  assert.equal(enemy.lastSeen, null);
+  assert.equal(enemy.perceptionState, "returning");
+  assert.ok(enemy.lastSeen);
   assert.deepEqual(enemy.guard.point, {
-    x: Math.floor(enemy.x) + 0.5,
-    z: Math.floor(enemy.z) + 0.5,
+    x: 2.5,
+    z: 2.5,
   });
 });
 

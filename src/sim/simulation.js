@@ -22,6 +22,8 @@ import {
   ENEMY_ARCHETYPE_NAMES,
   ENEMY_ARCHETYPE_PROFILE_NONE,
   ENEMY_ARCHETYPE_PROFILE_V1,
+  ENEMY_HOME_PROFILE_NONE,
+  ENEMY_HOME_PROFILE_V1,
   ENEMY_AI_PROFILE_BASIC,
   ENEMY_AI_PROFILE_INVESTIGATIVE,
   ENEMY_AI_PROFILE_NONE,
@@ -45,6 +47,9 @@ import {
   NAVIGATION_ROUTE_PHASE,
   NAVIGATION_TOPOLOGY,
   normalizeParticleProfile,
+  OBELISK,
+  OBELISK_ENCOUNTER_PROFILE_NONE,
+  OBELISK_ENCOUNTER_PROFILE_V1,
   PARTICLE,
   PARTICLE_PROFILES,
   PARTICLE_PROFILE_M02,
@@ -68,6 +73,7 @@ import {
   AUTHORING_MAP_VERSION,
   cloneAuthoringMap,
   MAX_AUTHORING_LAYERS,
+  NAVIGATION_AUTHORING_MAP_VERSION,
 } from "../authoring/authoring_map.js";
 import { applyAuthoringCommand } from "../authoring/authoring_history.js";
 import {
@@ -851,6 +857,8 @@ export class Simulation {
    * holePursuitProfile?:string,
    * enemyArchetypeProfile?:string,
    * encounterEnemyArchetype?:string,
+   * enemyHomeProfile?:string,
+   * obeliskEncounterProfile?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -905,6 +913,23 @@ export class Simulation {
       && this.encounterEnemyArchetype !== "wizard"
     ) {
       throw new RangeError("The legacy enemy-archetype profile only supports wizards");
+    }
+    this.enemyHomeProfile = options.enemyHomeProfile ?? ENEMY_HOME_PROFILE_V1;
+    if (
+      this.enemyHomeProfile !== ENEMY_HOME_PROFILE_V1
+      && this.enemyHomeProfile !== ENEMY_HOME_PROFILE_NONE
+    ) {
+      throw new RangeError(`Unsupported enemy-home profile: ${this.enemyHomeProfile}`);
+    }
+    this.obeliskEncounterProfile = options.obeliskEncounterProfile
+      ?? OBELISK_ENCOUNTER_PROFILE_V1;
+    if (
+      this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1
+      && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
+    ) {
+      throw new RangeError(
+        `Unsupported obelisk-encounter profile: ${this.obeliskEncounterProfile}`,
+      );
     }
     this.topologyRevision = 1;
     this.breakawayFloorProfile = options.breakawayFloorProfile
@@ -1182,6 +1207,8 @@ export class Simulation {
     this.commandLogBreakawayFloorProfile = this.breakawayFloorProfile;
     this.commandLogEnemyArchetypeProfile = this.enemyArchetypeProfile;
     this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
+    this.commandLogEnemyHomeProfile = this.enemyHomeProfile;
+    this.commandLogObeliskEncounterProfile = this.obeliskEncounterProfile;
     this.commandLogSoundEventCapacity = this.soundEvents.capacity;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1202,6 +1229,7 @@ export class Simulation {
       skippedCapped: 0,
       nextSpawnSequence: 1,
     };
+    this.obeliskEncounters = [];
     this.player = {
       id: 1,
       x: this.map.playerSpawn.x,
@@ -1387,6 +1415,8 @@ export class Simulation {
       this.commandLogHolePursuitProfile = this.holePursuitProfile;
       this.commandLogEnemyArchetypeProfile = this.enemyArchetypeProfile;
       this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
+      this.commandLogEnemyHomeProfile = this.enemyHomeProfile;
+      this.commandLogObeliskEncounterProfile = this.obeliskEncounterProfile;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1498,7 +1528,7 @@ export class Simulation {
           || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
           || this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
         )
-        && Boolean(this.scenario.encounterObelisk),
+        && this.scenario.allRuntimeEntities().some((entity) => entity.kind === "obelisk"),
       nextSpawnTick: this.tickCount + 1,
       spawnCursor: 0,
       attempts: 0,
@@ -1507,12 +1537,110 @@ export class Simulation {
       skippedCapped: 0,
       nextSpawnSequence: 1,
     });
+    this.#resetObeliskEncounters();
     for (const entity of this.scenario.allRuntimeEntities()) {
       if (isDynamicRuntimeEntity(entity)) this.#spawnRuntimeDynamicEntity(entity);
     }
     for (const connector of this.scenario.connectors) {
       this.#spawnAuthoredElevator(connector);
     }
+  }
+
+  #resetObeliskEncounters() {
+    const enabled = this.encounter.enabled;
+    const obelisks = this.scenario.allRuntimeEntities()
+      .filter((entity) => entity.kind === "obelisk")
+      .slice(0, OBELISK.capacity);
+    const selected = this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+      ? obelisks
+      : obelisks.slice(0, 1);
+    this.obeliskEncounters = selected.map((obelisk) => ({
+      enabled,
+      spawnId: Number(obelisk.spawnId),
+      authoringId: String(obelisk.authoringId ?? "marker.obelisk"),
+      layerId: String(obelisk.layerId),
+      layerIndex: this.layerIdToIndex.get(obelisk.layerId) ?? 0,
+      x: Number(obelisk.x),
+      z: Number(obelisk.z),
+      enemyArchetype: this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+        ? String(obelisk.enemyArchetype ?? "wizard")
+        : this.encounterEnemyArchetype,
+      maximumAlive: this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+        ? Number(obelisk.maximumAlive ?? OBELISK.defaultMaximumAlive)
+        : this.encounterMaximumAlive,
+      spawnIntervalTicks: this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+        ? Number(obelisk.spawnIntervalTicks ?? OBELISK.defaultSpawnIntervalTicks)
+        : ENEMY_WIZARD.spawnIntervalTicks,
+      nextSpawnTick: this.tickCount + 1,
+      spawnCursor: 0,
+      attempts: 0,
+      successfulSpawns: 0,
+      skippedBlocked: 0,
+      skippedCapped: 0,
+    }));
+    this.#refreshEncounterAggregate();
+  }
+
+  #reconcileObeliskEncounters() {
+    if (this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1) return;
+    const prior = new Map(this.obeliskEncounters.map((state) => [state.spawnId, state]));
+    const enabled = this.obeliskEncounters.length > 0
+      ? this.encounter.enabled
+      : this.gameplayProfile === GAMEPLAY_PROFILE_OBELISK_DUEL
+        && (
+          this.enemyAiProfile === ENEMY_AI_PROFILE_TACTICAL
+          || this.enemyAiProfile === ENEMY_AI_PROFILE_PERCEPTIVE
+          || this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE
+        );
+    this.obeliskEncounters = this.scenario.allRuntimeEntities()
+      .filter((entity) => entity.kind === "obelisk")
+      .slice(0, OBELISK.capacity)
+      .map((obelisk) => {
+        const existing = prior.get(Number(obelisk.spawnId));
+        return {
+          enabled,
+          spawnId: Number(obelisk.spawnId),
+          authoringId: String(obelisk.authoringId),
+          layerId: String(obelisk.layerId),
+          layerIndex: this.layerIdToIndex.get(obelisk.layerId) ?? 0,
+          x: Number(obelisk.x),
+          z: Number(obelisk.z),
+          enemyArchetype: String(obelisk.enemyArchetype ?? "wizard"),
+          maximumAlive: Number(obelisk.maximumAlive ?? OBELISK.defaultMaximumAlive),
+          spawnIntervalTicks: Number(
+            obelisk.spawnIntervalTicks ?? OBELISK.defaultSpawnIntervalTicks,
+          ),
+          nextSpawnTick: existing?.nextSpawnTick ?? this.tickCount + 1,
+          spawnCursor: existing?.spawnCursor ?? 0,
+          attempts: existing?.attempts ?? 0,
+          successfulSpawns: existing?.successfulSpawns ?? 0,
+          skippedBlocked: existing?.skippedBlocked ?? 0,
+          skippedCapped: existing?.skippedCapped ?? 0,
+        };
+      });
+    this.#refreshEncounterAggregate();
+  }
+
+  #refreshEncounterAggregate() {
+    const states = this.obeliskEncounters.filter((state) => state.enabled);
+    this.encounter.enabled = states.length > 0;
+    this.encounter.nextSpawnTick = states.length > 0
+      ? Math.min(...states.map((state) => state.nextSpawnTick))
+      : this.tickCount + 1;
+    this.encounter.spawnCursor = states[0]?.spawnCursor ?? 0;
+    this.encounter.attempts = states.reduce((sum, state) => sum + state.attempts, 0);
+    this.encounter.successfulSpawns = states.reduce(
+      (sum, state) => sum + state.successfulSpawns,
+      0,
+    );
+    this.encounter.skippedBlocked = states.reduce(
+      (sum, state) => sum + state.skippedBlocked,
+      0,
+    );
+    this.encounter.skippedCapped = states.reduce(
+      (sum, state) => sum + state.skippedCapped,
+      0,
+    );
   }
 
   /** @param {Record<string,any>} connector */
@@ -1925,6 +2053,7 @@ export class Simulation {
       }
     }
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      this.enemies.guardLayerIndex[index] = remap(this.enemies.guardLayerIndex[index]);
       const previousTarget = this.enemies.knownTargetLayer[index];
       if (previousTarget === NAVIGATION_TOPOLOGY.noLayer) continue;
       const targetLayerId = previousLayerIds[previousTarget];
@@ -3186,6 +3315,13 @@ export class Simulation {
     pool.guardReturnStartTick[index] = tick;
     pool.guardUnreachableStartTick[index] = 0;
     this.#clearSearchGoal(index);
+    if (this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1) {
+      this.#clearEnemyNavigationRoute(index, "return-home", tick);
+      pool.clearNavigationEvidence(index);
+      if (pool.layerIndex[index] !== pool.guardLayerIndex[index]) {
+        this.#planHomeRoute(index, tick, reason);
+      }
+    }
     if (!wasReturning) {
       this.#recordPerceptionEvent("return", index, tick, {
         reason,
@@ -3346,7 +3482,9 @@ export class Simulation {
         )
         && pool.knownTargetLayer[index] === pool.layerIndex[index]
         && !this.#isElevatorRoutePhase(pool.topologyPhase[index]);
-      if (differentLayer && !canSearchRememberedLayer) {
+      const returningHome = pool.perceptionState[index] === PERCEPTION_STATE.returning
+        && this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1;
+      if (differentLayer && !canSearchRememberedLayer && !returningHome) {
         pool.currentVisibility[index] = 0;
         pool.lineOfSight[index] = 0;
         pool.visibilitySampleTick[index] = simulationTick;
@@ -3401,7 +3539,10 @@ export class Simulation {
       }
 
       if (state === PERCEPTION_STATE.returning) {
-        const arrived = Math.hypot(
+        const arrived = (
+          this.enemyHomeProfile !== ENEMY_HOME_PROFILE_V1
+          || pool.layerIndex[index] === pool.guardLayerIndex[index]
+        ) && Math.hypot(
           pool.x[index] - pool.guardX[index],
           pool.z[index] - pool.guardZ[index],
         ) <= PERCEPTIVE_WIZARD.guardReturnDistanceMeters;
@@ -3424,16 +3565,29 @@ export class Simulation {
             simulationTick - pool.guardUnreachableStartTick[index]
             >= PERCEPTIVE_WIZARD.travelTimeoutTicks
           ) {
-            const enemyMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
-            pool.guardX[index] = enemyMap.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
-            pool.guardZ[index] = enemyMap.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
-            pool.guardBaseFacingX[index] = pool.facingX[index];
-            pool.guardBaseFacingZ[index] = pool.facingZ[index];
-            this.#recordPerceptionEvent("return", index, simulationTick, {
-              reason: "guard-rebased",
-              guard: { x: pool.guardX[index], z: pool.guardZ[index] },
-            });
-            this.#clearAwareness(index, simulationTick, "guard-rebased");
+            if (this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1) {
+              pool.guardUnreachableStartTick[index] = simulationTick;
+              pool.navigationSlot[index] = -1;
+              this.#recordPerceptionEvent("return", index, simulationTick, {
+                reason: "home-unreachable-retry",
+                guard: {
+                  x: pool.guardX[index],
+                  z: pool.guardZ[index],
+                  layerId: this.layerIds[pool.guardLayerIndex[index]] ?? null,
+                },
+              });
+            } else {
+              const enemyMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
+              pool.guardX[index] = enemyMap.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
+              pool.guardZ[index] = enemyMap.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
+              pool.guardBaseFacingX[index] = pool.facingX[index];
+              pool.guardBaseFacingZ[index] = pool.facingZ[index];
+              this.#recordPerceptionEvent("return", index, simulationTick, {
+                reason: "guard-rebased",
+                guard: { x: pool.guardX[index], z: pool.guardZ[index] },
+              });
+              this.#clearAwareness(index, simulationTick, "guard-rebased");
+            }
           }
         }
       }
@@ -3639,7 +3793,9 @@ export class Simulation {
         )
         && pool.knownTargetLayer[index] === pool.layerIndex[index]
         && !this.#isElevatorRoutePhase(pool.topologyPhase[index]);
-      if (differentLayer && !canSearchRememberedLayer) {
+      const returningHome = pool.perceptionState[index] === PERCEPTION_STATE.returning
+        && this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1;
+      if (differentLayer && !canSearchRememberedLayer && !returningHome) {
         pool.currentVisibility[index] = 0;
         pool.lineOfSight[index] = 0;
         pool.visibilitySampleTick[index] = simulationTick;
@@ -3703,7 +3859,10 @@ export class Simulation {
       }
 
       if (state === PERCEPTION_STATE.returning) {
-        const arrived = Math.hypot(
+        const arrived = (
+          this.enemyHomeProfile !== ENEMY_HOME_PROFILE_V1
+          || pool.layerIndex[index] === pool.guardLayerIndex[index]
+        ) && Math.hypot(
           pool.x[index] - pool.guardX[index],
           pool.z[index] - pool.guardZ[index],
         ) <= PERCEPTIVE_WIZARD.guardReturnDistanceMeters;
@@ -3726,16 +3885,29 @@ export class Simulation {
             simulationTick - pool.guardUnreachableStartTick[index]
             >= PERCEPTIVE_WIZARD.travelTimeoutTicks
           ) {
-            const enemyMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
-            pool.guardX[index] = enemyMap.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
-            pool.guardZ[index] = enemyMap.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
-            pool.guardBaseFacingX[index] = pool.facingX[index];
-            pool.guardBaseFacingZ[index] = pool.facingZ[index];
-            this.#recordPerceptionEvent("return", index, simulationTick, {
-              reason: "guard-rebased",
-              guard: { x: pool.guardX[index], z: pool.guardZ[index] },
-            });
-            this.#clearAwareness(index, simulationTick, "guard-rebased");
+            if (this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1) {
+              pool.guardUnreachableStartTick[index] = simulationTick;
+              pool.navigationSlot[index] = -1;
+              this.#recordPerceptionEvent("return", index, simulationTick, {
+                reason: "home-unreachable-retry",
+                guard: {
+                  x: pool.guardX[index],
+                  z: pool.guardZ[index],
+                  layerId: this.layerIds[pool.guardLayerIndex[index]] ?? null,
+                },
+              });
+            } else {
+              const enemyMap = this.layerMaps[pool.layerIndex[index]] ?? this.map;
+              pool.guardX[index] = enemyMap.get(cx, cz) === 0 ? cx + 0.5 : pool.x[index];
+              pool.guardZ[index] = enemyMap.get(cx, cz) === 0 ? cz + 0.5 : pool.z[index];
+              pool.guardBaseFacingX[index] = pool.facingX[index];
+              pool.guardBaseFacingZ[index] = pool.facingZ[index];
+              this.#recordPerceptionEvent("return", index, simulationTick, {
+                reason: "guard-rebased",
+                guard: { x: pool.guardX[index], z: pool.guardZ[index] },
+              });
+              this.#clearAwareness(index, simulationTick, "guard-rebased");
+            }
           }
         }
       }
@@ -3822,23 +3994,24 @@ export class Simulation {
   /** @param {number} simulationTick */
   #encounterSystem(simulationTick) {
     if (!this.encounter.enabled || simulationTick < this.encounter.nextSpawnTick) return;
-    this.#attemptEnemySpawn(simulationTick);
-    this.encounter.nextSpawnTick += ENEMY_WIZARD.spawnIntervalTicks;
+    for (const state of this.obeliskEncounters) {
+      if (!state.enabled || simulationTick < state.nextSpawnTick) continue;
+      this.#attemptEnemySpawn(simulationTick, state);
+      state.nextSpawnTick += state.spawnIntervalTicks;
+    }
+    this.#refreshEncounterAggregate();
   }
 
-  /** @param {number} simulationTick */
-  #attemptEnemySpawn(simulationTick) {
-    const obelisk = this.scenario.encounterObelisk;
-    if (!obelisk) return;
-    const layerIndex = this.layerIdToIndex.get(obelisk.layerId);
-    if (layerIndex === undefined) return;
-    const slot = this.encounter.spawnCursor;
+  /** @param {number} simulationTick @param {Record<string,any>} state */
+  #attemptEnemySpawn(simulationTick, state) {
+    const layerIndex = state.layerIndex;
+    const slot = state.spawnCursor;
     const offset = SPAWN_OFFSETS[slot];
-    this.encounter.spawnCursor = (slot + 1) % SPAWN_OFFSETS.length;
-    this.encounter.attempts += 1;
-    const x = obelisk.x + offset.x;
-    const z = obelisk.z + offset.z;
-    const archetype = this.encounterEnemyArchetype === "urchin"
+    state.spawnCursor = (slot + 1) % SPAWN_OFFSETS.length;
+    state.attempts += 1;
+    const x = state.x + offset.x;
+    const z = state.z + offset.z;
+    const archetype = state.enemyArchetype === "urchin"
       ? ENEMY_ARCHETYPE.urchin
       : ENEMY_ARCHETYPE.wizard;
     const definition = enemyDefinition(archetype);
@@ -3848,17 +4021,25 @@ export class Simulation {
       slot,
       direction: offset.name,
       position: { x, z },
+      obeliskSpawnId: state.spawnId,
       result: "blocked",
       enemy: null,
     };
-    if (this.enemies.activeCount >= this.encounterMaximumAlive) {
-      this.encounter.skippedCapped += 1;
+    let homeAlive = 0;
+    for (let index = 0; index < this.enemies.activeCount; index += 1) {
+      if (this.enemies.homeObeliskSpawnId[index] === state.spawnId) homeAlive += 1;
+    }
+    const encounterCapped = this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+      ? homeAlive >= state.maximumAlive
+      : this.enemies.activeCount >= state.maximumAlive;
+    if (encounterCapped || this.enemies.activeCount >= this.enemies.capacity) {
+      state.skippedCapped += 1;
       event.result = "capped";
       this.#recordCombatEvent(event);
       return;
     }
     if (!this.#enemySpawnIsSafe(x, z, layerIndex, definition.radius)) {
-      this.encounter.skippedBlocked += 1;
+      state.skippedBlocked += 1;
       this.#recordCombatEvent(event);
       return;
     }
@@ -3866,14 +4047,14 @@ export class Simulation {
     const spawnMap = this.layerMaps[layerIndex];
     const isDefaultArena = spawnMap.width === 24
       && spawnMap.height === 24
-      && obelisk.x === 20.5
-      && obelisk.z === 18.5
+      && state.x === 20.5
+      && state.z === 18.5
       && spawnMap.playerSpawn.x === 3.5
       && spawnMap.playerSpawn.z === 18.5;
     let heading = deterministicGuardHeading(this.seed, spawnSequence);
     if (isDefaultArena) {
-      const outwardX = x - obelisk.x;
-      const outwardZ = z - obelisk.z;
+      const outwardX = x - state.x;
+      const outwardZ = z - state.z;
       const outwardLength = Math.hypot(outwardX, outwardZ);
       if (outwardLength > 1e-9) {
         heading = {
@@ -3897,6 +4078,8 @@ export class Simulation {
       facingZ: heading.z,
       guardX: x,
       guardZ: z,
+      guardLayerIndex: layerIndex,
+      homeObeliskSpawnId: state.spawnId,
       guardBaseFacingX: heading.x,
       guardBaseFacingZ: heading.z,
       perceptionLane: spawnSequence % PERCEPTIVE_WIZARD.perceptionLanes,
@@ -3909,13 +4092,13 @@ export class Simulation {
       verticalMode: VERTICAL_MODE.SUPPORTED,
     });
     if (id === 0) {
-      this.encounter.skippedCapped += 1;
+      state.skippedCapped += 1;
       event.result = "capped";
       this.#recordCombatEvent(event);
       return;
     }
     this.encounter.nextSpawnSequence += 1;
-    this.encounter.successfulSpawns += 1;
+    state.successfulSpawns += 1;
     event.result = "spawned";
     event.enemy = { kind: enemyKindName(archetype), id, spawnSequence };
     this.#recordCombatEvent(event);
@@ -4105,12 +4288,17 @@ export class Simulation {
           );
         }
       } else if (state === PERCEPTION_STATE.returning) {
-        pool.navigationSlot[index] = this.#requestDestinationGoal(
-          layerIndex,
-          layerRevision,
-          Math.floor(pool.guardX[index]),
-          Math.floor(pool.guardZ[index]),
-        );
+        if (
+          this.enemyHomeProfile !== ENEMY_HOME_PROFILE_V1
+          || pool.guardLayerIndex[index] === layerIndex
+        ) {
+          pool.navigationSlot[index] = this.#requestDestinationGoal(
+            layerIndex,
+            layerRevision,
+            Math.floor(pool.guardX[index]),
+            Math.floor(pool.guardZ[index]),
+          );
+        }
       }
     }
     this.destinationFields.update(
@@ -4347,6 +4535,69 @@ export class Simulation {
         ? null
         : this.navigationTopology.portMetadata[pool.knownTargetPort[index]]?.key ?? null,
       evidence: "connector-transition",
+    });
+    return true;
+  }
+
+  /** @param {number} index @param {number} tick @param {string} reason */
+  #planHomeRoute(index, tick, reason) {
+    const pool = this.enemies;
+    if (
+      this.enemyHomeProfile !== ENEMY_HOME_PROFILE_V1
+      || pool.guardLayerIndex[index] === pool.layerIndex[index]
+      || pool.guardLayerIndex[index] >= this.layerIds.length
+    ) return false;
+    const sourceLayerId = this.layerIds[pool.layerIndex[index]];
+    const homeLayerId = this.layerIds[pool.guardLayerIndex[index]];
+    const source = this.navigationTopology.nearestNode(
+      sourceLayerId,
+      Math.floor(pool.x[index]),
+      Math.floor(pool.z[index]),
+    );
+    const target = this.navigationTopology.nearestNode(
+      homeLayerId,
+      Math.floor(pool.guardX[index]),
+      Math.floor(pool.guardZ[index]),
+    );
+    if (!source.ok || !target.ok) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.noAnchor,
+        `home-${!source.ok ? "source" : "target"}-anchor`,
+      );
+      return false;
+    }
+    const route = this.navigationTopology.route(source.portIndex, target.portIndex);
+    if (!route.ok) {
+      this.#failEnemyNavigationRoute(
+        index,
+        tick,
+        NAVIGATION_ROUTE_FAILURE.disconnected,
+        "home-disconnected",
+      );
+      return false;
+    }
+    const ports = route.ports.map((metadata) => this.navigationTopology.portMetadata.findIndex(
+      (candidate) => candidate.key === metadata.key,
+    ));
+    pool.clearNavigationRoute(index);
+    pool.setNavigationRoute(index, ports);
+    pool.topologyPhase[index] = NAVIGATION_ROUTE_PHASE.approachPort;
+    pool.topologyRevision[index] = this.topologyRevision;
+    pool.currentRoutePort[index] = ports[0];
+    pool.routeFailure[index] = NAVIGATION_ROUTE_FAILURE.none;
+    this.#recordNavigationRouteEvent("route-planned", index, tick, {
+      intent: "return-home",
+      reason,
+      source: source.port.key,
+      target: target.port.key,
+      home: {
+        obeliskSpawnId: pool.homeObeliskSpawnId[index] || null,
+        layerId: homeLayerId,
+        x: pool.guardX[index],
+        z: pool.guardZ[index],
+      },
     });
     return true;
   }
@@ -4737,6 +4988,19 @@ export class Simulation {
           reason: NAVIGATION_ROUTE_FAILURE_NAMES[failure],
         });
         this.#elevatorRouteIntent(index, simulationTick);
+        continue;
+      }
+      if (
+        phase === NAVIGATION_ROUTE_PHASE.none
+        && pool.routeLength[index] === 0
+        && pool.perceptionState[index] === PERCEPTION_STATE.returning
+        && this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1
+        && pool.guardLayerIndex[index] !== pool.layerIndex[index]
+      ) {
+        if (
+          simulationTick >= pool.routeReplanTick[index]
+          && pool.supportKind[index] === SUPPORT_KIND.FLOOR
+        ) this.#planHomeRoute(index, simulationTick, "home-replan");
         continue;
       }
       if (
@@ -5322,7 +5586,14 @@ export class Simulation {
       || pool.navigationEvidence[index] === NAVIGATION_EVIDENCE.holeTransition
     )
       && pool.knownTargetLayer[index] === pool.layerIndex[index];
-    if (pool.layerIndex[index] !== this.player.layerIndex && !canSearchRememberedLayer) {
+    const canReturnOnHomeLayer = this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1
+      && pool.perceptionState[index] === PERCEPTION_STATE.returning
+      && pool.layerIndex[index] === pool.guardLayerIndex[index];
+    if (
+      pool.layerIndex[index] !== this.player.layerIndex
+      && !canSearchRememberedLayer
+      && !canReturnOnHomeLayer
+    ) {
       pool.aiState[index] = ENEMY_AI_HOLD;
       this.#clearEnemyMovementGoal(index);
       this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
@@ -5506,6 +5777,15 @@ export class Simulation {
     }
 
     if (state === PERCEPTION_STATE.returning) {
+      if (
+        this.enemyHomeProfile === ENEMY_HOME_PROFILE_V1
+        && pool.layerIndex[index] !== pool.guardLayerIndex[index]
+      ) {
+        pool.aiState[index] = ENEMY_AI_HOLD;
+        this.#clearEnemyMovementGoal(index);
+        this.#applyEnemyDesiredVelocity(index, 0, 0, dt);
+        return;
+      }
       pool.aiState[index] = ENEMY_AI_APPROACH;
       this.#movePerceptiveWithField(
         index,
@@ -9141,7 +9421,11 @@ export class Simulation {
       hit = { kind: hitKind, id: body.id };
     } else {
       cell = { cx: this._gridContact.cx, cz: this._gridContact.cz };
-      const obelisk = this.scenario.obeliskAtCell(cell.cx, cell.cz);
+      const obelisk = this.scenario.obeliskAtCell(
+        cell.cx,
+        cell.cz,
+        this.layerIds[pool.layerIndex[projectileIndex]],
+      );
       hit = obelisk
         ? { kind: "obelisk", id: obelisk.spawnId, cx: cell.cx, cz: cell.cz }
         : { kind: "cell", cx: cell.cx, cz: cell.cz };
@@ -10571,6 +10855,9 @@ export class Simulation {
       ),
       guard: {
         point: { x: pool.guardX[index], z: pool.guardZ[index] },
+        layerId: this.layerIds[pool.guardLayerIndex[index]] ?? null,
+        layerIndex: pool.guardLayerIndex[index],
+        obeliskSpawnId: pool.homeObeliskSpawnId[index] || null,
         baseHeading: {
           x: pool.guardBaseFacingX[index],
           z: pool.guardBaseFacingZ[index],
@@ -10771,16 +11058,20 @@ export class Simulation {
       };
     }
 
-    // Rendering consumes the currently active layer projection.  Encounter
-    // spawning uses scenario.encounterObelisk instead, so a map-wide marker
-    // never leaks into every floor's visual map.
-    const obelisks = this.scenario.entities
+    const obeliskLayerId = this.runtimeViewLayerId
+      ?? this.layerIds[this.player.layerIndex]
+      ?? this.scenario.startLayerId;
+    const obelisks = (this.scenario.compiledLayer(obeliskLayerId)?.entities ?? [])
       .filter((entity) => entity.kind === "obelisk")
       .map((entity) => ({
         kind: "obelisk",
         id: entity.spawnId,
         spawnId: entity.spawnId,
         authoringId: entity.authoringId ?? "marker.obelisk",
+        layerId: entity.layerId,
+        enemyArchetype: entity.enemyArchetype,
+        maximumAlive: entity.maximumAlive,
+        spawnIntervalTicks: entity.spawnIntervalTicks,
         x: entity.x,
         z: entity.z,
         cell: { cx: Math.floor(entity.x), cz: Math.floor(entity.z) },
@@ -10859,6 +11150,13 @@ export class Simulation {
         supportId: this.enemies.supportId[index] || null,
         layerId: this.layerIds[this.enemies.layerIndex[index]] ?? null,
         layerIndex: this.enemies.layerIndex[index],
+        home: {
+          obeliskSpawnId: this.enemies.homeObeliskSpawnId[index] || null,
+          layerId: this.layerIds[this.enemies.guardLayerIndex[index]] ?? null,
+          layerIndex: this.enemies.guardLayerIndex[index],
+          x: this.enemies.guardX[index],
+          z: this.enemies.guardZ[index],
+        },
         transitConnectorId: this.enemies.transitConnectorId[index] || null,
         footprint: { type: "circle", radius: this.enemies.radius[index] },
         latestApertureFit: this.enemies.latestApertureFit[index] === 0
@@ -11148,6 +11446,8 @@ export class Simulation {
       tick: this.tickCount,
       gameplayProfile: this.gameplayProfile,
       enemyAiProfile: this.enemyAiProfile,
+      enemyHomeProfile: this.enemyHomeProfile,
+      obeliskEncounterProfile: this.obeliskEncounterProfile,
       deadBodyProfile: this.deadBodyProfile,
       movementSoundProfile: this.movementSoundProfile,
       projectileHeightCollisionProfile: this.projectileHeightCollisionProfile,
@@ -11201,6 +11501,33 @@ export class Simulation {
         alive: this.enemies.activeCount,
         capacity: this.enemies.capacity,
         maximumAlive: this.encounterMaximumAlive,
+        obelisks: this.obeliskEncounters.map((state) => {
+          let alive = 0;
+          for (let index = 0; index < this.enemies.activeCount; index += 1) {
+            if (this.enemies.homeObeliskSpawnId[index] === state.spawnId) alive += 1;
+          }
+          return {
+            spawnId: state.spawnId,
+            authoringId: state.authoringId,
+            layerId: state.layerId,
+            position: { x: state.x, z: state.z },
+            enemyArchetype: state.enemyArchetype,
+            maximumAlive: state.maximumAlive,
+            spawnIntervalTicks: state.spawnIntervalTicks,
+            nextSpawnTick: state.nextSpawnTick,
+            ticksUntilSpawn: state.enabled
+              ? Math.max(0, state.nextSpawnTick - this.tickCount)
+              : null,
+            spawnCursor: state.spawnCursor,
+            attempts: state.attempts,
+            successfulSpawns: state.successfulSpawns,
+            skippedAttempts: {
+              blocked: state.skippedBlocked,
+              capped: state.skippedCapped,
+            },
+            alive,
+          };
+        }),
       },
       particleProfile: this.particleProfile,
       scenarioVersion: SCENARIO_VERSION,
@@ -11432,7 +11759,11 @@ export class Simulation {
     if (best) return best;
     const cx = Math.floor(x);
     const cz = Math.floor(z);
-    const obelisk = this.scenario.obeliskAtCell(cx, cz);
+    const obelisk = this.scenario.obeliskAtCell(
+      cx,
+      cz,
+      this.layerIds[activeLayerIndex],
+    );
     if (obelisk) return this.#describeObelisk(obelisk);
     return {
       kind: "cell",
@@ -11464,9 +11795,7 @@ export class Simulation {
       return index < 0 ? null : this.#describeEnemy(index);
     }
     if (selection.kind === "obelisk") {
-      const obelisk = this.scenario.entities.find(
-        (entity) => entity.kind === "obelisk" && entity.spawnId === Number(selection.id),
-      );
+      const obelisk = this.scenario.obeliskBySpawnId(Number(selection.id));
       return obelisk ? this.#describeObelisk(obelisk) : null;
     }
     if (selection.kind === "projectile") {
@@ -11632,23 +11961,36 @@ export class Simulation {
     };
   }
 
-  /** @param {{spawnId:number,x:number,z:number}} obelisk */
+  /** @param {{spawnId:number,x:number,z:number,layerId?:string,authoringId?:string,enemyArchetype?:string,maximumAlive?:number,spawnIntervalTicks?:number}} obelisk */
   #describeObelisk(obelisk) {
     const cx = Math.floor(obelisk.x);
     const cz = Math.floor(obelisk.z);
     return {
       kind: "obelisk",
       id: obelisk.spawnId,
-      index: this.scenario.entities.findIndex((entity) => entity === obelisk),
+      index: this.scenario.allRuntimeEntities().findIndex(
+        (entity) => entity.kind === "obelisk" && entity.spawnId === obelisk.spawnId,
+      ),
       spawnId: obelisk.spawnId,
-      position: { x: obelisk.x, y: 0, z: obelisk.z },
+      authoringId: obelisk.authoringId ?? null,
+      layerId: obelisk.layerId ?? null,
+      position: {
+        x: obelisk.x,
+        y: this.layerBaseY[this.layerIdToIndex.get(obelisk.layerId) ?? 0] ?? 0,
+        z: obelisk.z,
+      },
       velocity: null,
       radius: Math.SQRT1_2,
       massKg: null,
       cell: { cx, cz, tile: 1, inBounds: true },
       age: null,
       lifetime: null,
-      flags: { authored: true, solid: true, protected: true, invulnerable: true },
+      encounter: {
+        enemyArchetype: obelisk.enemyArchetype ?? "wizard",
+        maximumAlive: obelisk.maximumAlive ?? this.encounterMaximumAlive,
+        spawnIntervalTicks: obelisk.spawnIntervalTicks ?? ENEMY_WIZARD.spawnIntervalTicks,
+      },
+      flags: { authored: true, solid: true, protected: false, invulnerable: true },
     };
   }
 
@@ -11811,6 +12153,7 @@ export class Simulation {
   }
 
   #refreshPreparedAuthoringState() {
+    if (Array.isArray(this.obeliskEncounters)) this.#reconcileObeliskEncounters();
     this.authoringRevision = stableAuthoringRevision(this.scenario.authoringMap);
     const layerSummaries = this.scenario.layerSummaries();
     const diagnostics = this.scenario.validationDiagnostics.map((entry) => ({ ...entry }));
@@ -12273,6 +12616,8 @@ export class Simulation {
         holePursuitProfile: this.commandLogHolePursuitProfile,
         enemyArchetypeProfile: this.commandLogEnemyArchetypeProfile,
         encounterEnemyArchetype: this.commandLogEncounterEnemyArchetype,
+        enemyHomeProfile: this.commandLogEnemyHomeProfile,
+        obeliskEncounterProfile: this.commandLogObeliskEncounterProfile,
         navigationTopologyCapacities: {
           authoredNodes: NAVIGATION_TOPOLOGY.authoredNodeCapacity,
           authoredLinks: NAVIGATION_TOPOLOGY.authoredLinkCapacity,
@@ -12302,11 +12647,14 @@ export class Simulation {
       recordingSchema >= 15
       && (
         !recording.initialAuthoringMap
-        || Number(recording.initialAuthoringMap.version) !== AUTHORING_MAP_VERSION
+        || (
+          Number(recording.initialAuthoringMap.version) !== AUTHORING_MAP_VERSION
+          && Number(recording.initialAuthoringMap.version) !== NAVIGATION_AUTHORING_MAP_VERSION
+        )
       )
     ) {
       throw new TypeError(
-        `Schema-v${recordingSchema} recording is missing its authoring-map v6 baseline`,
+        `Schema-v${recordingSchema} recording is missing a compatible authoring-map baseline`,
       );
     }
     const scenario = ArenaScenario.fromJSON(
@@ -12340,6 +12688,8 @@ export class Simulation {
     let holePursuitProfile = HOLE_PURSUIT_PROFILE_NONE;
     let enemyArchetypeProfile = ENEMY_ARCHETYPE_PROFILE_NONE;
     let encounterEnemyArchetype = "wizard";
+    let enemyHomeProfile = ENEMY_HOME_PROFILE_NONE;
+    let obeliskEncounterProfile = OBELISK_ENCOUNTER_PROFILE_NONE;
     let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
@@ -12403,6 +12753,8 @@ export class Simulation {
       || recordingSchema === 16
       || recordingSchema === 17
       || recordingSchema === 18
+      || recordingSchema === 19
+      || recordingSchema === 20
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -12543,6 +12895,27 @@ export class Simulation {
           );
         }
       }
+      if (recordingSchema >= 19) {
+        enemyHomeProfile = String(recording.configuration?.enemyHomeProfile ?? "");
+        if (enemyHomeProfile !== ENEMY_HOME_PROFILE_V1) {
+          throw new TypeError(
+            `Schema-v${recordingSchema} recording has invalid or missing enemy-home profile`,
+          );
+        }
+      }
+      if (recordingSchema >= 20) {
+        obeliskEncounterProfile = String(
+          recording.configuration?.obeliskEncounterProfile ?? "",
+        );
+        if (obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1) {
+          throw new TypeError(
+            "Schema-v20 recording has invalid or missing obelisk-encounter profile",
+          );
+        }
+        if (Number(recording.initialAuthoringMap?.version) !== AUTHORING_MAP_VERSION) {
+          throw new TypeError("Schema-v20 recording requires an authoring-map v7 baseline");
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -12580,6 +12953,8 @@ export class Simulation {
       holePursuitProfile,
       enemyArchetypeProfile,
       encounterEnemyArchetype,
+      enemyHomeProfile,
+      obeliskEncounterProfile,
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

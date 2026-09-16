@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 20;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -28,6 +28,10 @@ export const HOLE_PURSUIT_PROFILE_V1 = "observed-hole-pursuit-v1";
 export const HOLE_PURSUIT_PROFILE_NONE = "none";
 export const ENEMY_ARCHETYPE_PROFILE_V1 = "enemy-archetypes-v1";
 export const ENEMY_ARCHETYPE_PROFILE_NONE = "none";
+export const ENEMY_HOME_PROFILE_V1 = "floor-aware-enemy-home-v1";
+export const ENEMY_HOME_PROFILE_NONE = "none";
+export const OBELISK_ENCOUNTER_PROFILE_V1 = "independent-obelisk-encounters-v1";
+export const OBELISK_ENCOUNTER_PROFILE_NONE = "none";
 
 export const ENEMY_ARCHETYPE = Object.freeze({
   wizard: 1,
@@ -169,6 +173,14 @@ export const ENEMY_WIZARD = Object.freeze({
   withdrawInsideMeters: 6,
   shotIntervalTicks: 75,
   spawnIntervalTicks: 1_800,
+});
+
+export const OBELISK = Object.freeze({
+  capacity: 64,
+  defaultMaximumAlive: 4,
+  maximumAliveLimit: 4,
+  defaultSpawnIntervalTicks: 1_800,
+  maximumSpawnIntervalTicks: 216_000,
 });
 
 export const ENEMY_URCHIN = Object.freeze({

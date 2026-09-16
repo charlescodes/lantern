@@ -13,6 +13,7 @@ test("the centralized catalog contains the representative M1A definitions", () =
     "surface.moss",
     "structure.wall",
     "object.rock.medium",
+    "object.obelisk",
     "object.pillar",
     "object.torch",
     "object.table",
@@ -31,6 +32,8 @@ test("the centralized catalog contains the representative M1A definitions", () =
   assert.equal(definitions.find((value) => value.id === "object.table")?.traits.dynamic, true);
   assert.equal(definitions.find((value) => value.id === "object.table")?.traits.collider, "box");
   assert.equal(definitions.find((value) => value.id === "object.table")?.traits.fixedRotation, true);
+  assert.equal(definitions.find((value) => value.id === "object.obelisk")?.traits.enemyArchetype, "urchin");
+  assert.equal(definitions.find((value) => value.id === "object.obelisk")?.traits.maximumAlive, 4);
 });
 
 test("palette groups are derived from catalog categories in stable order", () => {

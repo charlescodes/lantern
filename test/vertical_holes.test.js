@@ -233,11 +233,14 @@ test("encounter obelisk is map-owned and spawns enemies on its own layer", () =>
   let { document, ids } = holeDocument({ layers: 2 });
   document.playerStart = { layerId: ids[0], x: 2.5, z: 2.5 };
   document = paintSurface(document, 5, 5, "surface.stone", ids[1]);
-  // Obelisks deliberately occupy a solid structure cell.
-  const upper = document.layers.find((layer) => layer.id === ids[1]);
-  upper.structure.legend.push("structure.wall");
-  upper.structure.cells[5 * upper.width + 5] = upper.structure.legend.length - 1;
-  upper.markers.obelisk = { x: 5.5, z: 5.5 };
+  document = placeInstance(document, "object.obelisk", 5.5, 5.5, {
+    layerId: ids[1],
+    properties: {
+      enemyArchetype: "wizard",
+      maximumAlive: 4,
+      spawnIntervalTicks: ENEMY_WIZARD.spawnIntervalTicks,
+    },
+  }).document;
   const simulation = new Simulation({
     scenario: new ArenaScenario(document),
     gameplayProfile: GAMEPLAY_PROFILE_OBELISK_DUEL,

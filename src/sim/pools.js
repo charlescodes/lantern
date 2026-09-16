@@ -205,6 +205,8 @@ export class EnemyPool {
     this.facingZ = new Float32Array(capacity);
     this.guardX = new Float32Array(capacity);
     this.guardZ = new Float32Array(capacity);
+    this.guardLayerIndex = new Uint16Array(capacity);
+    this.homeObeliskSpawnId = new Uint32Array(capacity);
     this.guardBaseFacingX = new Float32Array(capacity);
     this.guardBaseFacingZ = new Float32Array(capacity);
     this.guardSweepPhase = new Uint16Array(capacity);
@@ -292,7 +294,7 @@ export class EnemyPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
+  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardLayerIndex?:number,homeObeliskSpawnId?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -370,6 +372,8 @@ export class EnemyPool {
     this.facingZ[index] = facingLength > 1e-9 ? (value.facingZ ?? 0) / facingLength : 0;
     this.guardX[index] = value.guardX ?? value.x;
     this.guardZ[index] = value.guardZ ?? value.z;
+    this.guardLayerIndex[index] = value.guardLayerIndex ?? value.layerIndex ?? 0;
+    this.homeObeliskSpawnId[index] = value.homeObeliskSpawnId ?? 0;
     const guardFacingLength = Math.hypot(
       value.guardBaseFacingX ?? this.facingX[index],
       value.guardBaseFacingZ ?? this.facingZ[index],
@@ -506,6 +510,8 @@ export class EnemyPool {
         this.facingZ,
         this.guardX,
         this.guardZ,
+        this.guardLayerIndex,
+        this.homeObeliskSpawnId,
         this.guardBaseFacingX,
         this.guardBaseFacingZ,
         this.guardSweepPhase,

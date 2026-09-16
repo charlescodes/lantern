@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createLayer,
+  placeInstance,
   placeNavigationLink,
   placeNavigationNode,
 } from "../src/authoring/authoring_commands.js";
@@ -70,14 +71,13 @@ function patrolDocument() {
 
 function replayPatrolDocument() {
   let document = new ArenaScenario(borderedMap()).toAuthoringJSON();
-  const ground = document.layers[0];
-  let wallIndex = ground.structure.legend.indexOf("structure.wall");
-  if (wallIndex < 0) {
-    ground.structure.legend.push("structure.wall");
-    wallIndex = ground.structure.legend.length - 1;
-  }
-  ground.structure.cells[10 * ground.width + 25] = wallIndex;
-  ground.markers.obelisk = { x: 25.5, z: 10.5 };
+  document = placeInstance(document, "object.obelisk", 25.5, 10.5, {
+    properties: {
+      enemyArchetype: "wizard",
+      maximumAlive: 4,
+      spawnIntervalTicks: ENEMY_WIZARD.spawnIntervalTicks,
+    },
+  }).document;
   const first = placeNavigationNode(document, 25, 9, { patrol: true });
   document = first.document;
   const second = placeNavigationNode(document, 20, 9, { patrol: true });

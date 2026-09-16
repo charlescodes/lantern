@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v18 and authoring-map v6. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v20 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -25,8 +25,9 @@ These documents preserve future intent and candidate experiments. They are mutab
 ## Current contracts
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
-- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v6, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, and the M1C.1 topology data envelope.
+- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v7, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, the M1C.1 topology data envelope, and editable obelisk instances.
 - [M1C authored navigation topology](./plans/m1c-authored-navigation-topology.md) — implemented v6 topology data, editor tooling, route diagnostics, patrol, and cross-floor pursuit under the schema-v15 compatibility boundary.
+- [Editable, floor-aware obelisks](./plans/editable-floor-aware-obelisks.md) — implemented independent authored generators and reliable per-enemy cross-floor homes under schemas v19-v20.
 - [M1B.1–M1B.4 vertical bodies, elevator, holes, jumping, and breakaways](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, grounded plates, live connector authoring, and breakaway floors.
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.

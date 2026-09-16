@@ -15,9 +15,20 @@ import {
 import { FIREBALL_SPELL_CODE, FIREBALL_SPELL_ID } from "../src/spells/fireball_definition.js";
 import { ProjectilePool, EnemyPool } from "../src/sim/pools.js";
 import {
+  ArenaScenario,
   createNavigationDebugArenaScenario,
 } from "../src/sim/scenario.js";
 import { Simulation } from "../src/sim/simulation.js";
+
+function urchinScenario() {
+  const document = createNavigationDebugArenaScenario().toAuthoringJSON();
+  const obelisk = document.layers
+    .flatMap((layer) => layer.instances)
+    .find((instance) => instance.definitionId === "object.obelisk");
+  assert.ok(obelisk);
+  obelisk.properties.enemyArchetype = "urchin";
+  return new ArenaScenario(document);
+}
 
 test("enemy and projectile pools preserve stable archetype identity through swap removal", () => {
   const enemies = new EnemyPool(3);
@@ -54,7 +65,7 @@ test("enemy and projectile pools preserve stable archetype identity through swap
 
 test("navigation encounters spawn independently tuned half-height Urchins", () => {
   const simulation = new Simulation({
-    scenario: createNavigationDebugArenaScenario(),
+    scenario: urchinScenario(),
     encounterEnemyArchetype: "urchin",
     particleBurstCount: 0,
   });
@@ -149,6 +160,7 @@ test("thrown stones disappear silently on walls and at their bounded lifetime", 
 
 test("Urchins use the shared AI loop to launch their own stone attack", () => {
   const simulation = new Simulation({
+    scenario: urchinScenario(),
     encounterEnemyArchetype: "urchin",
     enemyAiProfile: ENEMY_AI_PROFILE_BASIC,
     particleBurstCount: 0,
@@ -170,7 +182,7 @@ test("Urchins use the shared AI loop to launch their own stone attack", () => {
 
 test("two direct Fireballs defeat a half-health Urchin and preserve corpse identity", () => {
   const simulation = new Simulation({
-    scenario: createNavigationDebugArenaScenario(),
+    scenario: urchinScenario(),
     encounterEnemyArchetype: "urchin",
     particleBurstCount: 0,
   });
@@ -210,7 +222,7 @@ test("two direct Fireballs defeat a half-health Urchin and preserve corpse ident
 
 test("current schema records the encounter archetype and older schemas remain wizard-only", () => {
   const simulation = new Simulation({
-    scenario: createNavigationDebugArenaScenario(),
+    scenario: urchinScenario(),
     encounterEnemyArchetype: "urchin",
     particleBurstCount: 0,
   });

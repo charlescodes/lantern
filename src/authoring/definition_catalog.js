@@ -1,6 +1,6 @@
 // @ts-check
 
-import { ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
+import { OBELISK, ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
 
 const CATEGORY_LABELS = Object.freeze({
   surface: "Surfaces",
@@ -152,6 +152,26 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       blocksSight: false,
     },
   })),
+  freezeDefinition({
+    id: "object.obelisk",
+    label: "Enemy obelisk",
+    category: "object",
+    categoryLabel: CATEGORY_LABELS.object,
+    placementMode: "stamp",
+    placementTarget: "instance",
+    footprint: { cells: [{ x: 0, z: 0 }] },
+    debug: { fill: "#553477", alternateFill: "#6e4395", stroke: "#d9b5ff", glyph: "O" },
+    renderAsset: null,
+    traits: {
+      runtimeKind: "obelisk",
+      snap: "cell-center",
+      blocksMovement: true,
+      blocksSight: true,
+      enemyArchetype: "urchin",
+      maximumAlive: OBELISK.defaultMaximumAlive,
+      spawnIntervalTicks: OBELISK.defaultSpawnIntervalTicks,
+    },
+  }),
   freezeDefinition({
     id: "object.pillar",
     label: "Pillar",

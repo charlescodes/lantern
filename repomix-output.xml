@@ -83,6 +83,7 @@ docs/
     proximity-walking-movement-sound.md
     scorch-mark-pool.md
   plans/
+    editable-floor-aware-obelisks.md
     m1c-authored-navigation-topology.md
     README.md
   soft-specs/
@@ -244,6 +245,7 @@ test/
   navigation_soak.test.js
   navigation_topology_view.test.js
   navigation_topology.test.js
+  obelisk_authoring_home.test.js
   particle_collision.test.js
   particle_lifecycle.test.js
   perception_replay.test.js
@@ -291,6 +293,62 @@ styles.css
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="docs/plans/editable-floor-aware-obelisks.md">
+# Editable, Floor-Aware Obelisks and Reliable Enemy Homes
+
+> **Status:** implemented 2026-09-12 · application `0.9.3` · recording schema
+> v20 · authoring-map v7
+
+This work replaces the original singleton obelisk marker with a bounded,
+editable instance model while preserving older replay behavior. Simulation
+state remains authoritative; renderers consume floor-local snapshot data.
+
+## Delivered checkpoints
+
+1. **Floor ownership:** obelisk rendering, queries, projectile impact identity,
+   and encounter placement resolve against the relevant runtime layer rather
+   than the editor's active layer.
+2. **Reliable homes (schema v19):** each spawned enemy captures its home
+   obelisk stable ID, layer, and guard point. A returning enemy uses authored
+   topology and autonomous elevators to reach that layer before local movement
+   resumes. An unreachable home remains stable and retries; it is not silently
+   rebased onto the wrong floor.
+3. **Independent authoring (schema v20 / authoring-map v7):** `object.obelisk`
+   appears in the ordinary object palette and supports stable placement, move,
+   property editing, deletion, undo/redo, save/load, and replay. Maps may hold
+   up to 64 obelisks. Each selects `wizard` or `urchin` (default `urchin`), a
+   living cap from 1 through 4 (default 4), and a bounded spawn interval
+   (default 1,800 ticks / 30 seconds).
+
+The enemy pool remains globally bounded at 64. Each obelisk may keep at most 4
+of its own enemies alive at once and may replace them after death. Spawn
+attempts, direction cursors, skips, and counts remain deterministic and bounded.
+Moving or deleting an obelisk does not delete existing enemies or rewrite their
+captured home; it only changes future spawning.
+
+Authoring-map v6 migrates its single marker into an `object.obelisk` instance,
+removing the replaced wall cell while retaining equivalent collision. Schemas
+v2-v18 keep legacy home/encounter profiles; schema v19 enables floor-aware
+homes with the legacy singleton encounter; schema v20 enables independent
+authored encounters.
+
+Automated acceptance covers migration, palette exposure, independent mixed
+archetype spawning and living caps, move/delete preservation, floor-local
+presentation, complete elevator return-home traversal, and replay-profile
+selection. Real-browser Canvas2D and Three.js readability remains a manual
+acceptance gate.
+</file>
+
+<file path="test/obelisk_authoring_home.test.js">
+function borderedMap(width = 18, height = 14)
+⋮----
+function addObelisk(document, layerId, x, z, properties)
+⋮----
+function runUntil(simulation, predicate, maximumTicks = 4_000)
+⋮----
+function homeRouteScenario()
+</file>
 
 <file path="docs/archive/handoffs/2026-08-30-post-m1b4-chatgpt-handoff.md">
 # Archived post-M1B.4 ChatGPT handoff
@@ -2912,6 +2970,11 @@ ordering. Historical milestone documents remain under `docs/milestones/`.
 - [M1C authored navigation topology](./m1c-authored-navigation-topology.md) —
   five bounded slices from persisted topology through deterministic patrol and
   observed, non-clairvoyant elevator pursuit.
+
+## Implemented
+
+- [Editable, floor-aware obelisks and reliable enemy homes](./editable-floor-aware-obelisks.md)
+  — delivered across schema v19, schema v20, and authoring-map v7.
 </file>
 
 <file path="docs/soft-specs/lantern_combat_physical_interaction_soft_spec.md">
@@ -5183,59 +5246,6 @@ coverage/
 .DS_Store
 </file>
 
-<file path="AGENTS.md">
-# Lantern agent guide
-
-Lantern is a browser-first, fixed-step JavaScript action-simulation kernel. Keep
-the source of gameplay truth in the simulation; renderers and browser UI observe
-it but do not decide it.
-
-## Start safely
-
-1. Run `git status --short` before changing anything. Preserve unrelated work.
-2. Read the applicable current contract before changing a system.
-3. For implementation work, run the focused tests and `npm run check` before
-   handoff. Browser/GPU readability still needs a real-browser manual pass.
-4. Stage exact paths, inspect `git diff --cached`, and never conflate app,
-   recording-schema, authoring-map, and historical-profile versions.
-
-## Authority order
-
-For shipped behavior, use this order when artifacts disagree:
-
-1. Current source, tests, and current format contracts.
-2. Current implementation plans and the [roadmap](docs/roadmap.md).
-3. Soft specifications and product direction.
-4. Historical milestone documents and archived handoffs.
-
-The [documentation guide](docs/README.md) explains ownership of each document.
-Historical contracts describe their release boundary; do not silently rewrite
-their frozen behavior to describe a newer runtime.
-
-## Engineering invariants
-
-- Keep simulation authority independent from Canvas, Three.js, DOM, and frame
-  rate. Send mutations through the fixed-tick command boundary.
-- Preserve bounded pools, typed-array/SoA patterns in hot loops, stable IDs,
-  deterministic tie breaks, replay branches, and detached JSON-safe probes.
-- Keep authored map state separate from disposable runtime movement and editor
-  active-layer state separate from every body's runtime layer.
-- Lantern is X/Z gameplay with limited per-body world Y. Floors and elevators
-  are supports, not passenger ownership; do not introduce general 3D rigid-body
-  physics, global floor swaps, or an unrelated ECS rewrite.
-- Treat new diagnostics and automation as bounded, replay-aware product tools,
-  not unbounded per-tick logs.
-
-## Useful references
-
-- [Product vision](docs/product-vision.md)
-- [Current roadmap](docs/roadmap.md)
-- [Architecture guide](docs/architecture-guide.md)
-- [Probe contract](docs/probe-contract.md)
-- [Verification guide](docs/verification.md)
-- [Platform contract](docs/platform.md)
-</file>
-
 <file path="docs/bugs/2026-09-11-playtest-backlog.md">
 # Playtest Defect Backlog — 2026-09-11
 
@@ -7107,6 +7117,67 @@ presentation.webRenderer.render = () =>
 
 </file>
 
+<file path="AGENTS.md">
+# Lantern agent guide
+
+Lantern is a browser-first, fixed-step JavaScript action-simulation kernel. Keep
+the source of gameplay truth in the simulation; renderers and browser UI observe
+it but do not decide it.
+
+## Start safely
+
+1. Run `git status --short` before changing anything. Preserve unrelated work.
+2. Read the applicable current contract before changing a system.
+3. For implementation work, run the focused tests and `npm run check` before
+   handoff. Browser/GPU readability still needs a real-browser manual pass.
+4. Stage exact paths, inspect `git diff --cached`, and never conflate app,
+   recording-schema, authoring-map, and historical-profile versions.
+
+## Repository map
+
+`repomix-output.xml` is a user-maintained compressed structural map of the
+repository. When a task needs an overview of the project hierarchy, modules, or
+candidate files, inspect it first; then verify exact behavior and authority in
+the live source, tests, and contracts. Do not regenerate or edit it unless the
+user explicitly asks.
+
+## Authority order
+
+For shipped behavior, use this order when artifacts disagree:
+
+1. Current source, tests, and current format contracts.
+2. Current implementation plans and the [roadmap](docs/roadmap.md).
+3. Soft specifications and product direction.
+4. Historical milestone documents and archived handoffs.
+
+The [documentation guide](docs/README.md) explains ownership of each document.
+Historical contracts describe their release boundary; do not silently rewrite
+their frozen behavior to describe a newer runtime.
+
+## Engineering invariants
+
+- Keep simulation authority independent from Canvas, Three.js, DOM, and frame
+  rate. Send mutations through the fixed-tick command boundary.
+- Preserve bounded pools, typed-array/SoA patterns in hot loops, stable IDs,
+  deterministic tie breaks, replay branches, and detached JSON-safe probes.
+- Keep authored map state separate from disposable runtime movement and editor
+  active-layer state separate from every body's runtime layer.
+- Lantern is X/Z gameplay with limited per-body world Y. Floors and elevators
+  are supports, not passenger ownership; do not introduce general 3D rigid-body
+  physics, global floor swaps, or an unrelated ECS rewrite.
+- Treat new diagnostics and automation as bounded, replay-aware product tools,
+  not unbounded per-tick logs.
+
+## Useful references
+
+- [Product vision](docs/product-vision.md)
+- [Current roadmap](docs/roadmap.md)
+- [Architecture guide](docs/architecture-guide.md)
+- [Probe contract](docs/probe-contract.md)
+- [Verification guide](docs/verification.md)
+- [Platform contract](docs/platform.md)
+</file>
+
 <file path="docs/soft-specs/candidate-roadmap.md">
 # Candidate Feature Roadmap
 
@@ -8102,6 +8173,8 @@ const sampleContact = () =>
 </file>
 
 <file path="test/enemy_urchin.test.js">
+function urchinScenario()
+⋮----
 const spawnStone = (value) => simulation.projectiles.spawn(
 ⋮----
 const hit = () => simulation.projectiles.spawn(
@@ -8177,8 +8250,6 @@ function simulationFor(document)
 ⋮----
 // Replace the player start so the top layer can compile normally, then add
 // a table centered above its hole. Its 2x1 authored footprint cannot fit.
-⋮----
-// Obelisks deliberately occupy a solid structure cell.
 </file>
 
 <file path="docs/notes/proximity-walking-movement-sound.md">
@@ -9824,7 +9895,7 @@ Evidence in the current tree:
 
 - `src/sim`, `src/spells`, and `src/core` do not import Three.js, DOM, Canvas, or presentation modules.
 - Three.js imports are confined to presentation adapters such as [`three_presentation.js`](../src/presentation/three_presentation.js), [`instanced_pool.js`](../src/presentation/instanced_pool.js), and [`true_sight_transport.js`](../src/presentation/true_sight_transport.js).
-- Authoritative actors and projectiles use X/Z positions for horizontal collision. Current schema-v18 projectiles also carry a fixed world-Y flight band for height-aware dynamic-prop and elevator contacts; actors remain layer-local targets. The 3D camera projects pointer commands back onto the `Y=0` ground plane.
+- Authoritative actors and projectiles use X/Z positions for horizontal collision. Schema-v18-and-newer projectiles also carry a fixed world-Y flight band for height-aware dynamic-prop and elevator contacts; actors remain layer-local targets. The 3D camera projects pointer commands back onto the `Y=0` ground plane.
 - Both renderers receive the same simulation snapshot. Three.js does not own an alternate physics body, AI state, health value, or entity ID.
 - AI visual checks use grid geometry and authoritative facing, not player-facing TrueSight or rendered visibility.
 
@@ -10300,7 +10371,7 @@ The prototype is now large enough that continuing to add vertical features throu
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v18, authoring-map v6. M1C.1–M1C.5 are
+> `0.9.3`, recording schema v20, authoring-map v7. M1C.1–M1C.5 are
 > implemented; the separate M1C manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 
@@ -10337,6 +10408,10 @@ multi-stop elevators, cross-floor clairvoyance, or a rewrite of current AI.
 
 ## After M1C
 
+- **Editable, floor-aware obelisks:** complete. Obelisks are ordinary authored
+  instances on explicit layers; schema v19 gives every enemy a stable home and
+  cross-floor return route, while schema v20 enables independent obelisks with
+  authored archetypes, living caps, and spawn cadence.
 - **M1D — Temple of Ix:** make ordinary editable authored maps and a Room Lab,
   then hand-build a complete temple. It should teach and test the established
   traversal systems and eventually offer three alternative exit goals. These
@@ -10362,6 +10437,8 @@ deferred: it is not a prerequisite for M1D's authored-map work.
 
 <file path="src/authoring/authoring_map.js">
 // @ts-check
+⋮----
+/** M1C maps with authored navigation topology and legacy obelisk markers. */
 ⋮----
 /** M1B.4 autonomous-elevator maps without authored navigation topology. */
 ⋮----
@@ -10431,10 +10508,6 @@ const link = isRecord(linkValue) ? /** @type {Record<string,any>} */ (linkValue)
 // independent (including adjacent cells), but cannot silently overlap a
 // connector endpoint at the same layer/cell.
 ⋮----
-// The existing obelisk encounter has one map-owned anchor.  It may live on
-// any authored layer, but multiple markers would make deterministic spawn
-// ownership ambiguous.
-⋮----
 /** @param {unknown} input */
 export function authoringMapDiagnostics(input)
 ⋮----
@@ -10479,6 +10552,13 @@ const source = /** @type {Record<string,any>} */ (input);
 export function migrateAuthoringMapV5(input)
 ⋮----
 const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Converts the singleton layer marker into an ordinary editable obelisk instance. @param {unknown} input */
+export function migrateAuthoringMapV6(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+const layer = /** @type {Record<string,any>} */ (layerValue);
 ⋮----
 /**
  * Explicitly migrates map-v1 and scenario-v2/v3 data into the authoring format.
@@ -11963,16 +12043,15 @@ authoringIdForSpawnId(spawnId)
 /** @param {number} x @param {number} z */
 instanceAt(x, z)
 ⋮----
-/** @param {number} cx @param {number} cz */
-obeliskAtCell(cx, cz)
+/** @param {number} cx @param {number} cz @param {string} [layerId] */
+obeliskAtCell(cx, cz, layerId = this.activeLayer.id)
+⋮----
+/** @param {number} spawnId */
+obeliskBySpawnId(spawnId)
 ⋮----
 get obelisk()
 ⋮----
-/**
-   * The arena encounter is map-owned, not a property of whichever layer the
-   * editor or camera is currently viewing.  Authoring validation keeps this
-   * singleton marker unambiguous.
-   */
+/** Legacy singleton encounter projection. */
 get encounterObelisk()
 ⋮----
 /** @param {string | Record<string, unknown>} input */
@@ -13259,7 +13338,7 @@ Load/import parses into a candidate, detects and migrates its supported version,
 
 ## Legacy loading and recordings
 
-Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, current markers, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. Saving after any migration emits authoring-map v6 only.
+Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. V6 migrates its singleton obelisk marker to an ordinary, stable `object.obelisk` instance on the marker's owning layer. Saving after any migration emits authoring-map v7 only.
 
 Snapshot/recording schema is v15. Recordings keep their compiled scenario-v3 field for frozen compatibility and add `initialAuthoringMap` for current authoring data. Schema v15 pins the inert authored-topology profile and capacities; schema v14 adds the breakaway-floor profile; schema v13 additionally records the elevator-projectile collision profile; schema v12 retains its committed jump edge and frozen projectile behavior. Replay uses `initialAuthoringMap` for schema v12 and later, preserving older schema fixtures and branches.
 
@@ -14464,7 +14543,7 @@ export class EnemyPool
 // A witnessed floor aperture is identified by its stable layer plus its
 // authored cell. Dense runtime-hole indices are intentionally not kept.
 ⋮----
-/** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
+/** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardLayerIndex?:number,homeObeliskSpawnId?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
 ⋮----
 /** @param {number} index */
 ⋮----
@@ -14686,13 +14765,13 @@ const position = /** @type {{x:number,z:number}} */ (entity.position);
 <file path="docs/platform.md">
 # Platform Contract
 
-> **Current through:** Lantern 0.9.3, authoring-map v6, and snapshot/recording schema v15
+> **Current through:** Lantern 0.9.3, authoring-map v7, and snapshot/recording schema v20
 
 The engine is browser-first and built with standard JavaScript ES modules, HTML, and CSS. It targets modern desktop browsers, while Node.js is used only for development tooling, dependency management, testing, and the local development server. The core simulation should remain independent of the browser, renderer, and input devices so it can later run in a Web Worker, Node.js server, Electron application, or another host with minimal changes. The prototype runs entirely on the client, but the code preserves a clear boundary between commands, simulation state, and presentation so authoritative multiplayer can be added later without redesigning the engine.
 
 Simulation truth remains a fixed 60 Hz world expressed in meters, seconds, and kilograms. X/Z collision remains deliberately 2D, while eligible bodies also own bounded authoritative world Y, vertical velocity, support, and layer state for floors, holes, jumps, and elevators. Commands are consumed only at fixed-tick boundaries. The grid, actor collision, projectile collision, line-of-effect, health, enemy decisions, encounter cadence, authoring compilation, vertical supports, and replay state belong to `src/sim`; Canvas2D, Three.js, DOM panels, emissive response, lights, and TrueSight concealment consume snapshots without simulation authority.
 
-The current serialization boundary is snapshot/recording schema v18, authoring-map v6, scenario schema v3, map schema v1, Fireball definition format v1, and performance-report schema v4. Schema v18 records `projectile-height-collision-v1`: projectiles retain authoritative caster-relative world Y, pass over low tables and small/medium rocks, and collide with tall props or elevator volumes only when their swept vertical intervals overlap; actor and corpse contacts remain layer-local. Schemas v2-v17 force this profile off and preserve their historical two-dimensional projectile contacts. Schema v17 records `observed-hole-pursuit-v1`: an enemy with direct visual evidence of a player entering a live floor aperture may route locally into that opening, fall through the ordinary vertical solver, and search from its own landing point. Schemas v2-v16 force this profile off. Schema v16 records `enemy-archetypes-v1`; schema v15 records `authored-navigation-topology-v1` plus bounded topology capacities, authored patrol, and observed elevator pursuit; schemas v2-v14 select topology profile `none`. Authoring-map v6 adds stable navigation nodes, undirected same-floor links, and connector endpoint references while preserving exact migrated v5 connector coordinates. Schema v14 records `breakaway-floor-v1`, a latched 18-tick floor-to-hole profile that reuses ordinary aperture/falling rules; schemas v2-v13 force it off. Schema v13 records `elevator-projectile-collision-v1`, so Fireballs impact a stopped elevator deck or the lower-floor shaft/piston while preserving schema-v12's pre-elevator behavior. Schema v12 records the committed player-jump edge and a current authoring-map projection while preserving v2-v11 behavior. Authoring-map v6 retains stable named layers, per-layer terrain/instances, player-start ownership, holes, breakaway surfaces, and map-level autonomous two-stop connectors; runtime movement never writes those authored starts back. Schema-v11 recordings name `obelisk-duel-v1` gameplay, `investigative-wizard-v1` enemy AI, `enemy-dead-body-v1`, and `proximity-walk-footsteps-v1`, with replay-pinned enemy, dead-body, and sound-event capacities. Schema-v10 keeps the same AI and body lifecycle but forces movement-sound profile `none`; schema-v9 keeps investigative AI and forces dead-body and movement-sound profiles `none`; schema-v8 retains the exact `perceptive-wizard-v1` behavior and scheduling. Schema-v7 retains the exact omniscient tactical wizard profile and historical four-entry enemy pool. Schema-v6 retains `basic-wizard-v1`; schema v5 keeps the versioned Fireball registry with frozen pre-combat behavior; schema-v2 through v4 keep their historical Fireball, particle, and collision profiles. Legacy scenario v2 and map v1 imports have no obelisk and therefore no encounter.
+The current serialization boundary is snapshot/recording schema v20, authoring-map v7, scenario schema v3, map schema v1, Fireball definition format v1, and performance-report schema v4. Schema v20 records `independent-obelisk-encounters-v1`: every authored obelisk owns a bounded schedule, enemy archetype, living cap up to 4, and spawn cadence while all encounters share the 64-enemy global pool. New authored obelisks default to urchins with a living cap of 4. Authoring-map v7 represents obelisks as ordinary stable, floor-owned instances and migrates the former v6 singleton marker without changing historical recordings. Schema v19 records `floor-aware-enemy-home-v1`: spawned enemies retain the stable obelisk identity, floor, and position they were assigned at birth, return through authored cross-floor routes, and wait and retry when home is unreachable. Schema v18 records `projectile-height-collision-v1`: projectiles retain authoritative caster-relative world Y, pass over low tables and small/medium rocks, and collide with tall props or elevator volumes only when their swept vertical intervals overlap; actor and corpse contacts remain layer-local. Schemas v2-v17 force this profile off and preserve their historical two-dimensional projectile contacts. Schema v17 records `observed-hole-pursuit-v1`: an enemy with direct visual evidence of a player entering a live floor aperture may route locally into that opening, fall through the ordinary vertical solver, and search from its own landing point. Schemas v2-v16 force this profile off. Schema v16 records `enemy-archetypes-v1`; schema v15 records `authored-navigation-topology-v1` plus bounded topology capacities, authored patrol, and observed elevator pursuit; schemas v2-v14 select topology profile `none`. Authoring-map v6 added stable navigation nodes, undirected same-floor links, and connector endpoint references while preserving exact migrated v5 connector coordinates. Schema v14 records `breakaway-floor-v1`, a latched 18-tick floor-to-hole profile that reuses ordinary aperture/falling rules; schemas v2-v13 force it off. Schema v13 records `elevator-projectile-collision-v1`, so Fireballs impact a stopped elevator deck or the lower-floor shaft/piston while preserving schema-v12's pre-elevator behavior. Schema v12 records the committed player-jump edge and a current authoring-map projection while preserving v2-v11 behavior. Authoring-map v7 retains stable named layers, per-layer terrain/instances, player-start ownership, holes, breakaway surfaces, map-level autonomous two-stop connectors, and navigation topology; runtime movement never writes authored starts or obelisks back. Schema-v11 recordings name `obelisk-duel-v1` gameplay, `investigative-wizard-v1` enemy AI, `enemy-dead-body-v1`, and `proximity-walk-footsteps-v1`, with replay-pinned enemy, dead-body, and sound-event capacities. Schema-v10 keeps the same AI and body lifecycle but forces movement-sound profile `none`; schema-v9 keeps investigative AI and forces dead-body and movement-sound profiles `none`; schema-v8 retains the exact `perceptive-wizard-v1` behavior and scheduling. Schema-v7 retains the exact omniscient tactical wizard profile and historical four-entry enemy pool. Schema-v6 retains `basic-wizard-v1`; schema v5 keeps the versioned Fireball registry with frozen pre-combat behavior; schema-v2 through v4 keep their historical Fireball, particle, and collision profiles. Legacy scenario v2 and map v1 imports have no obelisk and therefore no encounter.
 
 The default scenario owns exactly one invulnerable obelisk. Its solid cell is ordinary simulation occlusion for actors, projectiles, blast rays, AI line-of-sight, and TrueSight, while renderers replace that wall cell with procedural obelisk geometry. Live enemy wizards occupy a 64-entry typed-array pool, while the authored encounter still attempts one spawn on tick 1, repeats every 1,800 ticks, and caps at four alive. Enemy death transfers into a 16-entry dynamic SoA body pool and then a 100-entry inert FIFO ring; supported replay-pinned ceilings are 64 and 1,000. Player and enemy casts resolve through the same versioned Fireball registry, but each caster owns independent cooldown and successful-cast sequence state. The default projectile pool is 256, the one-tick sound queue is 257, and the particle pool remains 4,096, all with bounded drop behavior. Sound capacity is an independently replay-pinned positive integer.
 
@@ -15705,6 +15784,8 @@ export class Simulation
    * holePursuitProfile?:string,
    * enemyArchetypeProfile?:string,
    * encounterEnemyArchetype?:string,
+   * enemyHomeProfile?:string,
+   * obeliskEncounterProfile?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -15895,7 +15976,7 @@ const intersects = (layerIndex, x, z, radius) =>
 ⋮----
 /** @param {number} simulationTick */
 ⋮----
-/** @param {number} simulationTick */
+/** @param {number} simulationTick @param {Record<string,any>} state */
 ⋮----
 /** @param {number} x @param {number} z @param {number} layerIndex @param {number} radius */
 ⋮----
@@ -15922,6 +16003,8 @@ const intersects = (layerIndex, x, z, radius) =>
 /** @param {number} phase */
 ⋮----
 /** @param {number} index @param {number} tick */
+⋮----
+/** @param {number} index @param {number} tick @param {string} reason */
 ⋮----
 /** @param {number} index @param {number} tick @param {string} reason */
 ⋮----
@@ -16315,10 +16398,6 @@ enemyDiagnostics(id)
 ⋮----
 snapshot()
 ⋮----
-// Rendering consumes the currently active layer projection.  Encounter
-// spawning uses scenario.encounterObelisk instead, so a map-wide marker
-// never leaks into every floor's visual map.
-⋮----
 const layerPresentationMap = (layerId, layerIndex) =>
 ⋮----
 /** @param {number} x @param {number} z */
@@ -16329,7 +16408,7 @@ resolveSelection(selection)
 ⋮----
 /** @param {number} index */
 ⋮----
-/** @param {{spawnId:number,x:number,z:number}} obelisk */
+/** @param {{spawnId:number,x:number,z:number,layerId?:string,authoringId?:string,enemyArchetype?:string,maximumAlive?:number,spawnIntervalTicks?:number}} obelisk */
 ⋮----
 /** @param {number} index */
 ⋮----
@@ -16508,7 +16587,7 @@ mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md), then the current [product vision](./docs/product-vision.md), [roadmap](./docs/roadmap.md), [probe contract](./docs/probe-contract.md), and [verification guide](./docs/verification.md). They distinguish current direction and operating practice from mutable [soft specifications](./docs/soft-specs/README.md), frozen milestone contracts, and archived context. Release [`0.9.3`](./docs/milestones/0.9.3-m1b-vertical-traversal-closure.md) formally closes M1B. The current authoring kit emits authoring-map v6; [M1C.1](./docs/plans/m1c-authored-navigation-topology.md) adds authored navigation data, bounded compilation and pure queries under recording schema v15 without changing enemy movement. [M1B.1–M1B.4](./docs/notes/generic-vertical-bodies-and-elevator.md) remains the authority for continuous gameplay Y, per-body layers, autonomous elevators, holes, jumps, pressure plates, Fireball/elevator impacts, live connector authoring, and breakaway floors. App, recording-schema, authoring-map, and historical-profile versions remain independent boundaries.
+Start with the [documentation index](./docs/README.md), then the current [product vision](./docs/product-vision.md), [roadmap](./docs/roadmap.md), [probe contract](./docs/probe-contract.md), and [verification guide](./docs/verification.md). They distinguish current direction and operating practice from mutable [soft specifications](./docs/soft-specs/README.md), frozen milestone contracts, and archived context. Release [`0.9.3`](./docs/milestones/0.9.3-m1b-vertical-traversal-closure.md) formally closes M1B. The current authoring kit emits authoring-map v7; [M1C.1](./docs/plans/m1c-authored-navigation-topology.md) adds authored navigation data, bounded compilation and pure queries under recording schema v15 without changing enemy movement. [Editable, floor-aware obelisks](./docs/plans/editable-floor-aware-obelisks.md) promote the former singleton marker to independent authored instances and give each spawned enemy a stable home. [M1B.1–M1B.4](./docs/notes/generic-vertical-bodies-and-elevator.md) remains the authority for continuous gameplay Y, per-body layers, autonomous elevators, holes, jumps, pressure plates, Fireball/elevator impacts, live connector authoring, and breakaway floors. App, recording-schema, authoring-map, and historical-profile versions remain independent boundaries.
 
 ## Playtest controls and developer toolbox
 
@@ -16613,9 +16692,9 @@ The developer pool instruments report dynamic/inert body and sound-event occupan
 
 ## Snapshots and recordings
 
-Snapshots, runtime metrics, and command recordings use schema v17. Scenario JSON uses v3 and current recordings retain an initial authoring-map v6 document alongside its frozen scenario-v3 compatibility projection. Schema v17 records `observed-hole-pursuit-v1`: pursuit-capable enemies may follow a directly witnessed player drop through a live hole, without learning an unseen landing position; schemas v2-v16 retain their exact prior behavior. Schema v16 records `enemy-archetypes-v1` and the encounter's `wizard` or `urchin` selection; schemas v2-v15 remain wizard-only. Schema v15 records the inert `authored-navigation-topology-v1` profile and bounded capacities; schemas v2-v14 preserve their prior AI behavior with topology disabled. Schema v14 records `breakaway-floor-v1`: an 18-tick latched floor-to-hole transition that reuses ordinary aperture/falling authority. Schema v13 records the `elevator-projectile-collision-v1` profile: Fireballs collide with a stopped deck on either endpoint and the lower-floor piston/shaft while it is away from its lower stop. Schema v12 retains the committed jump edge and its pre-elevator-projectile collision behavior. Player snapshots include movement, vertical/support, layer, aperture, and jump state; enemies and their bodies retain archetype, physical identity, and live transform state. The one-tick sound queue and newest 32 of a separate 128-entry diagnostic ring expose stable source/event identity, origin, radius, and bounded occupancy/drop/hearing counters. The compact `spells` table still includes only current and referenced immutable revisions; effects retain spell code, definition revision, effect ID, and effect seed.
+Snapshots, runtime metrics, and command recordings use schema v20. Scenario JSON uses v3 and current recordings retain an initial authoring-map v7 document alongside its frozen scenario-v3 compatibility projection. Schema v20 records independent obelisk encounters; schema v19 records each enemy's floor-aware home identity and return routing; schema v18 records height-aware projectile contacts. Schema v17 records `observed-hole-pursuit-v1`: pursuit-capable enemies may follow a directly witnessed player drop through a live hole, without learning an unseen landing position; schemas v2-v16 retain their exact prior behavior. Schema v16 records `enemy-archetypes-v1` and the encounter's `wizard` or `urchin` selection; schemas v2-v15 remain wizard-only. Schema v15 records the inert `authored-navigation-topology-v1` profile and bounded capacities; schemas v2-v14 preserve their prior AI behavior with topology disabled. Schema v14 records `breakaway-floor-v1`: an 18-tick latched floor-to-hole transition that reuses ordinary aperture/falling authority. Schema v13 records the `elevator-projectile-collision-v1` profile: Fireballs collide with a stopped deck on either endpoint and the lower-floor piston/shaft while it is away from its lower stop. Schema v12 retains the committed jump edge and its pre-elevator-projectile collision behavior. Player snapshots include movement, vertical/support, layer, aperture, and jump state; enemies and their bodies retain archetype, physical identity, and live transform state. The one-tick sound queue and newest 32 of a separate 128-entry diagnostic ring expose stable source/event identity, origin, radius, and bounded occupancy/drop/hearing counters. The compact `spells` table still includes only current and referenced immutable revisions; effects retain spell code, definition revision, effect ID, and effect seed.
 
-A live v17 recording stores `holePursuitProfile: "observed-hole-pursuit-v1"`, `enemyArchetypeProfile: "enemy-archetypes-v1"`, `encounterEnemyArchetype`, `authoredNavigationTopologyProfile: "authored-navigation-topology-v1"`, and the authored-node, authored-link, compiled-port, compiled-arc, and route-event capacities. It also stores `gameplayProfile: "obelisk-duel-v1"`, `enemyAiProfile: "investigative-wizard-v1"`, `enemyCapacity: 64`, `encounterMaximumAlive: 4`, `deadBodyProfile: "enemy-dead-body-v1"`, `movementSoundProfile: "proximity-walk-footsteps-v1"`, `elevatorProjectileCollisionProfile: "elevator-projectile-collision-v1"`, `breakawayFloorProfile: "breakaway-floor-v1"`, the current authoring-map projection, both body capacities, the sound-event capacity, and the spell baseline. Replay reconstructs the encounter roster, movement cadence, attacks, hearing, AI, dynamic-body physics, vertical support/traversal, settlement, and FIFO overwrites exactly; autonomous decisions and transitions are not synthetic input commands. Schema v16 retains the same navigation behavior with witnessed-hole pursuit disabled; schema v15 retains the same navigation behavior while forcing wizard encounters; schema v14 retains the same behavior with topology disabled; schema v13 additionally omits the breakaway profile; schema v12 retains the same behavior except for the elevator collision profile; schema v11 retains the same AI/body/sound behavior without the jump edge; schema v10 retains AI and bodies but forces full-speed silent movement and direct Fireball hearing, schema v9 retains investigative AI with corpse-free immediate removal, schema v8 selects the frozen `perceptive-wizard-v1`, schema v7 selects the frozen `tactical-wizard-v1` with its historical four-entry enemy pool, schema v6 selects frozen `basic-wizard-v1`, schema v5 keeps versioned Fireballs with frozen pre-combat behavior, and schemas v2 through v4 retain their existing legacy Fireball and particle profiles. The default projectile pool is 256 and sound queue is 257; bounded drops remain valid under excessive authored effects or deliberately reduced tuning capacities.
+A live v20 recording stores `obeliskEncounterProfile: "independent-obelisk-encounters-v1"`, `enemyHomeProfile: "floor-aware-enemy-home-v1"`, `holePursuitProfile: "observed-hole-pursuit-v1"`, `enemyArchetypeProfile: "enemy-archetypes-v1"`, `authoredNavigationTopologyProfile: "authored-navigation-topology-v1"`, and the authored-node, authored-link, compiled-port, compiled-arc, and route-event capacities. It also stores `gameplayProfile: "obelisk-duel-v1"`, `enemyAiProfile: "investigative-wizard-v1"`, `enemyCapacity: 64`, `deadBodyProfile: "enemy-dead-body-v1"`, `movementSoundProfile: "proximity-walk-footsteps-v1"`, `projectileHeightCollisionProfile: "projectile-height-collision-v1"`, `elevatorProjectileCollisionProfile: "elevator-projectile-collision-v1"`, `breakawayFloorProfile: "breakaway-floor-v1"`, the current authoring-map projection, both body capacities, the sound-event capacity, and the spell baseline. Replay reconstructs independent encounter schedules, enemy homes, movement cadence, attacks, hearing, AI, dynamic-body physics, vertical support/traversal, settlement, and FIFO overwrites exactly; autonomous decisions and transitions are not synthetic input commands. Schema v19 uses stable enemy homes with the legacy singleton encounter scheduler; schema v18 retains height-aware projectile contacts with legacy enemy homes and encounters. Schema v17 retains the same navigation behavior without projectile-height contacts; schema v16 retains the same navigation behavior with witnessed-hole pursuit disabled; schema v15 retains the same navigation behavior while forcing wizard encounters; schema v14 retains the same behavior with topology disabled; schema v13 additionally omits the breakaway profile; schema v12 retains the same behavior except for the elevator collision profile; schema v11 retains the same AI/body/sound behavior without the jump edge; schema v10 retains AI and bodies but forces full-speed silent movement and direct Fireball hearing, schema v9 retains investigative AI with corpse-free immediate removal, schema v8 selects the frozen `perceptive-wizard-v1`, schema v7 selects the frozen `tactical-wizard-v1` with its historical four-entry enemy pool, schema v6 selects frozen `basic-wizard-v1`, schema v5 keeps versioned Fireballs with frozen pre-combat behavior, and schemas v2 through v4 retain their existing legacy Fireball and particle profiles. The default projectile pool is 256 and sound queue is 257; bounded drops remain valid under excessive authored effects or deliberately reduced tuning capacities.
 
 Particle snapshots retain maximum `size` and expose derived `currentSize`. Inspector output uses the current radius and reports its maximum separately. Pool telemetry exposes cumulative wall bounces, ground bounces, and collision-safety discards without copying particle impacts into the main contact history.
 
@@ -16633,7 +16712,7 @@ The automation surface at `window.__lantern` supports pause/resume/step/reset, s
 <file path="docs/README.md">
 # Lantern Documentation
 
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v18 and authoring-map v6. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v20 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -16658,8 +16737,9 @@ These documents preserve future intent and candidate experiments. They are mutab
 ## Current contracts
 
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
-- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v6, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, and the M1C.1 topology data envelope.
+- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v7, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, the M1C.1 topology data envelope, and editable obelisk instances.
 - [M1C authored navigation topology](./plans/m1c-authored-navigation-topology.md) — implemented v6 topology data, editor tooling, route diagnostics, patrol, and cross-floor pursuit under the schema-v15 compatibility boundary.
+- [Editable, floor-aware obelisks](./plans/editable-floor-aware-obelisks.md) — implemented independent authored generators and reliable per-enemy cross-floor homes under schemas v19-v20.
 - [M1B.1–M1B.4 vertical bodies, elevator, holes, jumping, and breakaways](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, grounded plates, live connector authoring, and breakaway floors.
 - [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
 - [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.

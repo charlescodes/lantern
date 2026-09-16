@@ -8,6 +8,7 @@ import {
   ENEMY_AI_PROFILE_NONE,
   ENEMY_WIZARD,
   GAMEPLAY_PROFILE_PRE_COMBAT,
+  OBELISK_ENCOUNTER_PROFILE_NONE,
   PROJECTILE_OWNER_KIND,
   SCENARIO_VERSION,
 } from "../src/config.js";
@@ -110,13 +111,13 @@ function assertOutsideSolid(simulation, x, z, radius) {
   assert.equal(firstSolidContact(simulation.map, x, z, radius, contact), false);
 }
 
-test("scenario v3 validates a singleton protected obelisk and imports v1/v2 without encounters", () => {
+test("scenario v3 migrates its singleton obelisk into an editable authored instance", () => {
   const scenario = obeliskScenario();
   const json = scenario.toJSON();
   assert.equal(json.version, SCENARIO_VERSION);
   assert.deepEqual(json.entities.at(-1), { kind: "obelisk", x: 8.5, z: 4.5 });
   assert.deepEqual(ArenaScenario.fromJSON(json).toJSON(), json);
-  assert.equal(scenario.setTile(8, 4, 0), false);
+  assert.equal(scenario.setTile(8, 4, 0), true);
   assert.equal(scenario.map.get(8, 4), 1);
   assert.equal(scenario.removeRock(scenario.obelisk.spawnId), false);
 
@@ -139,7 +140,7 @@ test("scenario v3 validates a singleton protected obelisk and imports v1/v2 with
   assert.equal(v2Simulation.snapshot().encounter.enabled, false);
 });
 
-test("scenario v3 rejects malformed, overlapping, or multiple obelisks", () => {
+test("scenario v3 rejects malformed, overlapping, or multiple legacy obelisks", () => {
   const map = borderedMap(10, 8, { x: 2.5, z: 3.5 });
   map.set(6, 3, 1);
   map.set(7, 3, 1);
@@ -163,7 +164,7 @@ test("scenario v3 rejects malformed, overlapping, or multiple obelisks", () => {
   playerMap.set(4, 4, 1);
   assert.throws(
     () => new ArenaScenario(playerMap, [{ kind: "obelisk", x: 4.5, z: 4.5 }]),
-    /inside solid geometry|overlapping the player/,
+    /inside solid geometry|overlaps the player|overlapping the player/,
   );
 
   const adjacentPlayerMap = borderedMap(10, 8, { x: 6.5, z: 2.5 });
@@ -179,7 +180,7 @@ test("scenario v3 rejects malformed, overlapping, or multiple obelisks", () => {
       { kind: "rock", archetype: "large", x: 5.2, z: 3.5 },
       { kind: "obelisk", x: 6.5, z: 3.5 },
     ]),
-    /inside solid geometry/,
+    /inside solid geometry|overlaps authoring instance/,
   );
 });
 
@@ -262,7 +263,11 @@ test("blocked and capped spawn attempts rotate once without queueing retries", (
   blocked.tick(null);
   assert.equal(blocked.enemies.activeCount, 0, "blocked attempts must not retry next tick");
 
-  const capped = new Simulation({ scenario: obeliskScenario(), particleBurstCount: 0 });
+  const capped = new Simulation({
+    scenario: obeliskScenario(),
+    particleBurstCount: 0,
+    obeliskEncounterProfile: OBELISK_ENCOUNTER_PROFILE_NONE,
+  });
   for (const [index, point] of [[0, [2, 2]], [1, [3, 2]], [2, [4, 2]], [3, [5, 2]]]) {
     spawnEnemy(capped, point[0], point[1], { spawnSequence: index + 1 });
   }
@@ -924,7 +929,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
     simulation.enemies.health[current] = 100;
   }
   const snapshot = simulation.snapshot();
-  assert.equal(snapshot.schemaVersion, 18);
+  assert.equal(snapshot.schemaVersion, 20);
   assert.equal(snapshot.player.maximumHealth, 100);
   assert.equal(snapshot.enemies[0].maximumHealth, 100);
   assert.equal(snapshot.pools.enemies.capacity, 4);
@@ -960,7 +965,7 @@ test("schema-v11 replay is exact and schema-v2 through v5 force frozen pre-comba
     });
   }
   const recording = live.exportCommandLog();
-  assert.equal(recording.schemaVersion, 18);
+  assert.equal(recording.schemaVersion, 20);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());

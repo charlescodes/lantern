@@ -197,27 +197,6 @@ function compileLayer(document, layer, layerIndex) {
     }
   }
 
-  if (layer.markers.obelisk) {
-    const obelisk = layer.markers.obelisk;
-    if (
-      obelisk.x !== Math.floor(obelisk.x) + 0.5
-      || obelisk.z !== Math.floor(obelisk.z) + 0.5
-    ) {
-      fail(`${layerPath}.markers.obelisk`, "cell-center", "Obelisk position must be cell-centered.", layer.id);
-    }
-    const cx = Math.floor(obelisk.x);
-    const cz = Math.floor(obelisk.z);
-    if (
-      cx < 0
-      || cz < 0
-      || cx >= layer.width
-      || cz >= layer.height
-      || structureSolidCells[cz * layer.width + cx] !== 1
-    ) {
-      fail(`${layerPath}.markers.obelisk`, "solid-cell", "Obelisk must occupy a solid structure cell.", layer.id);
-    }
-  }
-
   const dynamicInstances = [];
   for (const instance of layer.instances) {
     const definition = getPlaceableDefinition(instance.definitionId);
@@ -242,10 +221,7 @@ function compileLayer(document, layer, layerIndex) {
       massKg: Number(definition.traits.massKg),
     });
   }
-  const spawnKeys = [
-    ...layer.instances.map((instance) => `${layer.id}:instance:${instance.id}`),
-    ...(layer.markers.obelisk ? [`${layer.id}:marker:obelisk`] : []),
-  ];
+  const spawnKeys = layer.instances.map((instance) => `${layer.id}:instance:${instance.id}`);
   const spawnIds = stableSpawnIds(spawnKeys);
   const entities = dynamicInstances.map((instance) => ({
     kind: instance.runtimeKind === "rock"
@@ -266,14 +242,23 @@ function compileLayer(document, layer, layerIndex) {
     authoringId: instance.id,
     layerId: layer.id,
   }));
-  if (layer.markers.obelisk) {
+  for (const instance of layer.instances) {
+    const definition = getPlaceableDefinition(instance.definitionId);
+    if (definition?.traits.runtimeKind !== "obelisk") continue;
     entities.push({
       kind: /** @type {const} */ ("obelisk"),
-      x: layer.markers.obelisk.x,
-      z: layer.markers.obelisk.z,
-      spawnId: spawnIds.get(`${layer.id}:marker:obelisk`),
-      authoringId: "marker.obelisk",
+      definitionId: instance.definitionId,
+      x: instance.x,
+      z: instance.z,
+      spawnId: spawnIds.get(`${layer.id}:instance:${instance.id}`),
+      authoringId: instance.id,
       layerId: layer.id,
+      enemyArchetype: instance.properties?.enemyArchetype
+        ?? definition.traits.enemyArchetype,
+      maximumAlive: instance.properties?.maximumAlive
+        ?? definition.traits.maximumAlive,
+      spawnIntervalTicks: instance.properties?.spawnIntervalTicks
+        ?? definition.traits.spawnIntervalTicks,
     });
   }
 
@@ -285,6 +270,7 @@ function compileLayer(document, layer, layerIndex) {
       layerId: layer.id,
       runtimeKind: definition?.traits.runtimeKind ?? "unknown",
       runtimeSpawnId: isDynamicBodyDefinition(definition)
+        || definition?.traits.runtimeKind === "obelisk"
         ? spawnIds.get(`${layer.id}:instance:${instance.id}`)
         : null,
       collisionCells: (collisionCellsByInstance.get(instance.id) ?? []).map((cell) => ({ ...cell })),
@@ -306,9 +292,7 @@ function compileLayer(document, layer, layerIndex) {
       ...instance,
       ...(instance.properties ? { properties: cloneProperties(instance.properties) } : {}),
     })),
-    markers: {
-      ...(layer.markers.obelisk ? { obelisk: { ...layer.markers.obelisk } } : {}),
-    },
+    markers: {},
     entities,
     runtimeMappings,
     holes,

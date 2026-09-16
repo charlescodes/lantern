@@ -3,6 +3,7 @@
 import {
   MAP_VERSION,
   NAVIGATION_TOPOLOGY,
+  OBELISK,
   ROCK,
   SCENARIO_VERSION,
   VERTICAL_PHYSICS,
@@ -14,7 +15,9 @@ import {
 import { validateInstancePlacement } from "./placement_validation.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 6;
+export const AUTHORING_MAP_VERSION = 7;
+/** M1C maps with authored navigation topology and legacy obelisk markers. */
+export const NAVIGATION_AUTHORING_MAP_VERSION = 6;
 /** M1B.4 autonomous-elevator maps without authored navigation topology. */
 export const M1B_AUTHORING_MAP_VERSION = 5;
 /** M1B.1-M1B.3 connector maps using speed and activation policies. */
@@ -248,6 +251,7 @@ function normalizeCurrentDocument(input) {
   const layerValues = Array.isArray(source.layers) ? source.layers.slice(0, MAX_AUTHORING_LAYERS + 1) : [];
   const layerIds = new Set();
   const instanceIds = new Set();
+  let obeliskCount = 0;
   const baseHeights = new Map();
   const layers = layerValues.map((layerValue, layerIndex) => {
     const path = `layers[${layerIndex}]`;
@@ -423,6 +427,52 @@ function normalizeCurrentDocument(input) {
           properties = cloneJson(instanceSource.properties, `${instancePath}.properties`);
         }
       }
+      if (definition?.traits.runtimeKind === "obelisk") {
+        obeliskCount += 1;
+        const obeliskProperties = properties ?? {};
+        rejectUnknownFields(
+          obeliskProperties,
+          new Set(["enemyArchetype", "maximumAlive", "spawnIntervalTicks"]),
+          `${instancePath}.properties`,
+          id,
+        );
+        const enemyArchetype = obeliskProperties.enemyArchetype ?? definition.traits.enemyArchetype;
+        if (enemyArchetype !== "wizard" && enemyArchetype !== "urchin") {
+          issue(
+            "error",
+            `${instancePath}.properties.enemyArchetype`,
+            "enemy-archetype",
+            "Obelisk enemy archetype must be wizard or urchin.",
+            id,
+          );
+        }
+        const maximumAlive = obeliskProperties.maximumAlive ?? definition.traits.maximumAlive;
+        if (!Number.isInteger(maximumAlive) || maximumAlive < 1 || maximumAlive > OBELISK.maximumAliveLimit) {
+          issue(
+            "error",
+            `${instancePath}.properties.maximumAlive`,
+            "obelisk-maximum-alive",
+            `Obelisk maximum alive must be an integer from 1 through ${OBELISK.maximumAliveLimit}.`,
+            id,
+          );
+        }
+        const spawnIntervalTicks = obeliskProperties.spawnIntervalTicks
+          ?? definition.traits.spawnIntervalTicks;
+        if (
+          !Number.isInteger(spawnIntervalTicks)
+          || spawnIntervalTicks < 1
+          || spawnIntervalTicks > OBELISK.maximumSpawnIntervalTicks
+        ) {
+          issue(
+            "error",
+            `${instancePath}.properties.spawnIntervalTicks`,
+            "obelisk-spawn-interval",
+            `Obelisk spawn interval must be an integer from 1 through ${OBELISK.maximumSpawnIntervalTicks} ticks.`,
+            id,
+          );
+        }
+        properties = { enemyArchetype, maximumAlive, spawnIntervalTicks };
+      }
       return {
         id: instanceId,
         definitionId,
@@ -449,19 +499,8 @@ function normalizeCurrentDocument(input) {
     let markers = {};
     if (!isRecord(layerSource.markers)) {
       issue("error", `${path}.markers`, "object", "Markers must be an object.", id);
-    } else if (layerSource.markers.obelisk !== undefined) {
-      rejectUnknownFields(layerSource.markers, new Set(["obelisk"]), `${path}.markers`, id);
-      if (isRecord(layerSource.markers.obelisk)) {
-        rejectUnknownFields(
-          layerSource.markers.obelisk,
-          new Set(["x", "z"]),
-          `${path}.markers.obelisk`,
-          id,
-        );
-      }
-      markers = { obelisk: pointValue(layerSource.markers.obelisk, `${path}.markers.obelisk`, id) };
     } else {
-      rejectUnknownFields(layerSource.markers, new Set(["obelisk"]), `${path}.markers`, id);
+      rejectUnknownFields(layerSource.markers, new Set(), `${path}.markers`, id);
     }
     const nextInstanceOrdinal = positiveInteger(
       layerSource.nextInstanceOrdinal,
@@ -481,6 +520,15 @@ function normalizeCurrentDocument(input) {
       nextInstanceOrdinal,
     };
   });
+
+  if (obeliskCount > OBELISK.capacity) {
+    issue(
+      "error",
+      "layers",
+      "obelisk-capacity",
+      `Map contains more than the ${OBELISK.capacity}-obelisk limit.`,
+    );
+  }
 
   if (playerStart.layerId && !layerIds.has(playerStart.layerId)) {
     issue("error", "playerStart.layerId", "invalid-player-start-layer", `Player start references missing layer "${playerStart.layerId}".`);
@@ -837,23 +885,6 @@ function normalizeCurrentDocument(input) {
       }
     }
   }
-  // The existing obelisk encounter has one map-owned anchor.  It may live on
-  // any authored layer, but multiple markers would make deterministic spawn
-  // ownership ambiguous.
-  const obeliskLayers = layers
-    .map((layer, index) => ({ layer, index }))
-    .filter(({ layer }) => layer.markers.obelisk !== undefined);
-  if (obeliskLayers.length > 1) {
-    for (const { layer, index } of obeliskLayers.slice(1)) {
-      issue(
-        "error",
-        `layers[${index}].markers.obelisk`,
-        "multiple-obelisks",
-        `Only one map-owned obelisk marker is supported; "${layer.id}" adds another.`,
-        layer.id,
-      );
-    }
-  }
   if (!diagnostics.some((entry) => entry.severity === "error")) {
     for (let layerIndex = 0; layerIndex < layers.length; layerIndex += 1) {
       const layer = layers[layerIndex];
@@ -938,9 +969,9 @@ export function migrateAuthoringMapV1(input) {
       },
     };
   });
-  return validateAuthoringMap({
+  return migrateAuthoringMapV6({
     format: AUTHORING_MAP_FORMAT,
-    version: AUTHORING_MAP_VERSION,
+    version: NAVIGATION_AUTHORING_MAP_VERSION,
     metadata: source.metadata,
     nextLayerOrdinal: source.layers.length + 1,
     nextConnectorOrdinal: 1,
@@ -980,9 +1011,9 @@ export function migrateAuthoringMapV2(input) {
       `Authoring-map v2 cannot contain ${futureField}.`,
     );
   }
-  return validateAuthoringMap({
+  return migrateAuthoringMapV6({
     ...source,
-    version: AUTHORING_MAP_VERSION,
+    version: NAVIGATION_AUTHORING_MAP_VERSION,
     nextConnectorOrdinal: 1,
     connectors: [],
     nextNavigationNodeOrdinal: 1,
@@ -1021,9 +1052,9 @@ function migrateClockDrivenConnectors(source) {
     const { travelSpeed, activationPolicy, ...rest } = connector;
     return { ...rest, travelDurationSeconds };
   }) : source.connectors;
-  return validateAuthoringMap({
+  return migrateAuthoringMapV6({
     ...source,
-    version: AUTHORING_MAP_VERSION,
+    version: NAVIGATION_AUTHORING_MAP_VERSION,
     connectors,
     nextNavigationNodeOrdinal: 1,
     nextNavigationLinkOrdinal: 1,
@@ -1069,13 +1100,132 @@ export function migrateAuthoringMapV5(input) {
       fail(field, "unknown-field", `Authoring-map v5 cannot contain ${field}.`);
     }
   }
-  return validateAuthoringMap({
+  return migrateAuthoringMapV6({
     ...source,
-    version: AUTHORING_MAP_VERSION,
+    version: NAVIGATION_AUTHORING_MAP_VERSION,
     nextNavigationNodeOrdinal: 1,
     nextNavigationLinkOrdinal: 1,
     navigationNodes: [],
     navigationLinks: [],
+  });
+}
+
+/** Converts the singleton layer marker into an ordinary editable obelisk instance. @param {unknown} input */
+export function migrateAuthoringMapV6(input) {
+  if (!isRecord(input)) fail("map", "object", "Map must be an object.");
+  const source = /** @type {Record<string,any>} */ (input);
+  if (
+    source.format !== AUTHORING_MAP_FORMAT
+    || source.version !== NAVIGATION_AUTHORING_MAP_VERSION
+  ) {
+    fail(
+      "version",
+      "unsupported-schema-version",
+      `Expected authoring-map version ${NAVIGATION_AUTHORING_MAP_VERSION}.`,
+    );
+  }
+  let markerCount = 0;
+  for (let layerIndex = 0; layerIndex < (source.layers?.length ?? 0); layerIndex += 1) {
+    const layer = source.layers[layerIndex];
+    if (!isRecord(layer) || !isRecord(layer.markers)) continue;
+    const marker = layer.markers.obelisk;
+    if (marker === undefined) continue;
+    markerCount += 1;
+    if (!isRecord(marker) || !Number.isFinite(marker.x) || !Number.isFinite(marker.z)) {
+      fail(
+        `layers[${layerIndex}].markers.obelisk`,
+        "finite-point",
+        "Obelisk marker must contain finite X/Z coordinates.",
+      );
+    }
+    if (
+      marker.x !== Math.floor(marker.x) + 0.5
+      || marker.z !== Math.floor(marker.z) + 0.5
+    ) {
+      fail(
+        `layers[${layerIndex}].markers.obelisk`,
+        "cell-center",
+        "Obelisk marker must be cell-centered.",
+      );
+    }
+    const cx = Math.floor(marker.x);
+    const cz = Math.floor(marker.z);
+    const cellIndex = cz * Number(layer.width) + cx;
+    if (
+      cx < 0
+      || cz < 0
+      || cx >= Number(layer.width)
+      || cz >= Number(layer.height)
+      || !isRecord(layer.structure)
+      || !Array.isArray(layer.structure.cells)
+      || Number(layer.structure.cells[cellIndex]) === 0
+    ) {
+      fail(
+        `layers[${layerIndex}].markers.obelisk`,
+        "solid-cell",
+        "Obelisk marker must occupy a solid structure cell.",
+      );
+    }
+  }
+  if (markerCount > 1) {
+    fail(
+      "layers",
+      "multiple-obelisks",
+      "Authoring-map v6 supports at most one obelisk marker.",
+    );
+  }
+  const layers = Array.isArray(source.layers) ? source.layers.map((layerValue) => {
+    if (!isRecord(layerValue)) return layerValue;
+    const layer = /** @type {Record<string,any>} */ (layerValue);
+    const marker = isRecord(layer.markers) && isRecord(layer.markers.obelisk)
+      ? layer.markers.obelisk
+      : null;
+    if (!marker) return { ...layer, markers: {} };
+    const ordinal = Number(layer.nextInstanceOrdinal);
+    const instanceId = `instance-${String(ordinal).padStart(4, "0")}`;
+    const structure = isRecord(layer.structure)
+      ? {
+        ...layer.structure,
+        cells: Array.isArray(layer.structure.cells) ? [...layer.structure.cells] : layer.structure.cells,
+      }
+      : layer.structure;
+    const cx = Math.floor(Number(marker.x));
+    const cz = Math.floor(Number(marker.z));
+    if (
+      isRecord(structure)
+      && Array.isArray(structure.cells)
+      && Number.isInteger(layer.width)
+      && cx >= 0
+      && cz >= 0
+      && cx < Number(layer.width)
+      && cz < Number(layer.height)
+    ) structure.cells[cz * Number(layer.width) + cx] = 0;
+    return {
+      ...layer,
+      structure,
+      instances: [
+        ...(Array.isArray(layer.instances) ? layer.instances : []),
+        {
+          id: instanceId,
+          definitionId: "object.obelisk",
+          x: Number(marker.x),
+          z: Number(marker.z),
+          rotation: 0,
+          properties: {
+            enemyArchetype: "wizard",
+            maximumAlive: 4,
+            spawnIntervalTicks: OBELISK.defaultSpawnIntervalTicks,
+          },
+        },
+      ],
+      markers: {},
+      nextInstanceOrdinal: ordinal + 1,
+    };
+  }) : source.layers;
+  return validateAuthoringMap({
+    ...source,
+    version: AUTHORING_MAP_VERSION,
+    layers,
   });
 }
 
@@ -1150,9 +1300,9 @@ export function migrateLegacyMap(input, metadata = {}) {
     }
   }
 
-  return validateAuthoringMap({
+  return migrateAuthoringMapV6({
     format: AUTHORING_MAP_FORMAT,
-    version: AUTHORING_MAP_VERSION,
+    version: NAVIGATION_AUTHORING_MAP_VERSION,
     metadata: {
       id: metadata.id ?? embeddedMetadata?.id ?? "legacy-map",
       name: metadata.name ?? embeddedMetadata?.name ?? "Migrated legacy map",
@@ -1204,6 +1354,7 @@ export function loadAuthoringMap(input) {
   if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
   const version = /** @type {Record<string,any>} */ (value).version;
   if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
+  if (version === NAVIGATION_AUTHORING_MAP_VERSION) return migrateAuthoringMapV6(value);
   if (version === M1B_AUTHORING_MAP_VERSION) return migrateAuthoringMapV5(value);
   if (version === CLOCK_ELEVATOR_AUTHORING_MAP_VERSION) return migrateAuthoringMapV4(value);
   if (version === LEGACY_AUTHORING_MAP_VERSION) return migrateAuthoringMapV3(value);

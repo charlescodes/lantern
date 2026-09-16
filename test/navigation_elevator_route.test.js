@@ -215,7 +215,7 @@ test("two complete but insufficient dwell windows trigger the bounded cooldown",
 test("the authored navigation arena routes and physically traverses both chained connectors", () => {
   const scenario = createNavigationDebugArenaScenario();
   const document = scenario.toAuthoringJSON();
-  assert.equal(document.version, 6);
+  assert.equal(document.version, 7);
   assert.equal(document.layers.length, 3);
   assert.deepEqual(document.layers.map((layer) => [layer.width, layer.height]), [
     [24, 24],
@@ -225,10 +225,14 @@ test("the authored navigation arena routes and physically traverses both chained
   assert.deepEqual(document.layers.map((layer) => layer.baseY), [0, 3, 6]);
   assert.deepEqual(document.connectors.map((connector) => connector.initialStop), ["lower", "lower"]);
   assert.deepEqual(document.playerStart, { layerId: document.layers[0].id, x: 3.5, z: 18.5 });
-  assert.deepEqual(document.layers[0].markers.obelisk, { x: 14.5, z: 18.5 });
+  const obelisk = document.layers[0].instances.find(
+    (instance) => instance.definitionId === "object.obelisk",
+  );
+  assert.ok(obelisk);
+  assert.deepEqual({ x: obelisk.x, z: obelisk.z }, { x: 14.5, z: 18.5 });
   assert.ok(Math.hypot(
-    document.playerStart.x - document.layers[0].markers.obelisk.x,
-    document.playerStart.z - document.layers[0].markers.obelisk.z,
+    document.playerStart.x - obelisk.x,
+    document.playerStart.z - obelisk.z,
   ) <= 12);
   assert.deepEqual(new ArenaScenario(document).toAuthoringJSON(), document);
   const pureRoute = scenario.navigationTopology.route(
