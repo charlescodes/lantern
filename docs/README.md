@@ -54,6 +54,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 ## Open defects
 
+- [Navigation floor transitions and debug readability](./bugs/navigation-floor-debug-and-ai.md) — near-term reports of a stale floor overlay and suspected enemy retargeting; distinguish presentation state from valid pursuit before map-authoring acceptance.
 - [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
 - [Elevator crowding during enemy traversal](./bugs/elevator-enemy-queueing.md) — M1C's single-rider route works, but multi-enemy upward boarding needs a later bounded queue or larger-deck decision.
 - [2026-09-11 playtest defect backlog](./bugs/2026-09-11-playtest-backlog.md) — remaining unprioritized reports on pursuit, guard return, hole-fall forgiveness, scorch seams, and aperture reuse; its lowered-elevator Fireball report is resolved in schema v18.

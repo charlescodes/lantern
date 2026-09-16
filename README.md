@@ -27,6 +27,14 @@ Presentation routes:
 - <http://127.0.0.1:4173/?renderer=3d> — Three.js with automatic WebGPU/WebGL 2 selection.
 - <http://127.0.0.1:4173/?renderer=3d&backend=webgl> — forced WebGL 2 fallback test.
 
+Arena content loads from saved [JSON maps](./maps/README.md): `?arena=navigation`
+loads `maps/navigation.json`, `?arena=holes` loads `maps/holes.json`, and
+`?arena=elevator` loads `maps/elevator.json`. Omitting `arena` loads
+`maps/default.json`. These work with either renderer. Edit a map in the editor,
+Save, replace its repository JSON with the download, and reload to use it.
+The navigation obelisk is authored as one living urchin with a 10-second spawn
+interval; the normal immediate first-spawn rule still applies.
+
 The Balanced defaults are 16 resident lights, a 1.5× pixel-density cap, antialiasing on, automatic backend selection, dynamic lights, spell-color variation, TrueSight, and sight fading on; bloom, shadows, and sight debug are off. URL options are `lights=8|16|32|64`, `dpr=1|1.5|2`, `aa=0|1`, `dynamicLights=0|1`, `lightColorVariation=0|1`, `bloom=0|1`, `shadows=0|1`, `trueSight=0|1`, `sightFade=0|1`, and `sightDebug=0|1`. The compatibility URL/probe key remains `lightColorVariation`; the UI labels it **Spell color variation**.
 
 ## Validate

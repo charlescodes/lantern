@@ -9,6 +9,7 @@ import { LayerPanel } from "./browser/layer_panel.js";
 import { MapPalette } from "./browser/map_palette.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
+import { loadArenaScenario } from "./browser/arena_loader.js";
 import { APPLICATION_VERSION, SCHEMA_VERSION } from "./config.js";
 import { createPresentation } from "./presentation/factory.js";
 import { createNavigationTopologyView } from "./presentation/navigation_topology_view.js";
@@ -31,12 +32,7 @@ import {
   AuthoringHistory,
   commandFromAuthoringAction,
 } from "./authoring/authoring_history.js";
-import {
-  ArenaScenario,
-  createHoleDebugArenaScenario,
-  createNavigationDebugArenaScenario,
-  createVerticalDebugArenaScenario,
-} from "./sim/scenario.js";
+import { ArenaScenario } from "./sim/scenario.js";
 import { Simulation } from "./sim/simulation.js";
 import { TrueSightSystem } from "./visibility/true_sight.js";
 import {
@@ -50,22 +46,15 @@ const damageNumberCanvas = /** @type {HTMLCanvasElement|null} */ (
   document.getElementById("damage-number-overlay")
 );
 
-const requestedArena = new URLSearchParams(window.location.search).get("arena");
-const elevatorArenaRequested = requestedArena === "elevator";
-const holeArenaRequested = requestedArena === "holes";
-const navigationArenaRequested = requestedArena === "navigation";
-const simulation = new Simulation({
-  ...(elevatorArenaRequested
-    ? { scenario: createVerticalDebugArenaScenario() }
-    : holeArenaRequested
-      ? { scenario: createHoleDebugArenaScenario() }
-      : navigationArenaRequested
-        ? {
-          scenario: createNavigationDebugArenaScenario(),
-          encounterEnemyArchetype: "urchin",
-        }
-        : {}),
+const scenario = await loadArenaScenario(window.location.search).catch((error) => {
+  const message = document.createElement("p");
+  message.className = "error-output";
+  message.setAttribute("role", "alert");
+  message.textContent = error instanceof Error ? error.message : String(error);
+  canvas.replaceWith(message);
+  throw error;
 });
+const simulation = new Simulation({ scenario });
 const initialSnapshot = simulation.snapshot();
 const ui = new ArenaUi();
 const presentationOptions = parsePresentationOptions(window.location.search);

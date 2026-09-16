@@ -39,6 +39,7 @@ multi-stop elevators, cross-floor clairvoyance, or a rewrite of current AI.
 
 ## After M1C
 
+- **Near-term authoring reliability:** investigate the [navigation floor-transition reports](./bugs/navigation-floor-debug-and-ai.md) before substantial map authoring: stale debug overlay, suspected AI retargeting, and unclear navigation visualization.
 - **Editable, floor-aware obelisks:** complete. Obelisks are ordinary authored
   instances on explicit layers; schema v19 gives every enemy a stable home and
   cross-floor return route, while schema v20 enables independent obelisks with
@@ -60,3 +61,8 @@ and larger-world systems remain later backlog. The open
 separate from this roadmap unless its diagnosis becomes a direct prerequisite.
 The [elevator enemy queueing report](./bugs/elevator-enemy-queueing.md) is also
 deferred: it is not a prerequisite for M1D's authored-map work.
+
+Deferred engineering cleanup is tracked in the
+[long-term improvement ledger](./soft-specs/long-term-improvements.md#lt-003-retire-procedural-arena-builders):
+clarify saved-map versus test-fixture ownership, retaining useful stable test
+builders and removing duplicate playable-map definitions.

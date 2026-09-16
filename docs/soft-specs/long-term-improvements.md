@@ -4,7 +4,7 @@
 | --- | --- |
 | Status | Working draft |
 | Authority | Non-authoritative soft specification |
-| Last reviewed | 2026-08-08 |
+| Last reviewed | 2026-09-15 |
 | Scheduling | Trigger-driven; no release assignment |
 | Related current documents | [Platform contract](../platform.md), [architecture guide](../architecture-guide.md), [candidate roadmap](./candidate-roadmap.md) |
 
@@ -16,6 +16,7 @@ This ledger preserves architectural improvements that are credible and important
 | --- | --- | --- | --- |
 | LT-001 | [Client-owned presentation effects](#lt-001-client-owned-presentation-effects) | Candidate | Before a strict authoritative server or particle state becomes a measured simulation/snapshot bottleneck |
 | LT-002 | [Parkable developer windows](#lt-002-parkable-developer-windows) | Working draft | When the next stateful developer panel is added or substantially revised, with AI View as the likely first conversion |
+| LT-003 | [Retire procedural arena builders](#lt-003-retire-procedural-arena-builders) | Deferred cleanup | Follow-up to saved JSON arena loading, before maintaining parallel versions of arena content |
 
 ## LT-001: Client-owned presentation effects
 
@@ -226,6 +227,39 @@ substantially revised, when another stateful developer panel is introduced, or
 when repeated one-off launcher/panel behavior starts crowding the toolbox. Use
 that concrete panel as the second consumer; do not build generalized window
 management in anticipation of unspecified tools.
+
+## LT-003: Retire procedural arena builders
+
+**Scope clarification:** retain useful stable procedural test fixtures. The
+cleanup objective is explicit ownership and removal of duplicate playable-map
+definitions, not deletion of every builder. Saved JSON defines playable arenas;
+loading tests should exercise it. Mechanics tests may use clearly named,
+test-owned builders; historical replay fixtures remain frozen. Interpret the
+migration outline below within that boundary. Intentional fixture divergence
+is acceptable; ambiguous parallel sources of playable content are the debt.
+
+Recorded 2026-09-15 during the switch to [saved arena maps](../../maps/README.md).
+This is technical-debt cleanup with no assigned release.
+
+Browser startup now loads `maps/*.json`, but `src/sim/scenario.js` still contains
+the default, elevator, holes, and navigation arena builders. Tests use those
+builders, and `Simulation` still builds the default arena when no scenario or
+map is supplied. The base `createDebugArenaMap()` also remains in
+`src/sim/grid_map.js`. Keeping both authored files and construction recipes
+creates duplicate content that can drift.
+
+The follow-up should migrate arena-dependent tests to saved fixtures, replace
+the implicit simulation default with an explicit fixture-loading boundary, and
+remove the obsolete builders and imports. Keep file/network loading outside
+the simulation. Tests needing historical layouts should use frozen fixtures;
+they must not force editable gameplay maps to retain old content. In particular,
+replace the current loader test's comparisons against procedural factories.
+
+Completion means the old arena builders have no remaining callers and are
+removed, saved JSON is the source of arena content, and focused tests plus
+`npm run check` pass with historical replay behavior preserved. Small test-only
+geometry helpers and future intentional procedural generation are separate
+concerns.
 
 ## Entry template
 
