@@ -4,6 +4,7 @@ import { PLAYER } from "../config.js";
 import { circleCellContact, firstSolidContact } from "../sim/collision.js";
 import {
   getPlaceableDefinition,
+  isAuthoredEnemyDefinition,
   isDynamicBodyDefinition,
   isDynamicCircleDefinition,
 } from "./definition_catalog.js";
@@ -129,14 +130,16 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
     if (structureDefinition?.traits.blocksMovement) blockingCells.add(footprintCellKey(cell));
   }
 
-  const candidateIsDynamicCircle = isDynamicCircleDefinition(definition);
+  const candidateIsDynamicCircle = isDynamicCircleDefinition(definition)
+    || isAuthoredEnemyDefinition(definition);
   const candidateRadius = Number(definition.traits.radius ?? 0);
   for (const instance of layer.instances) {
     if (instance.id === options.ignoreInstanceId) continue;
     const otherDefinition = getPlaceableDefinition(instance.definitionId);
     if (!otherDefinition) continue;
     const otherCells = getOccupiedCells(otherDefinition, instance);
-    const otherIsDynamicCircle = isDynamicCircleDefinition(otherDefinition);
+    const otherIsDynamicCircle = isDynamicCircleDefinition(otherDefinition)
+      || isAuthoredEnemyDefinition(otherDefinition);
     if (!isDynamicBodyDefinition(otherDefinition) && otherDefinition.traits.blocksMovement) {
       for (const cell of otherCells) blockingCells.add(footprintCellKey(cell));
     }
@@ -217,7 +220,10 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
     );
   }
 
-  if (definition.traits.blocksMovement && document.playerStart?.layerId === layer.id) {
+  if (
+    (definition.traits.blocksMovement || isAuthoredEnemyDefinition(definition))
+    && document.playerStart?.layerId === layer.id
+  ) {
     const spawn = document.playerStart;
     const overlapsSpawn = candidateIsDynamicCircle
       ? Math.hypot(numericX - spawn.x, numericZ - spawn.z) < candidateRadius + PLAYER.radius

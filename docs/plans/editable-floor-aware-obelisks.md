@@ -1,7 +1,7 @@
 # Editable, Floor-Aware Obelisks and Reliable Enemy Homes
 
-> **Status:** implemented 2026-09-12 · application `0.9.3` · recording schema
-> v20 · authoring-map v7
+> **Status:** implemented 2026-09-12, extended 2026-09-16 · application `0.9.3` · recording schema
+> v21 · authoring-map v7
 
 This work replaces the original singleton obelisk marker with a bounded,
 editable instance model while preserving older replay behavior. Simulation
@@ -29,6 +29,15 @@ of its own enemies alive at once and may replace them after death. Spawn
 attempts, direction cursors, skips, and counts remain deterministic and bounded.
 Moving or deleting an obelisk does not delete existing enemies or rewrite their
 captured home; it only changes future spawning.
+
+Follow-up authoring behavior keeps encounter sources distinct from authored
+starting actors. Wizard and urchin instances may be stamped directly into a
+map; they start immediately on load/reset, have no obelisk owner, and return to
+their authored guard point. Current authored obelisks only spawn while the
+player shares their floor, is within 20 meters, and has unobstructed map
+line-of-sight. A loaded/reset encounter remains eligible on its first tick;
+placing a new obelisk in an existing editor session schedules its first attempt
+after its configured interval.
 
 Authoring-map v6 migrates its single marker into an `object.obelisk` instance,
 removing the replaced wall cell while retaining equivalent collision. Schemas

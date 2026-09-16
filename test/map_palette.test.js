@@ -14,6 +14,8 @@ test("the centralized catalog contains the representative M1A definitions", () =
     "structure.wall",
     "object.rock.medium",
     "object.obelisk",
+    "actor.enemy.wizard",
+    "actor.enemy.urchin",
     "object.pillar",
     "object.torch",
     "object.table",

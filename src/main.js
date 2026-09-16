@@ -214,6 +214,7 @@ const runtime = new FixedStepRuntime({
       mouseWorld: input.mouseWorld,
       hover,
       inspected: selected,
+      pinned,
       pinnedHidden,
       mode,
       developerToolsOpen,
@@ -608,6 +609,24 @@ onButton("step-button", singleStep);
 onButton("reset-button", () => reset(false));
 onButton("mode-button", toggleMode);
 onButton("focus-button", focusPlayer);
+onButton("despawn-enemy-button", () => {
+  if (!pinned || (pinned.kind !== "enemyWizard" && pinned.kind !== "enemyUrchin")) {
+    ui.announce("Pin a living enemy before despawning");
+    return;
+  }
+  const target = { ...pinned };
+  if (!simulation.resolveSelection(target)) {
+    pinned = null;
+    ui.announce("Pinned enemy no longer exists");
+    return;
+  }
+  if (!injectMutation({ type: "removeEntity", kind: target.kind, id: Number(target.id) })) {
+    ui.announce("Runtime command queue is full");
+    return;
+  }
+  pinned = null;
+  ui.announce(`Despawned ${target.kind} ${target.id}; its obelisk may replace it`);
+});
 
 for (const checkbox of document.querySelectorAll("[data-debug-flag]")) {
   checkbox.addEventListener("change", () => {
@@ -1071,7 +1090,11 @@ const probe = Object.freeze({
     return authoringEditor.updateInstanceProperties(String(authoringId), properties);
   },
   removeEntity(kind, id) {
-    if (String(kind) !== "rock") return false;
+    const entityKind = String(kind);
+    if (entityKind === "enemyWizard" || entityKind === "enemyUrchin") {
+      return injectMutation({ type: "removeEntity", kind: entityKind, id: Number(id) });
+    }
+    if (entityKind !== "rock") return false;
     const authoringId = simulation.authoringIdForRuntimeBodyId(Number(id));
     return authoringId
       ? commitAuthoringAction({ type: "removeInstance", authoringId }).ok

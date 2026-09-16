@@ -50,6 +50,7 @@ import {
   OBELISK,
   OBELISK_ENCOUNTER_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_V1,
+  OBELISK_ENCOUNTER_PROFILE_V2,
   PARTICLE,
   PARTICLE_PROFILES,
   PARTICLE_PROFILE_M02,
@@ -78,6 +79,7 @@ import {
 import { applyAuthoringCommand } from "../authoring/authoring_history.js";
 import {
   getPlaceableDefinition,
+  isAuthoredEnemyDefinition,
   isDynamicBodyDefinition,
   isDynamicBoxDefinition,
   isDynamicCircleDefinition,
@@ -922,9 +924,10 @@ export class Simulation {
       throw new RangeError(`Unsupported enemy-home profile: ${this.enemyHomeProfile}`);
     }
     this.obeliskEncounterProfile = options.obeliskEncounterProfile
-      ?? OBELISK_ENCOUNTER_PROFILE_V1;
+      ?? OBELISK_ENCOUNTER_PROFILE_V2;
     if (
       this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1
+      && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V2
       && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
     ) {
       throw new RangeError(
@@ -1540,6 +1543,7 @@ export class Simulation {
     this.#resetObeliskEncounters();
     for (const entity of this.scenario.allRuntimeEntities()) {
       if (isDynamicRuntimeEntity(entity)) this.#spawnRuntimeDynamicEntity(entity);
+      else if (entity.kind === "authoredEnemy") this.#spawnAuthoredEnemy(entity);
     }
     for (const connector of this.scenario.connectors) {
       this.#spawnAuthoredElevator(connector);
@@ -1551,7 +1555,7 @@ export class Simulation {
     const obelisks = this.scenario.allRuntimeEntities()
       .filter((entity) => entity.kind === "obelisk")
       .slice(0, OBELISK.capacity);
-    const selected = this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+    const selected = this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
       ? obelisks
       : obelisks.slice(0, 1);
     this.obeliskEncounters = selected.map((obelisk) => ({
@@ -1562,13 +1566,13 @@ export class Simulation {
       layerIndex: this.layerIdToIndex.get(obelisk.layerId) ?? 0,
       x: Number(obelisk.x),
       z: Number(obelisk.z),
-      enemyArchetype: this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+      enemyArchetype: this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
         ? String(obelisk.enemyArchetype ?? "wizard")
         : this.encounterEnemyArchetype,
-      maximumAlive: this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+      maximumAlive: this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
         ? Number(obelisk.maximumAlive ?? OBELISK.defaultMaximumAlive)
         : this.encounterMaximumAlive,
-      spawnIntervalTicks: this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+      spawnIntervalTicks: this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
         ? Number(obelisk.spawnIntervalTicks ?? OBELISK.defaultSpawnIntervalTicks)
         : ENEMY_WIZARD.spawnIntervalTicks,
       nextSpawnTick: this.tickCount + 1,
@@ -1582,7 +1586,7 @@ export class Simulation {
   }
 
   #reconcileObeliskEncounters() {
-    if (this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1) return;
+    if (this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_NONE) return;
     const prior = new Map(this.obeliskEncounters.map((state) => [state.spawnId, state]));
     const enabled = this.obeliskEncounters.length > 0
       ? this.encounter.enabled
@@ -1610,7 +1614,11 @@ export class Simulation {
           spawnIntervalTicks: Number(
             obelisk.spawnIntervalTicks ?? OBELISK.defaultSpawnIntervalTicks,
           ),
-          nextSpawnTick: existing?.nextSpawnTick ?? this.tickCount + 1,
+          nextSpawnTick: existing?.nextSpawnTick ?? this.tickCount + (
+            this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V2
+              ? Number(obelisk.spawnIntervalTicks ?? OBELISK.defaultSpawnIntervalTicks)
+              : 1
+          ),
           spawnCursor: existing?.spawnCursor ?? 0,
           attempts: existing?.attempts ?? 0,
           successfulSpawns: existing?.successfulSpawns ?? 0,
@@ -1760,8 +1768,10 @@ export class Simulation {
 
   /** @param {ArenaScenario} scenario */
   #scenarioFitsDynamicCapacity(scenario) {
-    return scenario.allRuntimeEntities().filter(isDynamicRuntimeEntity).length
-      <= this.rocks.capacity;
+    const entities = scenario.allRuntimeEntities();
+    return entities.filter(isDynamicRuntimeEntity).length <= this.rocks.capacity
+      && entities.filter((entity) => entity.kind === "authoredEnemy").length
+        <= this.enemies.capacity;
   }
 
   #rebuildCompiledLayerRuntime() {
@@ -1911,6 +1921,103 @@ export class Simulation {
       supportKind: SUPPORT_KIND.FLOOR,
       verticalMode: VERTICAL_MODE.SUPPORTED,
     });
+  }
+
+  /** Spawn one explicitly authored enemy at its saved guard position. */
+  #spawnAuthoredEnemy(entity) {
+    const layerIndex = this.layerIdToIndex.get(entity.layerId);
+    if (layerIndex === undefined) return 0;
+    const archetype = entity.enemyArchetype === "urchin"
+      ? ENEMY_ARCHETYPE.urchin
+      : ENEMY_ARCHETYPE.wizard;
+    const definition = enemyDefinition(archetype);
+    const spawnSequence = this.encounter.nextSpawnSequence;
+    const authoredHeadings = [
+      { x: 1, z: 0 },
+      { x: 0, z: 1 },
+      { x: -1, z: 0 },
+      { x: 0, z: -1 },
+    ];
+    const heading = Number.isInteger(entity.rotation)
+      ? authoredHeadings[normalizeQuarterTurns(entity.rotation)]
+      : deterministicGuardHeading(this.seed, spawnSequence);
+    const id = this.enemies.spawn({
+      spawnSequence,
+      spawnTick: this.tickCount,
+      authoredSpawnId: Number(entity.spawnId),
+      archetype,
+      x: Number(entity.x),
+      z: Number(entity.z),
+      radius: definition.radius,
+      massKg: definition.massKg,
+      maximumHealth: definition.maximumHealth ?? COMBAT.maximumHealth,
+      shotReadyTick: this.tickCount + definition.shotIntervalTicks,
+      facingX: heading.x,
+      facingZ: heading.z,
+      guardX: Number(entity.x),
+      guardZ: Number(entity.z),
+      guardLayerIndex: layerIndex,
+      homeObeliskSpawnId: 0,
+      guardBaseFacingX: heading.x,
+      guardBaseFacingZ: heading.z,
+      perceptionLane: spawnSequence % PERCEPTIVE_WIZARD.perceptionLanes,
+      guardSweepPhase: deterministicGuardSweepPhase(this.seed, spawnSequence),
+      worldY: this.layerBaseY[layerIndex],
+      layerIndex,
+      verticalCapabilities: DEFAULT_ACTOR_VERTICAL_CAPABILITIES,
+      supportKind: SUPPORT_KIND.FLOOR,
+      supportId: 0,
+      verticalMode: VERTICAL_MODE.SUPPORTED,
+    });
+    if (id > 0) this.encounter.nextSpawnSequence += 1;
+    return id;
+  }
+
+  /** Reconcile authored starting enemies without reviving previously defeated ones. */
+  #reconcileAuthoredEnemyRuntime(previousScenario) {
+    const previous = new Map(previousScenario.allRuntimeEntities()
+      .filter((entity) => entity.kind === "authoredEnemy")
+      .map((entity) => [entity.authoringId, entity]));
+    const next = new Map(this.scenario.allRuntimeEntities()
+      .filter((entity) => entity.kind === "authoredEnemy")
+      .map((entity) => [entity.authoringId, entity]));
+
+    for (let index = this.enemies.activeCount - 1; index >= 0; index -= 1) {
+      const spawnId = this.enemies.authoredSpawnId[index];
+      if (!spawnId) continue;
+      const authoringId = previousScenario.authoringIdForSpawnId(spawnId);
+      const before = authoringId ? previous.get(authoringId) : null;
+      const after = authoringId ? next.get(authoringId) : null;
+      const changed = before && after && (
+        before.definitionId !== after.definitionId
+        || before.layerId !== after.layerId
+        || before.x !== after.x
+        || before.z !== after.z
+        || before.rotation !== after.rotation
+      );
+      if (!after || changed) this.enemies.removeSwap(index);
+    }
+
+    for (const [authoringId, entity] of next) {
+      const before = previous.get(authoringId);
+      let existing = -1;
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        if (this.enemies.authoredSpawnId[index] === Number(entity.spawnId)) {
+          existing = index;
+          break;
+        }
+      }
+      const changed = before && (
+        before.definitionId !== entity.definitionId
+        || before.layerId !== entity.layerId
+        || before.x !== entity.x
+        || before.z !== entity.z
+        || before.rotation !== entity.rotation
+      );
+      if (!before || changed) {
+        if (existing < 0) this.#spawnAuthoredEnemy(entity);
+      }
+    }
   }
 
   /**
@@ -2177,6 +2284,7 @@ export class Simulation {
       this.#clearLayerRuntimeEvents();
     } else {
       this.#reconcileDynamicAuthoringRuntime(previousScenario);
+      this.#reconcileAuthoredEnemyRuntime(previousScenario);
       this.#reconcileElevatorAuthoringRuntime(previousScenario);
       this.navigationField.reset(this.map);
       if (this.authoredNavigationTopologyProfile !== AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1) {
@@ -2330,13 +2438,24 @@ export class Simulation {
             );
           }
         } else if (action.type === "removeEntity") {
-          if (action.kind !== "rock") throw new RangeError("Only authored rocks can be removed");
-          const index = this.rocks.findIndexById(action.id);
-          if (index < 0) throw new RangeError("Rock no longer exists");
-          const spawnId = this.rocks.spawnId[index];
-          const authoringId = this.scenario.authoringIdForSpawnId(spawnId);
-          if (!authoringId || !this.#removeAuthoredInstance(authoringId)) {
-            throw new RangeError("Rock is not authored");
+          if (action.kind === "enemyWizard" || action.kind === "enemyUrchin") {
+            const index = this.enemies.findIndexById(action.id);
+            if (index < 0) throw new RangeError("Enemy no longer exists");
+            if (enemyKindName(this.enemies.archetype[index]) !== action.kind) {
+              throw new RangeError("Enemy kind does not match stable identity");
+            }
+            this.enemies.removeSwap(index);
+          } else {
+            if (action.kind !== "rock") {
+              throw new RangeError("Only authored rocks or living enemies can be removed");
+            }
+            const index = this.rocks.findIndexById(action.id);
+            if (index < 0) throw new RangeError("Rock no longer exists");
+            const spawnId = this.rocks.spawnId[index];
+            const authoringId = this.scenario.authoringIdForSpawnId(spawnId);
+            if (!authoringId || !this.#removeAuthoredInstance(authoringId)) {
+              throw new RangeError("Rock is not authored");
+            }
           }
         } else if (
           action.type === "setDebugFlag" &&
@@ -2699,6 +2818,15 @@ export class Simulation {
         this.scenario.lastMutationError = "Dynamic prop pool capacity reached";
         return false;
       }
+    } else if (isAuthoredEnemyDefinition(definition)) {
+      const entity = this.scenario.entities.find(
+        (candidate) => candidate.authoringId === authoringId,
+      );
+      if (!entity || this.#spawnAuthoredEnemy(entity) === 0) {
+        this.scenario.removeInstance(authoringId);
+        this.scenario.lastMutationError = "Enemy pool capacity reached";
+        return false;
+      }
     }
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
       this.#markActiveLayerMapChanged();
@@ -2752,6 +2880,35 @@ export class Simulation {
         this.rocks.vx[rockIndex] = 0;
         this.rocks.vz[rockIndex] = 0;
       }
+    } else if (isAuthoredEnemyDefinition(definition) && spawnId !== null) {
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        if (this.enemies.authoredSpawnId[index] !== spawnId) continue;
+        const layerIndex = this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0;
+        this.enemies.x[index] = placement.transform.x;
+        this.enemies.z[index] = placement.transform.z;
+        this.enemies.previousX[index] = placement.transform.x;
+        this.enemies.previousZ[index] = placement.transform.z;
+        this.enemies.guardX[index] = placement.transform.x;
+        this.enemies.guardZ[index] = placement.transform.z;
+        this.enemies.guardLayerIndex[index] = layerIndex;
+        this.enemies.layerIndex[index] = layerIndex;
+        this.enemies.worldY[index] = this.layerBaseY[layerIndex];
+        this.enemies.previousWorldY[index] = this.layerBaseY[layerIndex];
+        this.enemies.vx[index] = 0;
+        this.enemies.vz[index] = 0;
+        const headings = [
+          { x: 1, z: 0 },
+          { x: 0, z: 1 },
+          { x: -1, z: 0 },
+          { x: 0, z: -1 },
+        ];
+        const heading = headings[normalizeQuarterTurns(placement.transform.rotation)];
+        this.enemies.facingX[index] = heading.x;
+        this.enemies.facingZ[index] = heading.z;
+        this.enemies.guardBaseFacingX[index] = heading.x;
+        this.enemies.guardBaseFacingZ[index] = heading.z;
+        break;
+      }
     }
     if (definition.traits.blocksMovement || definition.traits.blocksSight) {
       this.#markActiveLayerMapChanged();
@@ -2768,8 +2925,18 @@ export class Simulation {
     const definition = getPlaceableDefinition(instance.definitionId);
     const spawnId = this.scenario.spawnIdForAuthoringId(authoringId);
     const rockIndex = spawnId === null ? -1 : this.rocks.findIndexBySpawnId(spawnId);
+    let enemyIndex = -1;
+    if (spawnId !== null) {
+      for (let index = 0; index < this.enemies.activeCount; index += 1) {
+        if (this.enemies.authoredSpawnId[index] === spawnId) {
+          enemyIndex = index;
+          break;
+        }
+      }
+    }
     if (!this.scenario.removeInstance(authoringId)) return false;
     if (rockIndex >= 0) this.rocks.removeSwap(rockIndex);
+    if (enemyIndex >= 0) this.enemies.removeSwap(enemyIndex);
     if (definition?.traits.blocksMovement || definition?.traits.blocksSight) {
       this.#markActiveLayerMapChanged();
     }
@@ -3996,10 +4163,32 @@ export class Simulation {
     if (!this.encounter.enabled || simulationTick < this.encounter.nextSpawnTick) return;
     for (const state of this.obeliskEncounters) {
       if (!state.enabled || simulationTick < state.nextSpawnTick) continue;
+      if (!this.#obeliskCanSensePlayer(state)) continue;
       this.#attemptEnemySpawn(simulationTick, state);
       state.nextSpawnTick += state.spawnIntervalTicks;
     }
     this.#refreshEncounterAggregate();
+  }
+
+  /** Current authored obelisks activate only for a nearby player they can see. */
+  #obeliskCanSensePlayer(state) {
+    if (this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V2) return true;
+    if (this.player.layerIndex !== state.layerIndex) return false;
+    const dx = this.player.x - state.x;
+    const dz = this.player.z - state.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance > OBELISK.activationRangeMeters) return false;
+    if (distance <= 1e-9) return true;
+    const nx = dx / distance;
+    const nz = dz / distance;
+    const exitDistance = 0.5 / Math.max(Math.abs(nx), Math.abs(nz)) + 1e-4;
+    return !gridRayBlocked(
+      this.layerMaps[state.layerIndex] ?? this.map,
+      state.x + nx * exitDistance,
+      state.z + nz * exitDistance,
+      this.player.x,
+      this.player.z,
+    );
   }
 
   /** @param {number} simulationTick @param {Record<string,any>} state */
@@ -4029,7 +4218,7 @@ export class Simulation {
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
       if (this.enemies.homeObeliskSpawnId[index] === state.spawnId) homeAlive += 1;
     }
-    const encounterCapped = this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V1
+    const encounterCapped = this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
       ? homeAlive >= state.maximumAlive
       : this.enemies.activeCount >= state.maximumAlive;
     if (encounterCapped || this.enemies.activeCount >= this.enemies.capacity) {
@@ -11096,6 +11285,10 @@ export class Simulation {
         archetype,
         archetypeCode,
         id: this.enemies.id[index],
+        authoredSpawnId: this.enemies.authoredSpawnId[index] || null,
+        authoringId: this.enemies.authoredSpawnId[index]
+          ? this.scenario.authoringIdForSpawnId(this.enemies.authoredSpawnId[index])
+          : null,
         index,
         spawnSequence: this.enemies.spawnSequence[index],
         spawnTick: this.enemies.spawnTick[index],
@@ -11896,6 +12089,10 @@ export class Simulation {
       archetype,
       archetypeCode,
       id: this.enemies.id[index],
+      authoredSpawnId: this.enemies.authoredSpawnId[index] || null,
+      authoringId: this.enemies.authoredSpawnId[index]
+        ? this.scenario.authoringIdForSpawnId(this.enemies.authoredSpawnId[index])
+        : null,
       index,
       spawnSequence: this.enemies.spawnSequence[index],
       spawnTick: this.enemies.spawnTick[index],
@@ -12755,6 +12952,7 @@ export class Simulation {
       || recordingSchema === 18
       || recordingSchema === 19
       || recordingSchema === 20
+      || recordingSchema === 21
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -12907,13 +13105,18 @@ export class Simulation {
         obeliskEncounterProfile = String(
           recording.configuration?.obeliskEncounterProfile ?? "",
         );
-        if (obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1) {
+        const expectedObeliskProfile = recordingSchema >= 21
+          ? OBELISK_ENCOUNTER_PROFILE_V2
+          : OBELISK_ENCOUNTER_PROFILE_V1;
+        if (obeliskEncounterProfile !== expectedObeliskProfile) {
           throw new TypeError(
-            "Schema-v20 recording has invalid or missing obelisk-encounter profile",
+            `Schema-v${recordingSchema} recording has invalid or missing obelisk-encounter profile`,
           );
         }
         if (Number(recording.initialAuthoringMap?.version) !== AUTHORING_MAP_VERSION) {
-          throw new TypeError("Schema-v20 recording requires an authoring-map v7 baseline");
+          throw new TypeError(
+            `Schema-v${recordingSchema} recording requires an authoring-map v7 baseline`,
+          );
         }
       }
     }

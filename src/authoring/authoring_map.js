@@ -1,6 +1,7 @@
 // @ts-check
 
 import {
+  ENEMY_WIZARD,
   MAP_VERSION,
   NAVIGATION_TOPOLOGY,
   OBELISK,
@@ -252,6 +253,7 @@ function normalizeCurrentDocument(input) {
   const layerIds = new Set();
   const instanceIds = new Set();
   let obeliskCount = 0;
+  let authoredEnemyCount = 0;
   const baseHeights = new Map();
   const layers = layerValues.map((layerValue, layerIndex) => {
     const path = `layers[${layerIndex}]`;
@@ -411,6 +413,7 @@ function normalizeCurrentDocument(input) {
       } else if (definition.placementTarget !== "instance") {
         issue("error", `${instancePath}.definitionId`, "definition-target", `Definition "${definitionId}" is not a sparse instance.`, id);
       }
+      if (definition?.traits.runtimeKind === "authored-enemy") authoredEnemyCount += 1;
       const x = finiteValue(instanceSource.x, `${instancePath}.x`, id);
       const z = finiteValue(instanceSource.z, `${instancePath}.z`, id);
       let rotation = Number(instanceSource.rotation);
@@ -527,6 +530,14 @@ function normalizeCurrentDocument(input) {
       "layers",
       "obelisk-capacity",
       `Map contains more than the ${OBELISK.capacity}-obelisk limit.`,
+    );
+  }
+  if (authoredEnemyCount > ENEMY_WIZARD.capacity) {
+    issue(
+      "error",
+      "layers",
+      "authored-enemy-capacity",
+      `Map contains more than the ${ENEMY_WIZARD.capacity}-enemy runtime limit.`,
     );
   }
 

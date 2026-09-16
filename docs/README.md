@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v20 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v21 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 
@@ -54,6 +54,7 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 ## Open defects
 
+- [Obelisk activation range versus occlusion readability](./bugs/obelisk-activation-readability.md) — the 20-meter radius is correct, but hidden line-of-sight rejection makes the effective boundary look much smaller; add explicit activation diagnostics later.
 - [Navigation floor transitions and debug readability](./bugs/navigation-floor-debug-and-ai.md) — near-term reports of a stale floor overlay and suspected enemy retargeting; distinguish presentation state from valid pursuit before map-authoring acceptance.
 - [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
 - [Elevator crowding during enemy traversal](./bugs/elevator-enemy-queueing.md) — M1C's single-rider route works, but multi-enemy upward boarding needs a later bounded queue or larger-deck decision.

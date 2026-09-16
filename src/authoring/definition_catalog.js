@@ -1,6 +1,12 @@
 // @ts-check
 
-import { OBELISK, ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
+import {
+  ENEMY_URCHIN,
+  ENEMY_WIZARD,
+  OBELISK,
+  ROCK_ARCHETYPES,
+  VERTICAL_PHYSICS,
+} from "../config.js";
 
 const CATEGORY_LABELS = Object.freeze({
   surface: "Surfaces",
@@ -172,6 +178,29 @@ export const PLACEABLE_DEFINITIONS = Object.freeze([
       spawnIntervalTicks: OBELISK.defaultSpawnIntervalTicks,
     },
   }),
+  ...[
+    ["wizard", "Enemy wizard", ENEMY_WIZARD, "#a85e66", "W"],
+    ["urchin", "Enemy urchin", ENEMY_URCHIN, "#a9794f", "U"],
+  ].map(([archetype, label, enemy, fill, glyph]) => freezeDefinition({
+    id: `actor.enemy.${archetype}`,
+    label,
+    category: "object",
+    categoryLabel: CATEGORY_LABELS.object,
+    placementMode: "stamp",
+    placementTarget: "instance",
+    footprint: { cells: [{ x: 0, z: 0 }] },
+    debug: { fill, alternateFill: fill, stroke: "#f1d9bd", glyph },
+    renderAsset: null,
+    traits: {
+      runtimeKind: "authored-enemy",
+      enemyArchetype: archetype,
+      radius: enemy.radius,
+      massKg: enemy.massKg,
+      snap: "tenth",
+      blocksMovement: false,
+      blocksSight: false,
+    },
+  })),
   freezeDefinition({
     id: "object.pillar",
     label: "Pillar",
@@ -320,6 +349,16 @@ export function isDynamicBodyDefinition(definition) {
     && definition.traits?.dynamic === true
     && Number.isFinite(Number(definition.traits.massKg))
     && Number(definition.traits.massKg) > 0,
+  );
+}
+
+/** @param {Record<string, any>|null|undefined} definition */
+export function isAuthoredEnemyDefinition(definition) {
+  return Boolean(
+    definition?.placementTarget === "instance"
+    && definition.traits?.runtimeKind === "authored-enemy"
+    && (definition.traits.enemyArchetype === "wizard"
+      || definition.traits.enemyArchetype === "urchin")
   );
 }
 

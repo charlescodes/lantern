@@ -1441,6 +1441,13 @@ pre {
   background: rgba(4, 7, 5, 0.38);
 }
 
+.inspector-section .danger-button {
+  width: 100%;
+  margin-top: 8px;
+  border-color: rgba(208, 91, 99, 0.62);
+  color: #ef9da3;
+}
+
 .flag-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

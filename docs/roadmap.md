@@ -2,7 +2,7 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v20, authoring-map v7. M1C.1–M1C.5 are
+> `0.9.3`, recording schema v21, authoring-map v7. M1C.1–M1C.5 are
 > implemented; the separate M1C manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 

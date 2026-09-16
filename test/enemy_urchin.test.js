@@ -35,6 +35,7 @@ test("enemy and projectile pools preserve stable archetype identity through swap
   for (const archetype of [ENEMY_ARCHETYPE.wizard, ENEMY_ARCHETYPE.urchin]) {
     enemies.spawn({
       archetype,
+      authoredSpawnId: 100 + archetype,
       spawnSequence: archetype,
       spawnTick: 0,
       x: archetype,
@@ -47,6 +48,7 @@ test("enemy and projectile pools preserve stable archetype identity through swap
   }
   enemies.removeSwap(0);
   assert.equal(enemies.archetype[0], ENEMY_ARCHETYPE.urchin);
+  assert.equal(enemies.authoredSpawnId[0], 100 + ENEMY_ARCHETYPE.urchin);
 
   const projectiles = new ProjectilePool(3);
   projectiles.spawn({ x: 1, z: 1, vx: 0, vz: 0, lifetime: 1, radius: 0.1 });
@@ -78,6 +80,24 @@ test("navigation encounters spawn independently tuned half-height Urchins", () =
   assert.equal(enemy.maximumHealth, ENEMY_URCHIN.maximumHealth);
   assert.equal(enemy.presentationHeight, ENEMY_URCHIN.presentationHeight);
   assert.deepEqual(enemy.cooldowns, { "thrown-stone": 0 });
+});
+
+test("stable enemy identities can be despawned through a replay-visible command", () => {
+  const simulation = new Simulation({
+    scenario: urchinScenario(),
+    particleBurstCount: 0,
+  });
+  simulation.tick(null);
+  const [enemy] = simulation.snapshot().enemies;
+  assert.equal(enemy.kind, "enemyUrchin");
+
+  simulation.tick({
+    actions: [{ type: "removeEntity", kind: enemy.kind, id: enemy.id }],
+  });
+
+  assert.equal(simulation.snapshot().enemies.length, 0);
+  assert.equal(simulation.snapshot().deadBodies.dynamic.length, 0);
+  assert.equal(Simulation.replay(simulation.exportCommandLog()).snapshot().enemies.length, 0);
 });
 
 test("thrown stones deal two damage without impulse or spell effects and disappear", () => {

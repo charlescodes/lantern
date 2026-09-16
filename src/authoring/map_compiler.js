@@ -10,6 +10,7 @@ import {
 } from "./authoring_map.js";
 import {
   getPlaceableDefinition,
+  isAuthoredEnemyDefinition,
   isDynamicBodyDefinition,
   isDynamicBoxDefinition,
 } from "./definition_catalog.js";
@@ -244,6 +245,21 @@ function compileLayer(document, layer, layerIndex) {
   }));
   for (const instance of layer.instances) {
     const definition = getPlaceableDefinition(instance.definitionId);
+    if (!isAuthoredEnemyDefinition(definition)) continue;
+    entities.push({
+      kind: /** @type {const} */ ("authoredEnemy"),
+      definitionId: instance.definitionId,
+      enemyArchetype: definition.traits.enemyArchetype,
+      x: instance.x,
+      z: instance.z,
+      rotation: instance.rotation,
+      spawnId: spawnIds.get(`${layer.id}:instance:${instance.id}`),
+      authoringId: instance.id,
+      layerId: layer.id,
+    });
+  }
+  for (const instance of layer.instances) {
+    const definition = getPlaceableDefinition(instance.definitionId);
     if (definition?.traits.runtimeKind !== "obelisk") continue;
     entities.push({
       kind: /** @type {const} */ ("obelisk"),
@@ -271,6 +287,7 @@ function compileLayer(document, layer, layerIndex) {
       runtimeKind: definition?.traits.runtimeKind ?? "unknown",
       runtimeSpawnId: isDynamicBodyDefinition(definition)
         || definition?.traits.runtimeKind === "obelisk"
+        || isAuthoredEnemyDefinition(definition)
         ? spawnIds.get(`${layer.id}:instance:${instance.id}`)
         : null,
       collisionCells: (collisionCellsByInstance.get(instance.id) ?? []).map((cell) => ({ ...cell })),

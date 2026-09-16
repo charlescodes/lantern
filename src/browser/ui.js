@@ -22,6 +22,18 @@ function required(id) {
   return element;
 }
 
+/**
+ * Assigning identical textContent still replaces the DOM text node and clears
+ * a user's text selection, so live instruments only write on real changes.
+ * @param {{textContent:string|null}} element
+ * @param {string} text
+ */
+export function setTextContentIfChanged(element, text) {
+  if (element.textContent === text) return false;
+  element.textContent = text;
+  return true;
+}
+
 export class ArenaUi {
   constructor() {
     this.pauseButton = /** @type {HTMLButtonElement} */ (required("pause-button"));
@@ -36,6 +48,9 @@ export class ArenaUi {
     this.pointerValue = required("pointer-value");
     this.telemetry = required("telemetry-output");
     this.inspector = required("inspector-output");
+    this.despawnEnemyButton = /** @type {HTMLButtonElement} */ (
+      required("despawn-enemy-button")
+    );
     this.events = required("events-output");
     this.rockPool = required("rock-pool");
     this.enemyPool = required("enemy-pool");
@@ -134,7 +149,7 @@ export class ArenaUi {
   /**
    * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
    * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
-   * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinnedHidden?:boolean,mode:string,developerToolsOpen?:boolean}} view
+   * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinned?:{kind:string,id:number|string}|null,pinnedHidden?:boolean,mode:string,developerToolsOpen?:boolean}} view
    * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>,kineticFragments?:{active:number,capacity:number,dropped:number}}} presentation
    */
   update(snapshot, metrics, view, presentation) {
@@ -228,11 +243,17 @@ export class ArenaUi {
     this.soundEventBar.style.width = `${(snapshot.pools.soundEvents.active / snapshot.pools.soundEvents.capacity) * 100}%`;
     this.particleBar.style.width = `${(snapshot.pools.particles.active / snapshot.pools.particles.capacity) * 100}%`;
     const inspected = view.pinnedHidden ? null : view.inspected ?? view.hover;
-    this.inspector.textContent = view.pinnedHidden
+    const inspectorText = view.pinnedHidden
       ? "Pinned entity hidden by TrueSight."
       : inspected
         ? JSON.stringify(rounded(inspected), null, 2)
         : "Move over the arena to inspect. Click to pin.";
+    setTextContentIfChanged(this.inspector, inspectorText);
+    const pinnedEnemy = view.mode === "play"
+      && (view.pinned?.kind === "enemyWizard" || view.pinned?.kind === "enemyUrchin")
+      && Boolean(view.inspected);
+    this.despawnEnemyButton.hidden = !pinnedEnemy;
+    this.despawnEnemyButton.disabled = !pinnedEnemy;
     const events = snapshot.recentEvents.slice(-5).reverse();
     this.events.textContent = events.length
       ? events.map((event) => {

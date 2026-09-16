@@ -21,6 +21,7 @@ import {
   ENEMY_WIZARD,
   OBELISK_ENCOUNTER_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_V1,
+  OBELISK_ENCOUNTER_PROFILE_V2,
   SCHEMA_VERSION,
 } from "../src/config.js";
 import { PERCEPTION_STATE } from "../src/sim/perceptive_wizard.js";
@@ -192,6 +193,73 @@ test("placing the first obelisk in a running map activates its encounter", () =>
   assert.equal(simulation.snapshot().enemies.length, 1);
 });
 
+test("authored obelisks wait while the player is distant or occluded and fire when seen", () => {
+  const map = borderedMap(32, 14);
+  map.set(5, 7, 1);
+  let document = new ArenaScenario(map).toAuthoringJSON();
+  document = addObelisk(document, document.playerStart.layerId, 10.5, 7.5, {
+    enemyArchetype: "urchin",
+    maximumAlive: 1,
+    spawnIntervalTicks: 600,
+  }).document;
+  const simulation = new Simulation({ scenario: new ArenaScenario(document), particleBurstCount: 0 });
+  simulation.player.x = 1.5;
+  simulation.player.z = 7.5;
+
+  simulation.tick(null);
+  assert.equal(simulation.snapshot().enemies.length, 0, "wall should occlude the first due spawn");
+  simulation.map.set(5, 7, 0);
+  simulation.tick(null);
+  assert.equal(simulation.snapshot().enemies.length, 1, "a due obelisk should fire immediately once visible");
+
+  const distantMap = borderedMap(40, 14);
+  let distantDocument = new ArenaScenario(distantMap).toAuthoringJSON();
+  distantDocument = addObelisk(
+    distantDocument,
+    distantDocument.playerStart.layerId,
+    30.5,
+    7.5,
+    { enemyArchetype: "urchin", maximumAlive: 1, spawnIntervalTicks: 600 },
+  ).document;
+  const distant = new Simulation({ scenario: new ArenaScenario(distantDocument), particleBurstCount: 0 });
+  distant.player.x = 1.5;
+  distant.player.z = 7.5;
+  distant.tick(null);
+  assert.equal(distant.snapshot().enemies.length, 0);
+  distant.player.x = 12.5;
+  distant.tick(null);
+  assert.equal(distant.snapshot().enemies.length, 1);
+});
+
+test("authored enemies are immediate editable starting instances without obelisk ownership", () => {
+  let document = new ArenaScenario(borderedMap()).toAuthoringJSON();
+  const placed = placeInstance(document, "actor.enemy.urchin", 6.5, 6.5, {
+    layerId: document.playerStart.layerId,
+  });
+  document = placed.document;
+  const simulation = new Simulation({ scenario: new ArenaScenario(document), particleBurstCount: 0 });
+  let [enemy] = simulation.snapshot().enemies;
+  assert.equal(enemy.archetype, "urchin");
+  assert.equal(enemy.authoringId, placed.instanceId);
+  assert.equal(enemy.home.obeliskSpawnId, null);
+
+  simulation.tick({ actions: [{ type: "removeInstance", authoringId: placed.instanceId }] });
+  assert.equal(simulation.snapshot().enemies.length, 0);
+
+  simulation.tick({
+    actions: [{
+      type: "placeInstance",
+      definitionId: "actor.enemy.wizard",
+      x: 7.5,
+      z: 6.5,
+      rotation: 0,
+    }],
+  });
+  [enemy] = simulation.snapshot().enemies;
+  assert.equal(enemy.archetype, "wizard");
+  assert.ok(enemy.authoringId);
+});
+
 test("runtime obelisk presentation stays on the viewed floor when the editor changes layers", () => {
   let document = new ArenaScenario(borderedMap()).toAuthoringJSON();
   const lowerLayerId = document.playerStart.layerId;
@@ -303,17 +371,23 @@ test("a returning enemy routes through an elevator to its captured home layer an
   assert.ok(simulation.navigationRouteEvents().recent.some((event) => event.type === "ride"));
 });
 
-test("schema v20 records both profiles while v19 and v18 select their frozen boundaries", () => {
+test("schema v21 records sentry encounters while older schemas keep frozen boundaries", () => {
   const simulation = new Simulation({ particleBurstCount: 0 });
   const current = simulation.exportCommandLog();
   assert.equal(current.schemaVersion, SCHEMA_VERSION);
   assert.equal(current.configuration.enemyHomeProfile, ENEMY_HOME_PROFILE_V1);
   assert.equal(
     current.configuration.obeliskEncounterProfile,
-    OBELISK_ENCOUNTER_PROFILE_V1,
+    OBELISK_ENCOUNTER_PROFILE_V2,
   );
 
-  const v19 = structuredClone(current);
+  const v20 = structuredClone(current);
+  v20.schemaVersion = 20;
+  v20.configuration.obeliskEncounterProfile = OBELISK_ENCOUNTER_PROFILE_V1;
+  const replay20 = Simulation.replay(v20);
+  assert.equal(replay20.obeliskEncounterProfile, OBELISK_ENCOUNTER_PROFILE_V1);
+
+  const v19 = structuredClone(v20);
   v19.schemaVersion = 19;
   delete v19.configuration.obeliskEncounterProfile;
   const replay19 = Simulation.replay(v19);

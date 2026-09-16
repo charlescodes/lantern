@@ -229,7 +229,7 @@ test("authoring commands preserve live player state until explicit restore", () 
   assert.equal(simulation.player.verticalMode, VERTICAL_MODE.FALLING);
 });
 
-test("encounter obelisk is map-owned and spawns enemies on its own layer", () => {
+test("map-owned obelisk waits for the player on its floor before spawning there", () => {
   let { document, ids } = holeDocument({ layers: 2 });
   document.playerStart = { layerId: ids[0], x: 2.5, z: 2.5 };
   document = paintSurface(document, 5, 5, "surface.stone", ids[1]);
@@ -247,6 +247,11 @@ test("encounter obelisk is map-owned and spawns enemies on its own layer", () =>
     enemyAiProfile: ENEMY_AI_PROFILE_BASIC,
     particleBurstCount: 0,
   });
+  simulation.tick(null);
+  assert.equal(simulation.enemies.activeCount, 0);
+  simulation.player.layerIndex = 1;
+  simulation.player.worldY = 3;
+  simulation.player.previousWorldY = 3;
   simulation.tick(null);
   assert.equal(simulation.enemies.activeCount, 1);
   assert.equal(simulation.enemies.layerIndex[0], 1);

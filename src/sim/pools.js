@@ -141,6 +141,7 @@ export class EnemyPool {
     this.archetype = new Uint8Array(capacity);
     this.spawnSequence = new Uint32Array(capacity);
     this.spawnTick = new Uint32Array(capacity);
+    this.authoredSpawnId = new Uint32Array(capacity);
     this.x = new Float32Array(capacity);
     this.z = new Float32Array(capacity);
     this.previousX = new Float32Array(capacity);
@@ -294,7 +295,7 @@ export class EnemyPool {
     this.nextId = 1;
   }
 
-  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardLayerIndex?:number,homeObeliskSpawnId?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
+  /** @param {{spawnSequence:number,spawnTick:number,x:number,z:number,radius:number,massKg:number,maximumHealth:number,shotReadyTick:number,archetype?:number,authoredSpawnId?:number,facingX?:number,facingZ?:number,guardX?:number,guardZ?:number,guardLayerIndex?:number,homeObeliskSpawnId?:number,guardBaseFacingX?:number,guardBaseFacingZ?:number,perceptionLane?:number,guardSweepPhase?:number,worldY?:number,layerIndex?:number,verticalCapabilities?:number,supportKind?:number,supportId?:number,verticalMode?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -307,6 +308,7 @@ export class EnemyPool {
     this.archetype[index] = value.archetype ?? ENEMY_ARCHETYPE.wizard;
     this.spawnSequence[index] = value.spawnSequence;
     this.spawnTick[index] = value.spawnTick;
+    this.authoredSpawnId[index] = value.authoredSpawnId ?? 0;
     this.x[index] = value.x;
     this.z[index] = value.z;
     this.previousX[index] = value.x;
@@ -446,6 +448,7 @@ export class EnemyPool {
         this.archetype,
         this.spawnSequence,
         this.spawnTick,
+        this.authoredSpawnId,
         this.x,
         this.z,
         this.previousX,
