@@ -29,6 +29,7 @@ export class CanvasPresentation {
     flags = new PresentationFlags(options),
     damageNumberCanvas = null,
   ) {
+    this.camera = camera;
     this.renderer = new DebugRenderer(canvas, camera, options.dpr);
     this.flags = flags;
     this.options = options;

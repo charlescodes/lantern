@@ -295,3 +295,58 @@ test("Canvas batches the same tumbling triangle state into one charcoal path", (
   assert.equal(presentation.kineticFragments.rotationX, rotationX);
   assert.equal(presentation.diagnostics().kineticFragments.active, 16);
 });
+
+test("Canvas projects and draws damage numbers through its retained camera", () => {
+  const initial = new Simulation({ particleBurstCount: 0 }).snapshot();
+  const { canvas } = fakeCanvas2d();
+  const drawn = [];
+  const overlayContext = {
+    globalAlpha: 1,
+    setTransform() {},
+    clearRect() {},
+    strokeText(text, x, y) { drawn.push({ kind: "stroke", text, x, y }); },
+    fillText(text, x, y) { drawn.push({ kind: "fill", text, x, y }); },
+  };
+  const overlayCanvas = {
+    width: 1,
+    height: 1,
+    getContext: () => overlayContext,
+    getBoundingClientRect: () => ({ width: 960, height: 640 }),
+  };
+  const options = parsePresentationOptions("?renderer=2d&damageNumbers=1");
+  const camera = new Camera2D();
+  const presentation = new CanvasPresentation(
+    canvas,
+    camera,
+    initial,
+    options,
+    new PresentationFlags(options),
+    overlayCanvas,
+  );
+  const damaged = structuredClone(initial);
+  damaged.tick += 1;
+  damaged.recentCombatEvents = [{
+    type: "damage",
+    id: 1,
+    tick: damaged.tick,
+    amount: 25,
+    position: { x: damaged.player.x, z: damaged.player.z },
+    visualCenterY: 0.8,
+    layerIndex: damaged.player.layerIndex,
+    layerId: damaged.player.layerId,
+    launchDirection: { x: 1, z: 0 },
+    target: { kind: "enemyWizard", id: 1, team: "enemy" },
+  }];
+  const previousWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    presentation.render(damaged, 1, view(damaged));
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+
+  assert.equal(presentation.camera, camera);
+  assert.equal(drawn.filter((entry) => entry.kind === "fill").length, 1);
+  assert.ok(drawn.every((entry) => Number.isFinite(entry.x) && Number.isFinite(entry.y)));
+});
