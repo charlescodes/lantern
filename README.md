@@ -1,5 +1,7 @@
 # Lantern 0.9.3 / M1B Vertical Traversal Closure
 
+![Gameplay Demo](assets/demo.gif)
+
 A browser-first fixed-step combat and graybox-authoring sandbox. Lantern combines replay-safe Fireball combat, investigative wizards, bounded dynamic clutter, a generated multi-floor editor, and deliberately limited 2.5D vertical traversal: authored holes, autonomous two-stop elevators, falling, committed jumps, and grounded pressure plates. The live enemy pool is sized for 64 while the authored encounter caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js view consumes the same read-only snapshots, map state, AI diagnostics, body state, lights, and TrueSight frame. Press `;` to open the developer toolbox.
 
 ## Run
