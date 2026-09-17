@@ -51,6 +51,7 @@ import {
   OBELISK_ENCOUNTER_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_V2,
+  OBELISK_ENCOUNTER_PROFILE_V3,
   PARTICLE,
   PARTICLE_PROFILES,
   PARTICLE_PROFILE_M02,
@@ -924,10 +925,11 @@ export class Simulation {
       throw new RangeError(`Unsupported enemy-home profile: ${this.enemyHomeProfile}`);
     }
     this.obeliskEncounterProfile = options.obeliskEncounterProfile
-      ?? OBELISK_ENCOUNTER_PROFILE_V2;
+      ?? OBELISK_ENCOUNTER_PROFILE_V3;
     if (
       this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V1
       && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V2
+      && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V3
       && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_NONE
     ) {
       throw new RangeError(
@@ -1616,6 +1618,7 @@ export class Simulation {
           ),
           nextSpawnTick: existing?.nextSpawnTick ?? this.tickCount + (
             this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V2
+              || this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V3
               ? Number(obelisk.spawnIntervalTicks ?? OBELISK.defaultSpawnIntervalTicks)
               : 1
           ),
@@ -4165,14 +4168,19 @@ export class Simulation {
       if (!state.enabled || simulationTick < state.nextSpawnTick) continue;
       if (!this.#obeliskCanSensePlayer(state)) continue;
       this.#attemptEnemySpawn(simulationTick, state);
-      state.nextSpawnTick += state.spawnIntervalTicks;
+      state.nextSpawnTick = this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V3
+        ? simulationTick + state.spawnIntervalTicks
+        : state.nextSpawnTick + state.spawnIntervalTicks;
     }
     this.#refreshEncounterAggregate();
   }
 
   /** Current authored obelisks activate only for a nearby player they can see. */
   #obeliskCanSensePlayer(state) {
-    if (this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V2) return true;
+    if (
+      this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V2
+      && this.obeliskEncounterProfile !== OBELISK_ENCOUNTER_PROFILE_V3
+    ) return true;
     if (this.player.layerIndex !== state.layerIndex) return false;
     const dx = this.player.x - state.x;
     const dz = this.player.z - state.z;
@@ -12953,6 +12961,7 @@ export class Simulation {
       || recordingSchema === 19
       || recordingSchema === 20
       || recordingSchema === 21
+      || recordingSchema === 22
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -13105,9 +13114,11 @@ export class Simulation {
         obeliskEncounterProfile = String(
           recording.configuration?.obeliskEncounterProfile ?? "",
         );
-        const expectedObeliskProfile = recordingSchema >= 21
-          ? OBELISK_ENCOUNTER_PROFILE_V2
-          : OBELISK_ENCOUNTER_PROFILE_V1;
+        const expectedObeliskProfile = recordingSchema >= 22
+          ? OBELISK_ENCOUNTER_PROFILE_V3
+          : recordingSchema >= 21
+            ? OBELISK_ENCOUNTER_PROFILE_V2
+            : OBELISK_ENCOUNTER_PROFILE_V1;
         if (obeliskEncounterProfile !== expectedObeliskProfile) {
           throw new TypeError(
             `Schema-v${recordingSchema} recording has invalid or missing obelisk-encounter profile`,

@@ -521,6 +521,7 @@ mapPalette = new MapPalette({
   onRotate: () => authoringEditor.rotate(),
   onUndo: () => authoringEditor.undo(),
   onRedo: () => authoringEditor.redo(),
+  onFillConnectorNavigation: () => authoringEditor.fillConnectorNavigation(),
   onExtents: (value) => authoringEditor.setShowAuthoringExtents(value),
   onRestore: restoreAuthoredPositions,
 });

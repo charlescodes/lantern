@@ -22,6 +22,7 @@ import {
   OBELISK_ENCOUNTER_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_V2,
+  OBELISK_ENCOUNTER_PROFILE_V3,
   SCHEMA_VERSION,
 } from "../src/config.js";
 import { PERCEPTION_STATE } from "../src/sim/perceptive_wizard.js";
@@ -231,6 +232,55 @@ test("authored obelisks wait while the player is distant or occluded and fire wh
   assert.equal(distant.snapshot().enemies.length, 1);
 });
 
+test("a sentry obelisk banks only one overdue spawn and resumes its interval from release", () => {
+  const interval = 10;
+  const source = borderedMap(40, 14);
+  let document = new ArenaScenario(source).toAuthoringJSON();
+  document = addObelisk(
+    document,
+    document.playerStart.layerId,
+    30.5,
+    7.5,
+    { enemyArchetype: "urchin", maximumAlive: 4, spawnIntervalTicks: interval },
+  ).document;
+  const simulation = new Simulation({ scenario: new ArenaScenario(document), particleBurstCount: 0 });
+  simulation.player.x = 1.5;
+  simulation.player.z = 7.5;
+  for (let tick = 0; tick < 50; tick += 1) simulation.tick(null);
+  assert.equal(simulation.snapshot().enemies.length, 0);
+
+  simulation.player.x = 12.5;
+  simulation.tick(null);
+  assert.equal(simulation.snapshot().enemies.length, 1, "one banked enemy should release immediately");
+  simulation.tick(null);
+  assert.equal(simulation.snapshot().enemies.length, 1, "the overdue schedule must not burst on the next tick");
+  for (let tick = 0; tick < interval * 3; tick += 1) simulation.tick(null);
+  const snapshot = simulation.snapshot();
+  assert.equal(snapshot.enemies.length, 4);
+  const spawnTicks = snapshot.recentCombatEvents
+    .filter((event) => event.type === "spawn" && event.result === "spawned")
+    .map((event) => event.tick);
+  assert.equal(spawnTicks.length, 4);
+  assert.deepEqual(
+    spawnTicks.slice(1).map((tick, index) => tick - spawnTicks[index]),
+    [interval, interval, interval],
+  );
+  for (let tick = 0; tick < interval * 2; tick += 1) simulation.tick(null);
+  assert.equal(simulation.snapshot().enemies.length, 4, "the authored living cap remains authoritative");
+
+  const legacy = new Simulation({
+    scenario: new ArenaScenario(document),
+    obeliskEncounterProfile: OBELISK_ENCOUNTER_PROFILE_V2,
+    particleBurstCount: 0,
+  });
+  legacy.player.x = 1.5;
+  legacy.player.z = 7.5;
+  for (let tick = 0; tick < 50; tick += 1) legacy.tick(null);
+  legacy.player.x = 12.5;
+  for (let tick = 0; tick < 4; tick += 1) legacy.tick(null);
+  assert.equal(legacy.snapshot().enemies.length, 4, "schema-v21 catch-up behavior remains frozen");
+});
+
 test("authored enemies are immediate editable starting instances without obelisk ownership", () => {
   let document = new ArenaScenario(borderedMap()).toAuthoringJSON();
   const placed = placeInstance(document, "actor.enemy.urchin", 6.5, 6.5, {
@@ -371,17 +421,23 @@ test("a returning enemy routes through an elevator to its captured home layer an
   assert.ok(simulation.navigationRouteEvents().recent.some((event) => event.type === "ride"));
 });
 
-test("schema v21 records sentry encounters while older schemas keep frozen boundaries", () => {
+test("schema v22 records banked sentry encounters while older schemas keep frozen boundaries", () => {
   const simulation = new Simulation({ particleBurstCount: 0 });
   const current = simulation.exportCommandLog();
   assert.equal(current.schemaVersion, SCHEMA_VERSION);
   assert.equal(current.configuration.enemyHomeProfile, ENEMY_HOME_PROFILE_V1);
   assert.equal(
     current.configuration.obeliskEncounterProfile,
-    OBELISK_ENCOUNTER_PROFILE_V2,
+    OBELISK_ENCOUNTER_PROFILE_V3,
   );
 
-  const v20 = structuredClone(current);
+  const v21 = structuredClone(current);
+  v21.schemaVersion = 21;
+  v21.configuration.obeliskEncounterProfile = OBELISK_ENCOUNTER_PROFILE_V2;
+  const replay21 = Simulation.replay(v21);
+  assert.equal(replay21.obeliskEncounterProfile, OBELISK_ENCOUNTER_PROFILE_V2);
+
+  const v20 = structuredClone(v21);
   v20.schemaVersion = 20;
   v20.configuration.obeliskEncounterProfile = OBELISK_ENCOUNTER_PROFILE_V1;
   const replay20 = Simulation.replay(v20);

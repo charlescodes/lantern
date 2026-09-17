@@ -117,7 +117,7 @@ test("unseen player hole drops do not grant cross-floor pursuit evidence", () =>
 test("schema-v18 records witnessed-hole pursuit while schema-v17 replays retain it disabled", () => {
   const { simulation } = createSimulation();
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 21);
+  assert.equal(recording.schemaVersion, 22);
   assert.equal(recording.configuration.holePursuitProfile, HOLE_PURSUIT_PROFILE_V1);
   assert.equal(Simulation.replay(recording).holePursuitProfile, HOLE_PURSUIT_PROFILE_V1);
   const legacy = structuredClone(recording);

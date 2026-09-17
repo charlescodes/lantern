@@ -109,6 +109,15 @@ This is one of the strongest seams in the project and should remain boring.
 - [`src/sim/tactical_wizard.js`](../src/sim/tactical_wizard.js) and [`perceptive_wizard.js`](../src/sim/perceptive_wizard.js) contain deterministic AI calculations. State-machine orchestration still lives in `Simulation`.
 - [`src/sim/navigation_field.js`](../src/sim/navigation_field.js), [`destination_field_cache.js`](../src/sim/destination_field_cache.js), [`grid_reachability.js`](../src/sim/grid_reachability.js), and [`map_cell_broadphase.js`](../src/sim/map_cell_broadphase.js) are bounded data-oriented infrastructure.
 
+Authored navigation is a small inspectable graph over the layer-local grid, not
+a runtime-generated navmesh. The editor's Navigation channel paints cyan nodes
+and links them to visible purple elevator ports. **Fill connector navigation**
+is an explicit, whole-document helper that adds or reuses cardinal staging
+nodes and writes a deterministic sparse set of ordinary same-floor links. It
+runs as one undoable command, preserves manual topology, reports endpoints with
+no safe staging cell, and is idempotent; its result remains normal editable
+authoring-map v7 data.
+
 ### Spell data
 
 - [`src/spells/fireball_definition.js`](../src/spells/fireball_definition.js) defines and validates the data contract for Fireball.

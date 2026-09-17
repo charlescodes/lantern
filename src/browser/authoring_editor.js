@@ -600,6 +600,42 @@ export class AuthoringEditorController {
     return result;
   }
 
+  fillConnectorNavigation() {
+    const beforeNodes = this.currentSnapshot.authoring.navigationNodes?.length ?? 0;
+    const beforeLinks = this.currentSnapshot.authoring.navigationLinks?.length ?? 0;
+    const result = this.commitAction({ type: "generateConnectorNavigationSkeleton" });
+    if (result.snapshot) this.currentSnapshot = result.snapshot;
+    this.#reconcileLayers();
+    this.state.reconcile(this.currentSnapshot.authoring);
+    this.#refreshHoverAndPreview();
+    if (!result.ok) {
+      this.#message(result.error ?? "Connector navigation generation was rejected", false);
+      return false;
+    }
+    const authoring = this.currentSnapshot.authoring;
+    const addedNodes = Math.max(0, (authoring.navigationNodes?.length ?? 0) - beforeNodes);
+    const addedLinks = Math.max(0, (authoring.navigationLinks?.length ?? 0) - beforeLinks);
+    const linkedEndpoints = new Set();
+    for (const link of authoring.navigationLinks ?? []) {
+      for (const endpoint of [link.a, link.b]) {
+        if (endpoint.kind === "connector-endpoint") {
+          linkedEndpoints.add(`${endpoint.connectorId}:${endpoint.stop}`);
+        }
+      }
+    }
+    const unresolved = Math.max(0, (authoring.connectors?.length ?? 0) * 2 - linkedEndpoints.size);
+    if (addedNodes === 0 && addedLinks === 0 && unresolved === 0) {
+      this.#message("Connector navigation is already complete", true);
+    } else {
+      const suffix = unresolved > 0 ? `; ${unresolved} endpoint${unresolved === 1 ? "" : "s"} unresolved` : "";
+      this.#message(
+        `Connector navigation added ${addedNodes} node${addedNodes === 1 ? "" : "s"} and ${addedLinks} link${addedLinks === 1 ? "" : "s"}${suffix}`,
+        true,
+      );
+    }
+    return true;
+  }
+
   /** @param {string} connectorId */
   removeConnector(connectorId) {
     if (!this.#connector(connectorId)) return false;

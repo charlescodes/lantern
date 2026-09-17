@@ -35,6 +35,7 @@ export class MapPalette {
    * onUndo?:()=>void,
    * onRedo?:()=>void,
    * onExtents?:(value:boolean)=>void,
+   * onFillConnectorNavigation?:()=>void,
    * onRestore?:()=>void
    * }} options
    */
@@ -50,6 +51,7 @@ export class MapPalette {
     this.onUndo = options.onUndo ?? (() => {});
     this.onRedo = options.onRedo ?? (() => {});
     this.onExtents = options.onExtents ?? (() => {});
+    this.onFillConnectorNavigation = options.onFillConnectorNavigation ?? (() => {});
     this.onRestore = options.onRestore ?? (() => {});
     this.selectedId = this.definitionIds.has(options.selectedId)
       ? String(options.selectedId)
@@ -174,6 +176,19 @@ export class MapPalette {
       channels.append(button);
     }
     this.body.append(channels);
+
+    this.navigationHelp = document.createElement("section");
+    this.navigationHelp.className = "map-palette-navigation-help";
+    const navigationHelpText = document.createElement("p");
+    navigationHelpText.textContent = "Paint cyan nodes, then Link endpoints. Purple markers are elevator ports.";
+    this.fillConnectorNavigationButton = document.createElement("button");
+    this.fillConnectorNavigationButton.type = "button";
+    this.fillConnectorNavigationButton.dataset.paletteAction = "fill-connector-navigation";
+    this.fillConnectorNavigationButton.textContent = "Fill connector navigation";
+    this.fillConnectorNavigationButton.title = "Add missing elevator staging nodes and sparse links across every floor";
+    this.fillConnectorNavigationButton.addEventListener("click", () => this.onFillConnectorNavigation());
+    this.navigationHelp.append(navigationHelpText, this.fillConnectorNavigationButton);
+    this.body.append(this.navigationHelp);
 
     for (const group of groupPaletteDefinitions(this.definitions)) {
       const section = document.createElement("section");
@@ -305,6 +320,7 @@ export class MapPalette {
     this.rotationOutput.value = `${this.previewRotation * 90}°`;
     this.rotationOutput.textContent = `${this.previewRotation * 90}°`;
     this.extentsCheckbox.checked = this.showAuthoringExtents;
+    this.navigationHelp.hidden = this.activeChannel !== "navigation";
     this.undoButton.disabled = !this.history.canUndo;
     this.redoButton.disabled = !this.history.canRedo;
     this.undoButton.textContent = this.history.nextUndoLabel

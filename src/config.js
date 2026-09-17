@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -32,6 +32,7 @@ export const ENEMY_HOME_PROFILE_V1 = "floor-aware-enemy-home-v1";
 export const ENEMY_HOME_PROFILE_NONE = "none";
 export const OBELISK_ENCOUNTER_PROFILE_V1 = "independent-obelisk-encounters-v1";
 export const OBELISK_ENCOUNTER_PROFILE_V2 = "sentry-obelisk-encounters-v2";
+export const OBELISK_ENCOUNTER_PROFILE_V3 = "banked-sentry-obelisk-encounters-v3";
 export const OBELISK_ENCOUNTER_PROFILE_NONE = "none";
 
 export const ENEMY_ARCHETYPE = Object.freeze({

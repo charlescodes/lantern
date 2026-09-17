@@ -2,7 +2,7 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v21, authoring-map v7. M1C.1–M1C.5 are
+> `0.9.3`, recording schema v22, authoring-map v7. M1C.1–M1C.5 are
 > implemented; the separate M1C manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 
@@ -36,6 +36,9 @@ replacement. Its five focused slices are complete.
 
 M1C does not provide a general navmesh, arbitrary graph/pathfinding framework,
 multi-stop elevators, cross-floor clairvoyance, or a rewrite of current AI.
+The later connector-skeleton authoring helper remains within this boundary: it
+explicitly writes ordinary inspectable nodes and links and does not infer a
+hidden runtime graph.
 
 ## After M1C
 

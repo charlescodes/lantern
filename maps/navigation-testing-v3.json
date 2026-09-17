@@ -6,7 +6,7 @@
     "name": "Lantern default arena"
   },
   "nextLayerOrdinal": 4,
-  "nextConnectorOrdinal": 3,
+  "nextConnectorOrdinal": 5,
   "nextNavigationNodeOrdinal": 5,
   "nextNavigationLinkOrdinal": 6,
   "playerStart": {
@@ -3608,6 +3608,32 @@
       "upperLayerId": "layer-0003",
       "x": 16.5,
       "z": 11.5,
+      "platformWidth": 0.9,
+      "apertureWidth": 0.9,
+      "travelDurationSeconds": 2,
+      "dwellSeconds": 1,
+      "initialStop": "lower"
+    },
+    {
+      "id": "elevator-0003",
+      "definitionId": "connector.elevator.two-stop",
+      "lowerLayerId": "layer-0002",
+      "upperLayerId": "layer-0003",
+      "x": 7.5,
+      "z": 6.5,
+      "platformWidth": 0.9,
+      "apertureWidth": 0.9,
+      "travelDurationSeconds": 2,
+      "dwellSeconds": 1,
+      "initialStop": "lower"
+    },
+    {
+      "id": "elevator-0004",
+      "definitionId": "connector.elevator.two-stop",
+      "lowerLayerId": "ground",
+      "upperLayerId": "layer-0002",
+      "x": 3.5,
+      "z": 3.5,
       "platformWidth": 0.9,
       "apertureWidth": 0.9,
       "travelDurationSeconds": 2,

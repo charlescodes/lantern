@@ -47,6 +47,20 @@ function sourceDocument() {
   return new ArenaScenario(borderedMap()).toAuthoringJSON();
 }
 
+function chainedConnectorDocumentForEditor() {
+  let document = sourceDocument();
+  const middle = createLayer(document, "ground", "above", { baseY: 3 });
+  document = middle.document;
+  const upper = createLayer(document, middle.layerId, "above", { baseY: 6 });
+  document = upper.document;
+  document = placeElevatorConnector(document, 3.5, 6.5, {
+    lowerLayerId: "ground", upperLayerId: middle.layerId,
+  }).document;
+  return placeElevatorConnector(document, 6.5, 3.5, {
+    lowerLayerId: middle.layerId, upperLayerId: upper.layerId,
+  }).document;
+}
+
 /** @param {Record<string,unknown>} [document] */
 function simulationFor(document = sourceDocument()) {
   return new Simulation({
@@ -200,6 +214,16 @@ test("link tool accepts a visible connector endpoint without changing the runtim
   assert.equal(editor.pointerDown(0, 5.5, 4.5), true);
   assert.equal(simulation.authoringSnapshot().navigationLinks.length, 1);
   assert.equal(simulation.snapshot().runtimeLayerId, runtimeLayerBefore);
+});
+
+test("navigation editor fills connector topology through one semantic action", () => {
+  const document = chainedConnectorDocumentForEditor();
+  const simulation = simulationFor(document);
+  const editor = controllerFor(simulation);
+  assert.equal(editor.fillConnectorNavigation(), true);
+  assert.equal(simulation.authoringSnapshot().navigationNodes.length, 4);
+  assert.equal(simulation.authoringSnapshot().navigationLinks.length, 5);
+  assert.match(editor.snapshot().status.message, /added 4 nodes and 5 links/);
 });
 
 test("moving and rotating an instance preserves its stable ID through save/load", () => {

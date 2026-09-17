@@ -24,7 +24,7 @@ function fail(path, code, message, layerId) {
 }
 
 /** Reusable cold-path weighted grid search with deterministic heap ordering. */
-class StaticGridCosts {
+export class StaticGridCosts {
   /** @param {number} capacity */
   constructor(capacity) {
     this.capacity = capacity;

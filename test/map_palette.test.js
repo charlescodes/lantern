@@ -64,4 +64,6 @@ test("editor markup provides one generated palette mount and generated history c
   assert.match(palette, /this\.undoButton[\s\S]*?this\.redoButton/);
   assert.match(palette, /Unsaved changes/);
   assert.match(main, /onUndo: \(\) => authoringEditor\.undo\(\)/);
+  assert.match(main, /onFillConnectorNavigation: \(\) => authoringEditor\.fillConnectorNavigation\(\)/);
+  assert.match(palette, /Fill connector navigation/);
 });

@@ -33,6 +33,7 @@ import {
   rockDefinitionId,
 } from "./definition_catalog.js";
 import { compileAuthoringMap } from "./map_compiler.js";
+import { generateConnectorNavigationSkeleton } from "./navigation_skeleton.js";
 
 export const DEFAULT_AUTHORING_HISTORY_CAPACITY = 256;
 
@@ -1053,6 +1054,11 @@ export function commandFromAuthoringAction(documentInput, action) {
       }
       after = removeNavigationLink(before, linkId);
       label = "Delete Navigation Link";
+      break;
+    }
+    case "generateConnectorNavigationSkeleton": {
+      after = generateConnectorNavigationSkeleton(before).document;
+      label = "Fill Connector Navigation";
       break;
     }
     default:
