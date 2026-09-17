@@ -42,6 +42,8 @@ The content is organized as follows:
 </file_summary>
 
 <directory_structure>
+assets/
+  demo.gif
 docs/
   archive/
     handoffs/
@@ -52,6 +54,7 @@ docs/
     elevator-enemy-queueing.md
     enemy-health-bar-through-wall.md
     navigation-floor-debug-and-ai.md
+    obelisk-activation-readability.md
   milestones/
     0.1.0-blast-physics.md
     0.2.0-particle-collision.md
@@ -108,6 +111,7 @@ maps/
   default.json
   elevator.json
   holes.json
+  navigation-testing-v2.json
   navigation-testing.json
   navigation.json
   README.md
@@ -305,7 +309,7 @@ styles.css
 <files>
 This section contains the contents of the repository's files.
 
-<file path="maps/navigation-testing.json">
+<file path="maps/navigation-testing-v2.json">
 {
   "format": "lantern-authoring-map",
   "version": 7,
@@ -313,8 +317,8 @@ This section contains the contents of the repository's files.
     "id": "default",
     "name": "Lantern default arena"
   },
-  "nextLayerOrdinal": 2,
-  "nextConnectorOrdinal": 1,
+  "nextLayerOrdinal": 4,
+  "nextConnectorOrdinal": 3,
   "nextNavigationNodeOrdinal": 1,
   "nextNavigationLinkOrdinal": 1,
   "playerStart": {
@@ -1540,17 +1544,2392 @@ This section contains the contents of the repository's files.
       ],
       "markers": {},
       "nextInstanceOrdinal": 7
+    },
+    {
+      "id": "layer-0002",
+      "name": "Layer 2",
+      "baseY": 3,
+      "width": 24,
+      "height": 24,
+      "surface": {
+        "legend": [
+          "surface.stone",
+          "surface.hole"
+        ],
+        "cells": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "structure": {
+        "legend": [
+          null
+        ],
+        "cells": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "instances": [],
+      "markers": {},
+      "nextInstanceOrdinal": 1
+    },
+    {
+      "id": "layer-0003",
+      "name": "Layer 3",
+      "baseY": 6,
+      "width": 24,
+      "height": 24,
+      "surface": {
+        "legend": [
+          "surface.stone"
+        ],
+        "cells": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "structure": {
+        "legend": [
+          null
+        ],
+        "cells": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "instances": [],
+      "markers": {},
+      "nextInstanceOrdinal": 1
     }
   ],
-  "connectors": [],
+  "connectors": [
+    {
+      "id": "elevator-0001",
+      "definitionId": "connector.elevator.two-stop",
+      "lowerLayerId": "ground",
+      "upperLayerId": "layer-0002",
+      "x": 6.5,
+      "z": 17.5,
+      "platformWidth": 0.9,
+      "apertureWidth": 0.9,
+      "travelDurationSeconds": 2,
+      "dwellSeconds": 1,
+      "initialStop": "lower"
+    },
+    {
+      "id": "elevator-0002",
+      "definitionId": "connector.elevator.two-stop",
+      "lowerLayerId": "layer-0002",
+      "upperLayerId": "layer-0003",
+      "x": 16.5,
+      "z": 11.5,
+      "platformWidth": 0.9,
+      "apertureWidth": 0.9,
+      "travelDurationSeconds": 2,
+      "dwellSeconds": 1,
+      "initialStop": "lower"
+    }
+  ],
   "navigationNodes": [],
   "navigationLinks": []
 }
-</file>
-
-<file path="test/ui.test.js">
-get textContent()
-set textContent(value)
 </file>
 
 <file path="docs/archive/handoffs/2026-08-30-post-m1b4-chatgpt-handoff.md">
@@ -2121,6 +4500,46 @@ Acceptance: play-mode floor changes refresh the correct overlay without an
 editor toggle; editor-only layer changes leave enemy behavior unchanged; and
 cross-floor enemy travel is explained by recorded pursuit/home intent rather
 than the debug view's active floor. Verify in a real browser as well as tests.
+</file>
+
+<file path="docs/bugs/obelisk-activation-readability.md">
+# Obelisk activation range is difficult to distinguish from occlusion
+
+- **Status:** Open; deferred diagnostics/readability bug.
+- **Priority:** Polish before encounter-heavy map authoring.
+- **Reported:** 2026-09-16.
+- **Route:** `?renderer=3d&arena=navigation-testing`.
+
+## Symptom
+
+An obelisk configured with a 20-meter activation radius appears during play to
+have roughly a 10-meter radius. The one-meter editor grid makes the apparent
+discrepancy especially noticeable.
+
+The distance calculation is currently correct. In `navigation-testing`, the
+player start at `(3.5, 18.5)` is about `17.03m` from the obelisk at
+`(20.5, 19.5)`, but intervening solid cells block the separate line-of-sight
+requirement. Because the UI exposes neither test, the first position where
+line-of-sight opens can be mistaken for the range boundary.
+
+## Expected correction
+
+Keep the current sentry rules unless playtesting changes their design: same
+floor, no more than 20 meters away, and unobstructed map line-of-sight. Add
+detached, bounded obelisk diagnostics to the stable-identity inspector or an
+appropriate encounter debug view. At minimum, expose:
+
+- measured player distance and configured activation radius;
+- same-floor result;
+- in-range result;
+- line-of-sight result; and
+- a concise dormant reason such as `different-floor`, `out-of-range`,
+  `occluded`, `capped`, or `waiting-for-cadence`.
+
+The diagnostics must observe simulation truth without moving spawn authority
+into the DOM or renderer. Canvas2D and Three.js should communicate the same
+reason, and the final acceptance check should reproduce the original
+navigation-testing route in a real browser.
 </file>
 
 <file path="docs/milestones/0.1.0-blast-physics.md">
@@ -4220,61 +6639,6 @@ acceptance gate for blending order, wall-corner overlap, scorch readability,
 and player visibility on automatic WebGPU and forced WebGL 2.
 </file>
 
-<file path="docs/plans/editable-floor-aware-obelisks.md">
-# Editable, Floor-Aware Obelisks and Reliable Enemy Homes
-
-> **Status:** implemented 2026-09-12, extended 2026-09-16 · application `0.9.3` · recording schema
-> v21 · authoring-map v7
-
-This work replaces the original singleton obelisk marker with a bounded,
-editable instance model while preserving older replay behavior. Simulation
-state remains authoritative; renderers consume floor-local snapshot data.
-
-## Delivered checkpoints
-
-1. **Floor ownership:** obelisk rendering, queries, projectile impact identity,
-   and encounter placement resolve against the relevant runtime layer rather
-   than the editor's active layer.
-2. **Reliable homes (schema v19):** each spawned enemy captures its home
-   obelisk stable ID, layer, and guard point. A returning enemy uses authored
-   topology and autonomous elevators to reach that layer before local movement
-   resumes. An unreachable home remains stable and retries; it is not silently
-   rebased onto the wrong floor.
-3. **Independent authoring (schema v20 / authoring-map v7):** `object.obelisk`
-   appears in the ordinary object palette and supports stable placement, move,
-   property editing, deletion, undo/redo, save/load, and replay. Maps may hold
-   up to 64 obelisks. Each selects `wizard` or `urchin` (default `urchin`), a
-   living cap from 1 through 4 (default 4), and a bounded spawn interval
-   (default 1,800 ticks / 30 seconds).
-
-The enemy pool remains globally bounded at 64. Each obelisk may keep at most 4
-of its own enemies alive at once and may replace them after death. Spawn
-attempts, direction cursors, skips, and counts remain deterministic and bounded.
-Moving or deleting an obelisk does not delete existing enemies or rewrite their
-captured home; it only changes future spawning.
-
-Follow-up authoring behavior keeps encounter sources distinct from authored
-starting actors. Wizard and urchin instances may be stamped directly into a
-map; they start immediately on load/reset, have no obelisk owner, and return to
-their authored guard point. Current authored obelisks only spawn while the
-player shares their floor, is within 20 meters, and has unobstructed map
-line-of-sight. A loaded/reset encounter remains eligible on its first tick;
-placing a new obelisk in an existing editor session schedules its first attempt
-after its configured interval.
-
-Authoring-map v6 migrates its single marker into an `object.obelisk` instance,
-removing the replaced wall cell while retaining equivalent collision. Schemas
-v2-v18 keep legacy home/encounter profiles; schema v19 enables floor-aware
-homes with the legacy singleton encounter; schema v20 enables independent
-authored encounters.
-
-Automated acceptance covers migration, palette exposure, independent mixed
-archetype spawning and living caps, move/delete preservation, floor-local
-presentation, complete elevator return-home traversal, and replay-profile
-selection. Real-browser Canvas2D and Three.js readability remains a manual
-acceptance gate.
-</file>
-
 <file path="docs/soft-specs/lantern_combat_physical_interaction_soft_spec.md">
 # Lantern Combat & Physical Interaction Soft Spec
 
@@ -6022,6 +8386,1249 @@ stable IDs, expected versus observed result, and probe output with the report.
 }
 </file>
 
+<file path="maps/navigation-testing.json">
+{
+  "format": "lantern-authoring-map",
+  "version": 7,
+  "metadata": {
+    "id": "default",
+    "name": "Lantern default arena"
+  },
+  "nextLayerOrdinal": 2,
+  "nextConnectorOrdinal": 1,
+  "nextNavigationNodeOrdinal": 1,
+  "nextNavigationLinkOrdinal": 1,
+  "playerStart": {
+    "layerId": "ground",
+    "x": 3.5,
+    "z": 18.5
+  },
+  "layers": [
+    {
+      "id": "ground",
+      "name": "Ground",
+      "baseY": 0,
+      "width": 24,
+      "height": 24,
+      "surface": {
+        "legend": [
+          "surface.stone"
+        ],
+        "cells": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "structure": {
+        "legend": [
+          null,
+          "structure.wall"
+        ],
+        "cells": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "instances": [
+        {
+          "id": "legacy-rock-0001",
+          "definitionId": "object.rock.small",
+          "x": 5,
+          "z": 18.5,
+          "rotation": 0
+        },
+        {
+          "id": "legacy-rock-0002",
+          "definitionId": "object.rock.medium",
+          "x": 6.5,
+          "z": 18.5,
+          "rotation": 0
+        },
+        {
+          "id": "legacy-rock-0003",
+          "definitionId": "object.rock.large",
+          "x": 4.5,
+          "z": 21,
+          "rotation": 0
+        },
+        {
+          "id": "legacy-rock-0004",
+          "definitionId": "object.rock.small",
+          "x": 9.5,
+          "z": 12.5,
+          "rotation": 0
+        },
+        {
+          "id": "object-obelisk-0006",
+          "definitionId": "object.obelisk",
+          "x": 20.5,
+          "z": 19.5,
+          "rotation": 0,
+          "properties": {
+            "enemyArchetype": "urchin",
+            "maximumAlive": 4,
+            "spawnIntervalTicks": 1800
+          }
+        }
+      ],
+      "markers": {},
+      "nextInstanceOrdinal": 7
+    }
+  ],
+  "connectors": [],
+  "navigationNodes": [],
+  "navigationLinks": []
+}
+</file>
+
 <file path="maps/navigation.json">
 {
   "format": "lantern-authoring-map",
@@ -7740,16 +11347,6 @@ function complete(field, map, revision, cx, cz, budget = 2_048)
 function maximumTopologyDocument()
 </file>
 
-<file path="test/obelisk_authoring_home.test.js">
-function borderedMap(width = 18, height = 14)
-⋮----
-function addObelisk(document, layerId, x, z, properties)
-⋮----
-function runUntil(simulation, predicate, maximumTicks = 4_000)
-⋮----
-function homeRouteScenario()
-</file>
-
 <file path="test/particle_collision.test.js">
 /** @param {number} actual @param {number} expected @param {number} [epsilon] */
 function closeTo(actual, expected, epsilon = 1e-5)
@@ -7920,6 +11517,11 @@ const next = (overrides = {}) => snapshot(
       previousZ: overrides.previousZ,
     },
   );
+</file>
+
+<file path="test/ui.test.js">
+get textContent()
+set textContent(value)
 </file>
 
 <file path=".gitignore">
@@ -8555,6 +12157,61 @@ acceptance gate for charcoal opacity, wall-edge readability, large overlap, and
 automatic WebGPU versus forced WebGL output.
 </file>
 
+<file path="docs/plans/editable-floor-aware-obelisks.md">
+# Editable, Floor-Aware Obelisks and Reliable Enemy Homes
+
+> **Status:** implemented 2026-09-12, extended 2026-09-16 · application `0.9.3` · recording schema
+> v21 · authoring-map v7
+
+This work replaces the original singleton obelisk marker with a bounded,
+editable instance model while preserving older replay behavior. Simulation
+state remains authoritative; renderers consume floor-local snapshot data.
+
+## Delivered checkpoints
+
+1. **Floor ownership:** obelisk rendering, queries, projectile impact identity,
+   and encounter placement resolve against the relevant runtime layer rather
+   than the editor's active layer.
+2. **Reliable homes (schema v19):** each spawned enemy captures its home
+   obelisk stable ID, layer, and guard point. A returning enemy uses authored
+   topology and autonomous elevators to reach that layer before local movement
+   resumes. An unreachable home remains stable and retries; it is not silently
+   rebased onto the wrong floor.
+3. **Independent authoring (schema v20 / authoring-map v7):** `object.obelisk`
+   appears in the ordinary object palette and supports stable placement, move,
+   property editing, deletion, undo/redo, save/load, and replay. Maps may hold
+   up to 64 obelisks. Each selects `wizard` or `urchin` (default `urchin`), a
+   living cap from 1 through 4 (default 4), and a bounded spawn interval
+   (default 1,800 ticks / 30 seconds).
+
+The enemy pool remains globally bounded at 64. Each obelisk may keep at most 4
+of its own enemies alive at once and may replace them after death. Spawn
+attempts, direction cursors, skips, and counts remain deterministic and bounded.
+Moving or deleting an obelisk does not delete existing enemies or rewrite their
+captured home; it only changes future spawning.
+
+Follow-up authoring behavior keeps encounter sources distinct from authored
+starting actors. Wizard and urchin instances may be stamped directly into a
+map; they start immediately on load/reset, have no obelisk owner, and return to
+their authored guard point. Current authored obelisks only spawn while the
+player shares their floor, is within 20 meters, and has unobstructed map
+line-of-sight. A loaded/reset encounter remains eligible on its first tick;
+placing a new obelisk in an existing editor session schedules its first attempt
+after its configured interval.
+
+Authoring-map v6 migrates its single marker into an `object.obelisk` instance,
+removing the replaced wall cell while retaining equivalent collision. Schemas
+v2-v18 keep legacy home/encounter profiles; schema v19 enables floor-aware
+homes with the legacy singleton encounter; schema v20 enables independent
+authored encounters.
+
+Automated acceptance covers migration, palette exposure, independent mixed
+archetype spawning and living caps, move/delete preservation, floor-local
+presentation, complete elevator return-home traversal, and replay-profile
+selection. Real-browser Canvas2D and Three.js readability remains a manual
+acceptance gate.
+</file>
+
 <file path="docs/plans/README.md">
 # Active implementation plans
 
@@ -8572,103 +12229,6 @@ ordering. Historical milestone documents remain under `docs/milestones/`.
 
 - [Editable, floor-aware obelisks and reliable enemy homes](./editable-floor-aware-obelisks.md)
   — delivered across schema v19, schema v20, and authoring-map v7.
-</file>
-
-<file path="docs/probe-contract.md">
-# Probe and observability contract
-
-> **Status:** current operational contract. The documented surface describes
-> existing behavior first; new probe work requires a bounded, evidence-driven
-> change and relevant tests.
-
-`window.__lantern` is Lantern's browser-side inspection and controlled-command
-surface. It exists to make hidden simulation state reproducible and inspectable,
-not to grant arbitrary mutation of live arrays.
-
-## Rules
-
-- Read APIs return detached, JSON-safe data and identify gameplay entities by
-  stable identity, never dense pool index.
-- Mutations enter through commands and are consumed at fixed-tick boundaries.
-- Snapshots, diagnostic queues, counters, and test fixtures remain bounded.
-- Presentation probes may report renderer state, but rendering cannot become
-  gameplay authority.
-- A useful bug report includes arena/map, seed or recording, commands, stable
-  IDs, tick, relevant probe output, and a manual observation.
-
-## Current surface
-
-The live definition is the frozen `probe` object in
-[`src/main.js`](../src/main.js). These categories are a working catalog, not a
-second compatibility versioning scheme.
-
-| Category | Read-oriented calls | Controlled mutations | Notes |
-| --- | --- | --- | --- |
-| Runtime and replay | `snapshot`, `metrics`, `exportCommandLog` | `pause`, `resume`, `step`, `reset`, `injectCommand`, `restoreScenario` | `step` pauses first. A queued mutation is consumed on a fixed tick; while paused, the host advances that tick immediately. |
-| World and vertical | `queryAt`, `verticalBody`, `elevators`, `holes`, `holeDiagnostics`, `pressurePlates`, `pressurePlateEvents`, `breakawayFloors`, `breakawayFloorEvents` | `cycleElevator`, `summonElevator` | Elevator helpers are debug requests to the existing autonomous shuttle, not a player-facing activation model. |
-| AI and visibility | `encounterDiagnostics`, `enemyDiagnostics`, `aiView`, `trueSight`, `isVisible`, `navigationTopology`, `navigationRouteEvents` | `setAiView`, `removeEntity` for living enemies | Runtime enemy despawn is a fixed-tick, replay-visible debug action; an owning obelisk may replace the enemy on a later spawn attempt. Topology reads are detached and bounded; AI View and TrueSight calls are diagnostic/presentation controls and do not grant simulation knowledge. |
-| Authoring | `authoring`, `editor`, `authoringHistory`, `authoringLayer`, `getAuthoredInstance`, `getAuthoredConnector`, `validateAuthoringMap`, placement predicates | editor, layer, connector, paint, instance, undo/redo, save/load calls | Authoring actions validate/compile atomically through the existing authoring command/history boundary. They are not raw pool writes. |
-| Spells and presentation | spell listing/definition/diagnostics, `presentation`, performance-report reads | spell definition/cast/effect calls, debug flags, presentation flags, density cap, metric reset, performance capture | Presentation mutation is local-only. Capture is asynchronous and manual browser/GPU review remains required. |
-
-Snapshot state includes the current tick, seed, recording-schema/profile data,
-runtime/editor layer data, entity records, and bounded event/counter summaries.
-The vertical helpers return detached data sourced from snapshots or selection
-descriptions. Current bounded diagnostic retention includes a 128-entry hole
-ring and 128-entry pressure-plate and breakaway rings; snapshots expose their
-recent entries rather than unbounded histories.
-
-Use `snapshot()` when one coherent cross-system frame matters. Use a narrow
-helper when inspecting one mechanism between steps. Pair a mutating call with
-`step(1)` or an immediately refreshed `snapshot()` before drawing conclusions
-about fixed-tick state.
-
-## Reproduction report minimum
-
-Record the route (`?arena=...` or an exported map), seed/recording, current
-tick, command sequence, stable IDs, relevant probe return values, and expected
-versus observed behavior. Include renderer/browser/GPU facts for a presentation
-failure. A screenshot or clip is useful evidence, but it does not replace the
-authoritative state needed to reproduce a simulation failure.
-
-### Current gaps deliberately left for later
-
-There is no generic per-system event bus, no unbounded trace log, and no promise
-that every internal helper becomes public. M1C should add topology-specific
-diagnostics only when topology exists. Cross-floor AI, general triggers, and
-network inspection remain future work, not reasons to widen the probe now.
-</file>
-
-<file path="src/authoring/placement_validation.js">
-// @ts-check
-⋮----
-/** @param {Record<string, any>} document @param {string|undefined} layerId */
-export function getAuthoringLayer(document, layerId)
-⋮----
-/**
- * @param {string} code
- * @param {string} message
- * @param {string} layerId
- * @param {string} definitionId
- * @param {{x:number,z:number,rotation:number}} transform
- * @param {Array<{cx:number,cz:number}>} occupiedCells
- */
-function invalid(code, message, layerId, definitionId, transform, occupiedCells)
-⋮----
-/** @param {number} x @param {number} z @param {number} radius @param {Array<{cx:number,cz:number}>} cells */
-export function circleTouchesFootprint(x, z, radius, cells)
-⋮----
-/**
- * Lightweight authoring-space validation used by previews and compilation.
- * It never compiles a runtime map and never mutates the document.
- *
- * @param {Record<string, any>} document
- * @param {string} definitionId
- * @param {{x:number,z:number,rotation?:number}} candidate
- * @param {{layerId?:string,ignoreInstanceId?:string}} [options]
- */
-export function validateInstancePlacement(document, definitionId, candidate, options =
-⋮----
-get(cx, cz)
 </file>
 
 <file path="src/browser/spell_lab.js">
@@ -9820,6 +13380,16 @@ function installRoute(simulation, enemyId, sourceKey, targetKey)
 function runUntil(simulation, predicate, maximumTicks = 2_000)
 </file>
 
+<file path="test/obelisk_authoring_home.test.js">
+function borderedMap(width = 18, height = 14)
+⋮----
+function addObelisk(document, layerId, x, z, properties)
+⋮----
+function runUntil(simulation, predicate, maximumTicks = 4_000)
+⋮----
+function homeRouteScenario()
+</file>
+
 <file path="test/perception_soak.test.js">
 function percentile(values, fraction)
 ⋮----
@@ -10195,6 +13765,70 @@ Before using a soft specification to change the engine:
 ```
 </file>
 
+<file path="docs/probe-contract.md">
+# Probe and observability contract
+
+> **Status:** current operational contract. The documented surface describes
+> existing behavior first; new probe work requires a bounded, evidence-driven
+> change and relevant tests.
+
+`window.__lantern` is Lantern's browser-side inspection and controlled-command
+surface. It exists to make hidden simulation state reproducible and inspectable,
+not to grant arbitrary mutation of live arrays.
+
+## Rules
+
+- Read APIs return detached, JSON-safe data and identify gameplay entities by
+  stable identity, never dense pool index.
+- Mutations enter through commands and are consumed at fixed-tick boundaries.
+- Snapshots, diagnostic queues, counters, and test fixtures remain bounded.
+- Presentation probes may report renderer state, but rendering cannot become
+  gameplay authority.
+- A useful bug report includes arena/map, seed or recording, commands, stable
+  IDs, tick, relevant probe output, and a manual observation.
+
+## Current surface
+
+The live definition is the frozen `probe` object in
+[`src/main.js`](../src/main.js). These categories are a working catalog, not a
+second compatibility versioning scheme.
+
+| Category | Read-oriented calls | Controlled mutations | Notes |
+| --- | --- | --- | --- |
+| Runtime and replay | `snapshot`, `metrics`, `exportCommandLog` | `pause`, `resume`, `step`, `reset`, `injectCommand`, `restoreScenario` | `step` pauses first. A queued mutation is consumed on a fixed tick; while paused, the host advances that tick immediately. |
+| World and vertical | `queryAt`, `verticalBody`, `elevators`, `holes`, `holeDiagnostics`, `pressurePlates`, `pressurePlateEvents`, `breakawayFloors`, `breakawayFloorEvents` | `cycleElevator`, `summonElevator` | Elevator helpers are debug requests to the existing autonomous shuttle, not a player-facing activation model. |
+| AI and visibility | `encounterDiagnostics`, `enemyDiagnostics`, `aiView`, `trueSight`, `isVisible`, `navigationTopology`, `navigationRouteEvents` | `setAiView`, `removeEntity` for living enemies | Runtime enemy despawn is a fixed-tick, replay-visible debug action; an owning obelisk may replace the enemy on a later spawn attempt. Topology reads are detached and bounded; AI View and TrueSight calls are diagnostic/presentation controls and do not grant simulation knowledge. |
+| Authoring | `authoring`, `editor`, `authoringHistory`, `authoringLayer`, `getAuthoredInstance`, `getAuthoredConnector`, `validateAuthoringMap`, placement predicates | editor, layer, connector, paint, instance, undo/redo, save/load calls | Authoring actions validate/compile atomically through the existing authoring command/history boundary. They are not raw pool writes. |
+| Spells and presentation | spell listing/definition/diagnostics, `presentation`, performance-report reads | spell definition/cast/effect calls, debug flags, presentation flags, density cap, metric reset, performance capture | Presentation mutation is local-only. Capture is asynchronous and manual browser/GPU review remains required. |
+
+Snapshot state includes the current tick, seed, recording-schema/profile data,
+runtime/editor layer data, entity records, and bounded event/counter summaries.
+The vertical helpers return detached data sourced from snapshots or selection
+descriptions. Current bounded diagnostic retention includes a 128-entry hole
+ring and 128-entry pressure-plate and breakaway rings; snapshots expose their
+recent entries rather than unbounded histories.
+
+Use `snapshot()` when one coherent cross-system frame matters. Use a narrow
+helper when inspecting one mechanism between steps. Pair a mutating call with
+`step(1)` or an immediately refreshed `snapshot()` before drawing conclusions
+about fixed-tick state.
+
+## Reproduction report minimum
+
+Record the route (`?arena=...` or an exported map), seed/recording, current
+tick, command sequence, stable IDs, relevant probe return values, and expected
+versus observed behavior. Include renderer/browser/GPU facts for a presentation
+failure. A screenshot or clip is useful evidence, but it does not replace the
+authoritative state needed to reproduce a simulation failure.
+
+### Current gaps deliberately left for later
+
+There is no generic per-system event bus, no unbounded trace log, and no promise
+that every internal helper becomes public. M1C should add topology-specific
+diagnostics only when topology exists. Cross-floor AI, general triggers, and
+network inspection remain future work, not reasons to widen the probe now.
+</file>
+
 <file path="scripts/serve_options.mjs">
 /** @param {unknown} value @param {string} source */
 function parsePort(value, source)
@@ -10333,6 +13967,39 @@ reconcile(authoring)
 setShowAuthoringExtents(value)
 ⋮----
 snapshot()
+</file>
+
+<file path="src/authoring/placement_validation.js">
+// @ts-check
+⋮----
+/** @param {Record<string, any>} document @param {string|undefined} layerId */
+export function getAuthoringLayer(document, layerId)
+⋮----
+/**
+ * @param {string} code
+ * @param {string} message
+ * @param {string} layerId
+ * @param {string} definitionId
+ * @param {{x:number,z:number,rotation:number}} transform
+ * @param {Array<{cx:number,cz:number}>} occupiedCells
+ */
+function invalid(code, message, layerId, definitionId, transform, occupiedCells)
+⋮----
+/** @param {number} x @param {number} z @param {number} radius @param {Array<{cx:number,cz:number}>} cells */
+export function circleTouchesFootprint(x, z, radius, cells)
+⋮----
+/**
+ * Lightweight authoring-space validation used by previews and compilation.
+ * It never compiles a runtime map and never mutates the document.
+ *
+ * @param {Record<string, any>} document
+ * @param {string} definitionId
+ * @param {{x:number,z:number,rotation?:number}} candidate
+ * @param {{layerId?:string,ignoreInstanceId?:string}} [options]
+ */
+export function validateInstancePlacement(document, definitionId, candidate, options =
+⋮----
+get(cx, cz)
 </file>
 
 <file path="src/browser/camera.js">
@@ -10966,14 +14633,6 @@ undo: ()
 redo: ()
 </file>
 
-<file path="test/navigation_hole_pursuit.test.js">
-function holePursuitScenario()
-⋮----
-function createSimulation()
-⋮----
-function runUntil(simulation, predicate, maximumTicks = 1_200)
-</file>
-
 <file path="test/navigation_route_state.test.js">
 function spawn(pool, sequence)
 </file>
@@ -11484,12 +15143,12 @@ export function boxBoxContact(ax, az, aHalfX, aHalfZ, bx, bz, bHalfX, bHalfZ, ou
 export function gridRayBlocked(map, startX, startZ, endX, endZ)
 </file>
 
-<file path="test/enemy_urchin.test.js">
-function urchinScenario()
+<file path="test/navigation_hole_pursuit.test.js">
+function holePursuitScenario()
 ⋮----
-const spawnStone = (value) => simulation.projectiles.spawn(
+function createSimulation()
 ⋮----
-const hit = () => simulation.projectiles.spawn(
+function runUntil(simulation, predicate, maximumTicks = 1_200)
 </file>
 
 <file path="test/navigation_patrol.test.js">
@@ -11532,21 +15191,6 @@ beginGpuCapture: ()
 
 <file path="test/presentation_options.test.js">
 
-</file>
-
-<file path="test/vertical_holes.test.js">
-function borderedMap()
-⋮----
-function holeDocument(
-⋮----
-// The lowest floor catches. Every higher floor owns an independent hole.
-⋮----
-function simulationFor(document)
-⋮----
-// Let capture happen, then steer far enough sideways before the 6m plane.
-⋮----
-// Replace the player start so the top layer can compile normally, then add
-// a table centered above its hole. Its 2x1 authored footprint cannot fit.
 </file>
 
 <file path="docs/notes/ai-view.md">
@@ -12560,6 +16204,14 @@ function snapshot()
 isVisible: ()
 </file>
 
+<file path="test/enemy_urchin.test.js">
+function urchinScenario()
+⋮----
+const spawnStone = (value) => simulation.projectiles.spawn(
+⋮----
+const hit = () => simulation.projectiles.spawn(
+</file>
+
 <file path="test/movement_sound.test.js">
 function borderedMap(width = 30, height = 24, spawn =
 ⋮----
@@ -12574,36 +16226,27 @@ function runUntilFootsteps(value, count, direction =
 const event = (tick, kind, layerIndex = 0) => (
 </file>
 
-<file path="test/navigation_cross_floor_pursuit.test.js">
-function createSimulation()
-⋮----
-function spawnObserver(simulation, x = 7.5, z = 14.5, sequence = 1)
-⋮----
-function putPlayerOnElevator(simulation, elevatorIndex, stop)
-⋮----
-function putPlayerOnFloor(simulation, layerIndex, x, z)
-⋮----
-function facePlayer(simulation, index)
-⋮----
-function runUntil(simulation, predicate, maximumTicks = 5_000)
-⋮----
-function observeElevatorDeparture(simulation, observerIndex, elevatorIndex, destinationStop)
-⋮----
-function runSchemaV15NavigationGolden()
-</file>
-
-<file path="test/navigation_topology.test.js">
-function borderedMap(width = 9, height = 9)
-⋮----
-function sourceDocument()
-</file>
-
 <file path="test/serve_options.test.js">
 
 </file>
 
 <file path="test/soak.test.js">
 
+</file>
+
+<file path="test/vertical_holes.test.js">
+function borderedMap()
+⋮----
+function holeDocument(
+⋮----
+// The lowest floor catches. Every higher floor owns an independent hole.
+⋮----
+function simulationFor(document)
+⋮----
+// Let capture happen, then steer far enough sideways before the 6m plane.
+⋮----
+// Replace the player start so the top layer can compile normally, then add
+// a table centered above its hole. Its 2x1 authored footprint cannot fit.
 </file>
 
 <file path="scripts/serve.mjs">
@@ -13031,26 +16674,28 @@ resetPerformanceMetrics()
 metrics()
 </file>
 
-<file path="test/map_palette.test.js">
-
+<file path="test/navigation_cross_floor_pursuit.test.js">
+function createSimulation()
+⋮----
+function spawnObserver(simulation, x = 7.5, z = 14.5, sequence = 1)
+⋮----
+function putPlayerOnElevator(simulation, elevatorIndex, stop)
+⋮----
+function putPlayerOnFloor(simulation, layerIndex, x, z)
+⋮----
+function facePlayer(simulation, index)
+⋮----
+function runUntil(simulation, predicate, maximumTicks = 5_000)
+⋮----
+function observeElevatorDeparture(simulation, observerIndex, elevatorIndex, destinationStop)
+⋮----
+function runSchemaV15NavigationGolden()
 </file>
 
-<file path="test/vertical_elevator.test.js">
-function borderedMap(spawn =
+<file path="test/navigation_topology.test.js">
+function borderedMap(width = 9, height = 9)
 ⋮----
-function elevatorDocument(options =
-⋮----
-// Preserve the historical off-center M1B fixture so its frozen physical
-// expectations continue to exercise the exact pre-v6 deck position.
-⋮----
-function simulationFor(document)
-⋮----
-function runToStop(simulation, connectorId, stop, maximumTicks = 360)
-⋮----
-// This point is within the 0.90m square deck but just outside its former
-// circular support footprint.
-⋮----
-const run = () =>
+function sourceDocument()
 </file>
 
 <file path="docs/architecture-guide.md">
@@ -13811,198 +17456,6 @@ export function rotateInstance(input, instanceId, rotation, layerId)
 export function removeInstance(input, instanceId, layerId)
 </file>
 
-<file path="src/authoring/authoring_map.js">
-// @ts-check
-⋮----
-/** M1C maps with authored navigation topology and legacy obelisk markers. */
-⋮----
-/** M1B.4 autonomous-elevator maps without authored navigation topology. */
-⋮----
-/** M1B.1-M1B.3 connector maps using speed and activation policies. */
-⋮----
-/** M1B.1 connector maps. */
-⋮----
-/** M1A.4 multi-layer maps. */
-⋮----
-export class AuthoringMapValidationError extends RangeError
-⋮----
-/** @param {Array<{severity?:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} issues */
-⋮----
-/** @param {string} path @param {string} code @param {string} message */
-function fail(path, code, message)
-⋮----
-/** @param {unknown} value */
-function isRecord(value)
-⋮----
-/**
- * Structural validation is intentionally deterministic and non-mutating. It
- * returns every safe-to-diagnose issue in document order; compilation adds
- * geometry-specific diagnostics such as a blocked player start.
- * @param {unknown} input
- */
-function normalizeCurrentDocument(input)
-⋮----
-/** @type {Array<{severity:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} */
-⋮----
-const issue = (severity, path, code, message, layerId) =>
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-const rejectUnknownFields = (value, allowed, path, layerId) =>
-⋮----
-const stringValue = (value, path, layerId) =>
-const finiteValue = (value, path, layerId) =>
-const dimensionValue = (value, path, layerId) =>
-const positiveInteger = (value, path, layerId) =>
-const cloneJson = (value, path, seen = new WeakSet()) =>
-const pointValue = (value, path, layerId) =>
-⋮----
-const point = /** @type {Record<string,any>} */ (value);
-⋮----
-metadata = /** @type {Record<string,any>} */ (cloneJson(source.metadata, "metadata"));
-⋮----
-const layerSource = isRecord(layerValue) ? /** @type {Record<string,any>} */ (layerValue) : {};
-⋮----
-const instanceSource = isRecord(instanceValue) ? /** @type {Record<string,any>} */ (instanceValue) : {};
-⋮----
-? /** @type {Record<string,any>} */ (connectorValue)
-⋮----
-const positiveWidth = (value, field) =>
-⋮----
-const node = isRecord(nodeValue) ? /** @type {Record<string,any>} */ (nodeValue) : {};
-⋮----
-const integerCell = (value, field) =>
-⋮----
-const endpointKey = (endpoint)
-const endpointLayer = (endpoint) =>
-const normalizeEndpoint = (value, path) =>
-⋮----
-const endpoint = /** @type {Record<string,any>} */ (value);
-⋮----
-const link = isRecord(linkValue) ? /** @type {Record<string,any>} */ (linkValue) : {};
-⋮----
-// A single cell may have exactly one aperture owner. Surface holes are
-// independent (including adjacent cells), but cannot silently overlap a
-// connector endpoint at the same layer/cell.
-⋮----
-/** @param {unknown} input */
-export function authoringMapDiagnostics(input)
-⋮----
-/**
- * Validates and returns a detached, normalized current-version document.
- * @param {unknown} input
- */
-export function validateAuthoringMap(input)
-⋮----
-/** @param {unknown} input */
-export function validateAuthoringMapWithDiagnostics(input)
-⋮----
-/** @param {unknown} input */
-export function isAuthoringMapDocument(input)
-⋮----
-&& /** @type {Record<string, unknown>} */ (input).format === AUTHORING_MAP_FORMAT,
-⋮----
-/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into the current schema. @param {unknown} input */
-export function migrateAuthoringMapV1(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** Explicitly adds the M1B connector envelope to M1A.4 authoring-map v2. @param {unknown} input */
-export function migrateAuthoringMapV2(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** @param {Record<string, any>} source */
-function migrateClockDrivenConnectors(source)
-⋮----
-/** M1B.2 adds a catalog-backed surface-hole terrain value; v3 grids need no reshape. @param {unknown} input */
-export function migrateAuthoringMapV3(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** M1B.1-M1B.3 used connector speed and activation-policy fields. @param {unknown} input */
-export function migrateAuthoringMapV4(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** Additively migrates the M1B authoring envelope without moving connectors. @param {unknown} input */
-export function migrateAuthoringMapV5(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** Converts the singleton layer marker into an ordinary editable obelisk instance. @param {unknown} input */
-export function migrateAuthoringMapV6(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-const layer = /** @type {Record<string,any>} */ (layerValue);
-⋮----
-/**
- * Explicitly migrates map-v1 and scenario-v2/v3 data into the authoring format.
- * @param {unknown} input
- * @param {{id?:string,name?:string}} [metadata]
- */
-export function migrateLegacyMap(input, metadata =
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-const legacyDimension = (value, path) =>
-const legacyPoint = (value, path) =>
-⋮----
-/** @param {string | unknown} input */
-export function loadAuthoringMap(input)
-⋮----
-const version = /** @type {Record<string,any>} */ (value).version;
-⋮----
-/** @param {unknown} document */
-export function cloneAuthoringMap(document)
-⋮----
-/**
- * Creates authoring source data for callers that still construct scenarios
- * from the compact runtime map and legacy entity descriptors.
- * @param {{width:number,height:number,cells:Uint8Array|number[],playerSpawn:{x:number,z:number}}} map
- * @param {Array<Record<string, any>>} entities
- * @param {{id?:string,name?:string}} [metadata]
- */
-export function authoringMapFromRuntime(map, entities = [], metadata =
-</file>
-
-<file path="src/authoring/definition_catalog.js">
-// @ts-check
-⋮----
-/** @param {Record<string, any>} definition */
-function freezeDefinition(definition)
-⋮----
-/**
- * The catalog is authoring data. Runtime systems resolve these stable IDs
- * during compilation rather than branching on palette button names.
- */
-⋮----
-/** @param {unknown} id */
-export function getPlaceableDefinition(id)
-⋮----
-export function listPlaceableDefinitions()
-⋮----
-/**
- * Dynamic circular props share the existing bounded X/Z rigid-body pool.
- * Their stable authoring definition remains the semantic identity; the pool
- * slot is only a runtime implementation detail.
- * @param {Record<string, any>|null|undefined} definition
- */
-export function isDynamicCircleDefinition(definition)
-⋮----
-/** @param {Record<string, any>|null|undefined} definition */
-export function isDynamicBoxDefinition(definition)
-⋮----
-/** @param {Record<string, any>|null|undefined} definition */
-export function isDynamicBodyDefinition(definition)
-⋮----
-/** @param {Record<string, any>|null|undefined} definition */
-export function isAuthoredEnemyDefinition(definition)
-⋮----
-/** @param {string} archetype */
-export function rockDefinitionId(archetype)
-</file>
-
 <file path="test/combat_presentation.test.js">
 function fakeThreeCanvas()
 ⋮----
@@ -14043,8 +17496,30 @@ presentation.webRenderer.render = () =>
 function view(snapshot, sightFrame)
 </file>
 
+<file path="test/map_palette.test.js">
+
+</file>
+
 <file path="test/pools.test.js">
 
+</file>
+
+<file path="test/vertical_elevator.test.js">
+function borderedMap(spawn =
+⋮----
+function elevatorDocument(options =
+⋮----
+// Preserve the historical off-center M1B fixture so its frozen physical
+// expectations continue to exercise the exact pre-v6 deck position.
+⋮----
+function simulationFor(document)
+⋮----
+function runToStop(simulation, connectorId, stop, maximumTicks = 360)
+⋮----
+// This point is within the 0.90m square deck but just outside its former
+// circular support footprint.
+⋮----
+const run = () =>
 </file>
 
 <file path="docs/notes/generic-vertical-bodies-and-elevator.md">
@@ -14371,75 +17846,196 @@ ejection remain deferred after M1B.4. Breakaway floors are implemented by the
 preceding M1B.4 section; cross-layer enemy routing is the planned M1C concern.
 </file>
 
-<file path="docs/roadmap.md">
-# Lantern roadmap
+<file path="src/authoring/authoring_map.js">
+// @ts-check
+⋮----
+/** M1C maps with authored navigation topology and legacy obelisk markers. */
+⋮----
+/** M1B.4 autonomous-elevator maps without authored navigation topology. */
+⋮----
+/** M1B.1-M1B.3 connector maps using speed and activation policies. */
+⋮----
+/** M1B.1 connector maps. */
+⋮----
+/** M1A.4 multi-layer maps. */
+⋮----
+export class AuthoringMapValidationError extends RangeError
+⋮----
+/** @param {Array<{severity?:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} issues */
+⋮----
+/** @param {string} path @param {string} code @param {string} message */
+function fail(path, code, message)
+⋮----
+/** @param {unknown} value */
+function isRecord(value)
+⋮----
+/**
+ * Structural validation is intentionally deterministic and non-mutating. It
+ * returns every safe-to-diagnose issue in document order; compilation adds
+ * geometry-specific diagnostics such as a blocked player start.
+ * @param {unknown} input
+ */
+function normalizeCurrentDocument(input)
+⋮----
+/** @type {Array<{severity:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} */
+⋮----
+const issue = (severity, path, code, message, layerId) =>
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+const rejectUnknownFields = (value, allowed, path, layerId) =>
+⋮----
+const stringValue = (value, path, layerId) =>
+const finiteValue = (value, path, layerId) =>
+const dimensionValue = (value, path, layerId) =>
+const positiveInteger = (value, path, layerId) =>
+const cloneJson = (value, path, seen = new WeakSet()) =>
+const pointValue = (value, path, layerId) =>
+⋮----
+const point = /** @type {Record<string,any>} */ (value);
+⋮----
+metadata = /** @type {Record<string,any>} */ (cloneJson(source.metadata, "metadata"));
+⋮----
+const layerSource = isRecord(layerValue) ? /** @type {Record<string,any>} */ (layerValue) : {};
+⋮----
+const instanceSource = isRecord(instanceValue) ? /** @type {Record<string,any>} */ (instanceValue) : {};
+⋮----
+? /** @type {Record<string,any>} */ (connectorValue)
+⋮----
+const positiveWidth = (value, field) =>
+⋮----
+const node = isRecord(nodeValue) ? /** @type {Record<string,any>} */ (nodeValue) : {};
+⋮----
+const integerCell = (value, field) =>
+⋮----
+const endpointKey = (endpoint)
+const endpointLayer = (endpoint) =>
+const normalizeEndpoint = (value, path) =>
+⋮----
+const endpoint = /** @type {Record<string,any>} */ (value);
+⋮----
+const link = isRecord(linkValue) ? /** @type {Record<string,any>} */ (linkValue) : {};
+⋮----
+// A single cell may have exactly one aperture owner. Surface holes are
+// independent (including adjacent cells), but cannot silently overlap a
+// connector endpoint at the same layer/cell.
+⋮----
+/** @param {unknown} input */
+export function authoringMapDiagnostics(input)
+⋮----
+/**
+ * Validates and returns a detached, normalized current-version document.
+ * @param {unknown} input
+ */
+export function validateAuthoringMap(input)
+⋮----
+/** @param {unknown} input */
+export function validateAuthoringMapWithDiagnostics(input)
+⋮----
+/** @param {unknown} input */
+export function isAuthoringMapDocument(input)
+⋮----
+&& /** @type {Record<string, unknown>} */ (input).format === AUTHORING_MAP_FORMAT,
+⋮----
+/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into the current schema. @param {unknown} input */
+export function migrateAuthoringMapV1(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Explicitly adds the M1B connector envelope to M1A.4 authoring-map v2. @param {unknown} input */
+export function migrateAuthoringMapV2(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** @param {Record<string, any>} source */
+function migrateClockDrivenConnectors(source)
+⋮----
+/** M1B.2 adds a catalog-backed surface-hole terrain value; v3 grids need no reshape. @param {unknown} input */
+export function migrateAuthoringMapV3(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** M1B.1-M1B.3 used connector speed and activation-policy fields. @param {unknown} input */
+export function migrateAuthoringMapV4(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Additively migrates the M1B authoring envelope without moving connectors. @param {unknown} input */
+export function migrateAuthoringMapV5(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Converts the singleton layer marker into an ordinary editable obelisk instance. @param {unknown} input */
+export function migrateAuthoringMapV6(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+const layer = /** @type {Record<string,any>} */ (layerValue);
+⋮----
+/**
+ * Explicitly migrates map-v1 and scenario-v2/v3 data into the authoring format.
+ * @param {unknown} input
+ * @param {{id?:string,name?:string}} [metadata]
+ */
+export function migrateLegacyMap(input, metadata =
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+const legacyDimension = (value, path) =>
+const legacyPoint = (value, path) =>
+⋮----
+/** @param {string | unknown} input */
+export function loadAuthoringMap(input)
+⋮----
+const version = /** @type {Record<string,any>} */ (value).version;
+⋮----
+/** @param {unknown} document */
+export function cloneAuthoringMap(document)
+⋮----
+/**
+ * Creates authoring source data for callers that still construct scenarios
+ * from the compact runtime map and legacy entity descriptors.
+ * @param {{width:number,height:number,cells:Uint8Array|number[],playerSpawn:{x:number,z:number}}} map
+ * @param {Array<Record<string, any>>} entities
+ * @param {{id?:string,name?:string}} [metadata]
+ */
+export function authoringMapFromRuntime(map, entities = [], metadata =
+</file>
 
-> **Status:** current planning authority. It orders future work but does not
-> redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v21, authoring-map v7. M1C.1–M1C.5 are
-> implemented; the separate M1C manual acceptance and deferred crowding report
-> are recorded in their respective documents.
-
-## Transition after M1B.4
-
-The immediate goal is a trusted post-M1B.4 baseline, not new gameplay.
-
-| Slice | Outcome | Boundary |
-| --- | --- | --- |
-| T.1 | Canonical documentation foundation and handoff archive | Complete; documentation only. |
-| T.2 | Probe and verification baseline | Complete; strengthened existing canonical docs without a parallel runtime probe system. |
-| T.3 | Formal M1B / `0.9.3` closure | Complete; application/package bump only, preserving schema v14 and authoring-map v5. |
-| T.4 | [M1C authored-navigation topology](./plans/m1c-authored-navigation-topology.md) | Complete; topology authoring, patrol, autonomous elevator traversal, and observed cross-floor pursuit. |
-
-## M1C — authored navigation topology
-
-M1C delivered deliberately small, inspectable navigation rather than a navmesh
-replacement. Its five focused slices are complete.
-
-1. **M1C.1 — topology data:** authored high-level nodes and explicit
-   bidirectional same-floor links; compile autonomous elevator links from the
-   existing connector data.
-2. **M1C.2 — authoring and visibility:** editor placement/editing, validation,
-   stable IDs, and a readable debug overlay/probe.
-3. **M1C.3 — local movement and patrol:** use the topology only to choose goals;
-   preserve the existing layer-local movement system for getting there.
-4. **M1C.4 — elevator traversal plan:** prove a bounded wait/board/disembark
-   policy for the autonomous shuttle, with no rider-owned call behavior.
-5. **M1C.5 — cross-floor pursuit proof:** let a confirmed target route through
-   topology and resume ordinary pursuit after arrival.
-
-M1C does not provide a general navmesh, arbitrary graph/pathfinding framework,
-multi-stop elevators, cross-floor clairvoyance, or a rewrite of current AI.
-
-## After M1C
-
-- **Near-term authoring reliability:** investigate the [navigation floor-transition reports](./bugs/navigation-floor-debug-and-ai.md) before substantial map authoring: stale debug overlay, suspected AI retargeting, and unclear navigation visualization.
-- **Editable, floor-aware obelisks:** complete. Obelisks are ordinary authored
-  instances on explicit layers; schema v19 gives every enemy a stable home and
-  cross-floor return route, while schema v20 enables independent obelisks with
-  authored archetypes, living caps, and spawn cadence.
-- **M1D — Temple of Ix:** make ordinary editable authored maps and a Room Lab,
-  then hand-build a complete temple. It should teach and test the established
-  traversal systems and eventually offer three alternative exit goals. These
-  are map assets, not a room-prefab schema.
-- **M1E — mechanisms:** extend proven, content-driven mechanisms only after the
-  temple exposes a real need. Pressure plates are a foundation; triggers,
-  levers, chains, doors, and richer trap behavior are not assumed together.
-- **M1F — procedural generation:** only after hand-authored rooms and the temple
-  establish useful constraints. A later seeded generator should emit ordinary,
-  inspectable authoring documents rather than replace authoring.
-
-Additional spells, new actor types, expanded combat, cooperative networking,
-and larger-world systems remain later backlog. The open
-[health-bar-through-wall defect](./bugs/enemy-health-bar-through-wall.md) stays
-separate from this roadmap unless its diagnosis becomes a direct prerequisite.
-The [elevator enemy queueing report](./bugs/elevator-enemy-queueing.md) is also
-deferred: it is not a prerequisite for M1D's authored-map work.
-
-Deferred engineering cleanup is tracked in the
-[long-term improvement ledger](./soft-specs/long-term-improvements.md#lt-003-retire-procedural-arena-builders):
-clarify saved-map versus test-fixture ownership, retaining useful stable test
-builders and removing duplicate playable-map definitions.
+<file path="src/authoring/definition_catalog.js">
+// @ts-check
+⋮----
+/** @param {Record<string, any>} definition */
+function freezeDefinition(definition)
+⋮----
+/**
+ * The catalog is authoring data. Runtime systems resolve these stable IDs
+ * during compilation rather than branching on palette button names.
+ */
+⋮----
+/** @param {unknown} id */
+export function getPlaceableDefinition(id)
+⋮----
+export function listPlaceableDefinitions()
+⋮----
+/**
+ * Dynamic circular props share the existing bounded X/Z rigid-body pool.
+ * Their stable authoring definition remains the semantic identity; the pool
+ * slot is only a runtime implementation detail.
+ * @param {Record<string, any>|null|undefined} definition
+ */
+export function isDynamicCircleDefinition(definition)
+⋮----
+/** @param {Record<string, any>|null|undefined} definition */
+export function isDynamicBoxDefinition(definition)
+⋮----
+/** @param {Record<string, any>|null|undefined} definition */
+export function isDynamicBodyDefinition(definition)
+⋮----
+/** @param {Record<string, any>|null|undefined} definition */
+export function isAuthoredEnemyDefinition(definition)
+⋮----
+/** @param {string} archetype */
+export function rockDefinitionId(archetype)
 </file>
 
 <file path="src/presentation/light_budget.js">
@@ -14665,49 +18261,75 @@ presentation.webRenderer.render = () =>
 const render = (cells) =>
 </file>
 
-<file path="src/authoring/map_compiler.js">
-// @ts-check
-⋮----
-/** @param {string} path @param {string} code @param {string} message @param {string} [layerId] */
-function fail(path, code, message, layerId)
-⋮----
-/** @param {string} value */
-function stableUint32(value)
-⋮----
-/** @param {string[]} ids */
-function stableSpawnIds(ids)
-⋮----
-/** @param {Record<string, unknown>} value */
-function cloneProperties(value)
-⋮----
-/** @param {Record<string,any>} document @param {Record<string,any>} layer @param {number} layerIndex */
-function compileLayer(document, layer, layerIndex)
-⋮----
-/** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
-⋮----
-/** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
-⋮----
-/** @type {Array<{id:string,layerId:string,x:number,z:number,cx:number,cz:number}>} */
-⋮----
-? /** @type {const} */ ("rock")
-: /** @type {const} */ ("dynamicInstance"),
-⋮----
-kind: /** @type {const} */ ("authoredEnemy"),
-⋮----
-kind: /** @type {const} */ ("obelisk"),
-⋮----
-/** @param {ReturnType<typeof compileLayer>} layer */
-function compatibilityProjection(layer)
-⋮----
-/**
- * Deterministically derives independent runtime recipes for every authored
- * layer. The compatibility projection points at the player-start layer.
- * @param {unknown} input
- */
-export function compileAuthoringMap(input)
-⋮----
-/** @param {ReturnType<typeof compileAuthoringMap>} compiled @param {string} layerId */
-export function getCompiledLayer(compiled, layerId)
+<file path="docs/roadmap.md">
+# Lantern roadmap
+
+> **Status:** current planning authority. It orders future work but does not
+> redefine frozen release contracts. Current repository baseline: application
+> `0.9.3`, recording schema v21, authoring-map v7. M1C.1–M1C.5 are
+> implemented; the separate M1C manual acceptance and deferred crowding report
+> are recorded in their respective documents.
+
+## Transition after M1B.4
+
+The immediate goal is a trusted post-M1B.4 baseline, not new gameplay.
+
+| Slice | Outcome | Boundary |
+| --- | --- | --- |
+| T.1 | Canonical documentation foundation and handoff archive | Complete; documentation only. |
+| T.2 | Probe and verification baseline | Complete; strengthened existing canonical docs without a parallel runtime probe system. |
+| T.3 | Formal M1B / `0.9.3` closure | Complete; application/package bump only, preserving schema v14 and authoring-map v5. |
+| T.4 | [M1C authored-navigation topology](./plans/m1c-authored-navigation-topology.md) | Complete; topology authoring, patrol, autonomous elevator traversal, and observed cross-floor pursuit. |
+
+## M1C — authored navigation topology
+
+M1C delivered deliberately small, inspectable navigation rather than a navmesh
+replacement. Its five focused slices are complete.
+
+1. **M1C.1 — topology data:** authored high-level nodes and explicit
+   bidirectional same-floor links; compile autonomous elevator links from the
+   existing connector data.
+2. **M1C.2 — authoring and visibility:** editor placement/editing, validation,
+   stable IDs, and a readable debug overlay/probe.
+3. **M1C.3 — local movement and patrol:** use the topology only to choose goals;
+   preserve the existing layer-local movement system for getting there.
+4. **M1C.4 — elevator traversal plan:** prove a bounded wait/board/disembark
+   policy for the autonomous shuttle, with no rider-owned call behavior.
+5. **M1C.5 — cross-floor pursuit proof:** let a confirmed target route through
+   topology and resume ordinary pursuit after arrival.
+
+M1C does not provide a general navmesh, arbitrary graph/pathfinding framework,
+multi-stop elevators, cross-floor clairvoyance, or a rewrite of current AI.
+
+## After M1C
+
+- **Near-term authoring reliability:** investigate the [navigation floor-transition reports](./bugs/navigation-floor-debug-and-ai.md) before substantial map authoring: stale debug overlay, suspected AI retargeting, and unclear navigation visualization.
+- **Editable, floor-aware obelisks:** complete. Obelisks are ordinary authored
+  instances on explicit layers; schema v19 gives every enemy a stable home and
+  cross-floor return route, while schema v20 enables independent obelisks with
+  authored archetypes, living caps, and spawn cadence.
+- **M1D — Temple of Ix:** make ordinary editable authored maps and a Room Lab,
+  then hand-build a complete temple. It should teach and test the established
+  traversal systems and eventually offer three alternative exit goals. These
+  are map assets, not a room-prefab schema.
+- **M1E — mechanisms:** extend proven, content-driven mechanisms only after the
+  temple exposes a real need. Pressure plates are a foundation; triggers,
+  levers, chains, doors, and richer trap behavior are not assumed together.
+- **M1F — procedural generation:** only after hand-authored rooms and the temple
+  establish useful constraints. A later seeded generator should emit ordinary,
+  inspectable authoring documents rather than replace authoring.
+
+Additional spells, new actor types, expanded combat, cooperative networking,
+and larger-world systems remain later backlog. The open
+[health-bar-through-wall defect](./bugs/enemy-health-bar-through-wall.md) stays
+separate from this roadmap unless its diagnosis becomes a direct prerequisite.
+The [elevator enemy queueing report](./bugs/elevator-enemy-queueing.md) is also
+deferred: it is not a prerequisite for M1D's authored-map work.
+
+Deferred engineering cleanup is tracked in the
+[long-term improvement ledger](./soft-specs/long-term-improvements.md#lt-003-retire-procedural-arena-builders):
+clarify saved-map versus test-fixture ownership, retaining useful stable test
+builders and removing duplicate playable-map definitions.
 </file>
 
 <file path="docs/plans/m1c-authored-navigation-topology.md">
@@ -15819,6 +19441,51 @@ problem and must not be presented as global pathfinding.
   Koenig and Likhachev — a
   later option for repairing similar searches after localized cost changes,
   not a prerequisite for M1C.
+</file>
+
+<file path="src/authoring/map_compiler.js">
+// @ts-check
+⋮----
+/** @param {string} path @param {string} code @param {string} message @param {string} [layerId] */
+function fail(path, code, message, layerId)
+⋮----
+/** @param {string} value */
+function stableUint32(value)
+⋮----
+/** @param {string[]} ids */
+function stableSpawnIds(ids)
+⋮----
+/** @param {Record<string, unknown>} value */
+function cloneProperties(value)
+⋮----
+/** @param {Record<string,any>} document @param {Record<string,any>} layer @param {number} layerIndex */
+function compileLayer(document, layer, layerIndex)
+⋮----
+/** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
+⋮----
+/** @type {Array<{id:string,layerId:string,cellIndex:number,cx:number,cz:number,x:number,z:number,width:number,clearance:number}>} */
+⋮----
+/** @type {Array<{id:string,layerId:string,x:number,z:number,cx:number,cz:number}>} */
+⋮----
+? /** @type {const} */ ("rock")
+: /** @type {const} */ ("dynamicInstance"),
+⋮----
+kind: /** @type {const} */ ("authoredEnemy"),
+⋮----
+kind: /** @type {const} */ ("obelisk"),
+⋮----
+/** @param {ReturnType<typeof compileLayer>} layer */
+function compatibilityProjection(layer)
+⋮----
+/**
+ * Deterministically derives independent runtime recipes for every authored
+ * layer. The compatibility projection points at the player-start layer.
+ * @param {unknown} input
+ */
+export function compileAuthoringMap(input)
+⋮----
+/** @param {ReturnType<typeof compileAuthoringMap>} compiled @param {string} layerId */
+export function getCompiledLayer(compiled, layerId)
 </file>
 
 <file path="src/presentation/canvas_presentation.js">
@@ -17425,14 +21092,6 @@ export class ParticlePool
 /** @param {number} id */
 </file>
 
-<file path="test/replay_inspector.test.js">
-function comparable(simulation)
-⋮----
-function borderedMap(width, height, spawn)
-⋮----
-const spawn = (x) => simulation.projectiles.spawn(
-</file>
-
 <file path="package.json">
 {
   "name": "lantern-debug-arena",
@@ -17460,6 +21119,14 @@ const spawn = (x) => simulation.projectiles.spawn(
     "three": "0.184.0"
   }
 }
+</file>
+
+<file path="test/replay_inspector.test.js">
+function comparable(simulation)
+⋮----
+function borderedMap(width, height, spawn)
+⋮----
+const spawn = (x) => simulation.projectiles.spawn(
 </file>
 
 <file path="src/browser/renderer.js">
@@ -19376,8 +23043,119 @@ export function sphereMassKg(radius)
 // The remainder of the 1m grid cell is a visible floor frame.
 </file>
 
+<file path="docs/README.md">
+# Lantern Documentation
+
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v21 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+
+## Start here
+
+- [Product vision](./product-vision.md) — Lantern's durable game identity and direction; it does not redefine shipped behavior.
+- [Current roadmap](./roadmap.md) — the authoritative ordering for transition work and future milestones.
+- [Architecture review and owner's guide](./architecture-guide.md) — a current code map, plain-language mental model, strengths and drift assessment, review route, and staged refactoring strategy.
+- [Lay of the land in pseudocode](./lay-of-the-land-pseudocode.md) — the current startup, fixed-tick, simulation, combat, AI, presentation, command, and replay flows in one compact trace.
+- [Probe and observability contract](./probe-contract.md) — rules for detached inspection, fixed-tick mutations, bounded diagnostics, and reproducible reports.
+- [Verification guide](./verification.md) — automated checks and the manual M1B traversal route.
+- [Research and inspiration shelf](./references.md) — a curated, non-authoritative bibliography of Nox references, released engines, technical foundations, talks, and later research leads.
+
+## Soft specifications
+
+These documents preserve future intent and candidate experiments. They are mutable and non-authoritative: current code, tests, and contracts still define shipped behavior.
+
+- [Soft-specification collection and promotion rules](./soft-specs/README.md) — how brainstorming becomes a candidate, implementation plan, and eventually a proven contract without rewriting milestone history.
+- [Gameplay idea bin](./soft-specs/idea-bin.md) — unprioritized mechanics, monsters, traps, spell behavior, and unfinished sparks kept as non-binding seeds.
+- [Emergent co-op simulation north star](./soft-specs/emergent-coop-simulation.md) — the rat wizard, movable furniture, stealth and sound, elemental surfaces, layered world data, AI composition, CPU/GPU authority, networking shape, portability, and architectural pressure.
+- [Retired candidate feature roadmap](./soft-specs/candidate-roadmap.md) — preserved historical ordering and idea seeds; use the current roadmap for active sequencing.
+- [Long-term improvement ledger](./soft-specs/long-term-improvements.md) — trigger-driven architecture work, beginning with moving visual particles and lighting behind a client-effect event boundary before authoritative multiplayer.
+
+## Current contracts
+
+- [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
+- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v7, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, the M1C.1 topology data envelope, and editable obelisk instances.
+- [M1C authored navigation topology](./plans/m1c-authored-navigation-topology.md) — implemented v6 topology data, editor tooling, route diagnostics, patrol, and cross-floor pursuit under the schema-v15 compatibility boundary.
+- [Editable, floor-aware obelisks](./plans/editable-floor-aware-obelisks.md) — implemented independent authored generators and reliable per-enemy cross-floor homes under schemas v19-v20.
+- [M1B.1–M1B.4 vertical bodies, elevator, holes, jumping, and breakaways](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, grounded plates, live connector authoring, and breakaway floors.
+- [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
+- [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
+- [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
+- [Foreground wall fading](./notes/foreground-wall-fading.md) — camera-aware 33% opacity for nearby foreground walls while complete wall geometry and gameplay authority remain intact.
+- [Kinetic explosion fragments](./notes/kinetic-fragment-pool.md) — a deterministic 512-slot presentation pool for tumbling, bouncing charcoal triangles expanded from generic explosion events.
+- [0.3.0 renderer regression notes](./notes/0.3.0-renderer-regressions.md) — cold-pipeline and stale-instance symptoms that future renderer changes must not reintroduce.
+- [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) — current player/body response contract that prevents controller contact from storing external recoil.
+- [0.3.2 spark-light affinity regression](./notes/0.3.2-spark-light-affinity.md) — carrier leases, smooth tail fades, and keyed resident-light slots.
+- [0.3.3 Render Lab and effect-local lighting](./notes/0.3.3-render-lab-performance.md) — atomic fireball light groups, URL settings, performance capture, LAN testing, and current support thresholds.
+- [0.4.0 TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) — player-centered wall LOS, shared renderer masks, local interaction gating, fades, probes, and performance-report v2.
+- [0.5.0 Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) — strict definitions, immutable revisions, effect-local seeds, schema-v5 replay, live controls, and stable presentation resources.
+- [0.6.0 Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) — singleton obelisk encounter, bounded enemy wizards, symmetric health/damage, schema-v6 replay, defeat/restart, and presentation parity.
+- [0.6.1 health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) — keeps Three.js health fills above their dark tracks through normal visibility and TrueSight fading.
+- [0.7.0 Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) — shared bounded navigation, deterministic strafe/intercept/dodge/retreat behavior, schema-v7 diagnostics, and frozen schema-v6 basic replay.
+- [0.8.0 Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) — geometry-only vision, personal memory/search/guard behavior, bounded 50-mob infrastructure, schema-v8 replay, and frozen schema-v7 tactical replay.
+- [0.8.1 Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) — clean full-viewport boot, one semicolon-gated developer workspace, parked authoring windows, and presentation-only diagnostic suppression without a schema change.
+- [0.8.2 Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) — exact local render-pose following in play, free camera authoring in edit, and pointer-stable camera input without a schema change.
+- [0.9.0 Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) — anonymous projectile and explosion clues, deterministic priority arbitration and search, schema-v9 replay, and frozen schema-v8 perception.
+- [0.9.1 Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) — multi-layer map authoring, semantic history, holes, elevators, falling, jumping, pressure plates, schema-v12 replay, and authoring-map v5.
+- [0.9.2 Elevator Spell Impacts](./milestones/0.9.2-elevator-spell-impacts.md) — Fireballs hit elevator decks and lower-floor shafts under schema-v13 replay while schema v12 remains frozen.
+- [0.9.3 M1B vertical traversal closure](./milestones/0.9.3-m1b-vertical-traversal-closure.md) — formal application closure for M1B.1–M1B.4; schema v14 adds breakaway floors while authoring-map v5 remains unchanged.
+- [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
+
+## Open defects
+
+- [Obelisk activation range versus occlusion readability](./bugs/obelisk-activation-readability.md) — the 20-meter radius is correct, but hidden line-of-sight rejection makes the effective boundary look much smaller; add explicit activation diagnostics later.
+- [Navigation floor transitions and debug readability](./bugs/navigation-floor-debug-and-ai.md) — near-term reports of a stale floor overlay and suspected enemy retargeting; distinguish presentation state from valid pursuit before map-authoring acceptance.
+- [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
+- [Elevator crowding during enemy traversal](./bugs/elevator-enemy-queueing.md) — M1C's single-rider route works, but multi-enemy upward boarding needs a later bounded queue or larger-deck decision.
+- [2026-09-11 playtest defect backlog](./bugs/2026-09-11-playtest-backlog.md) — remaining unprioritized reports on pursuit, guard return, hole-fall forgiveness, scorch seams, and aperture reuse; its lowered-elevator Fireball report is resolved in schema v18.
+
+## Release and milestone history
+
+| Version | Contract | Scope |
+| --- | --- | --- |
+| M0 | [Debug arena](./milestones/m0-debug-arena.md) | Fixed-step X/Z simulation, commands, snapshots, bounded pools, Canvas2D, probes |
+| 0.1.0 | [Blast physics](./milestones/0.1.0-blast-physics.md) | Dynamic rocks, occluded explosion impulses, scenario editing |
+| 0.2.0 | [Map-colliding sparks](./milestones/0.2.0-particle-collision.md) | Presentation-only particle sweeps and wall response |
+| 0.2.5 | [Size-linked ember lifecycles](./milestones/0.2.5-particle-lifecycle.md) | Shrink, lifetime, ground settling, replay profiles |
+| 0.3.0 | [3D presentation and dynamic lighting](./milestones/0.3.0-3d-presentation.md) | Three.js adapter, stable lights, warmup, bounded presentation profiling |
+| 0.3.1 | [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) | Prevent controller contact from storing external recoil while preserving genuine impact knockback |
+| 0.3.2 | [Spark-light affinity](./notes/0.3.2-spark-light-affinity.md) | Prevent dying spark lights from hopping to older surviving carriers |
+| 0.3.3 | [Effect-local lighting and Render Lab](./notes/0.3.3-render-lab-performance.md) | Atomic eight-slot fireball groups, 16-light default, live render controls, capture reports, and LAN phone routes |
+| 0.4.0 | [TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) | 360-degree wall LOS, shared Canvas/Three shroud, local interaction gating, and report v2 |
+| 0.5.0 | [Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) | Current spell registry, Fireball definition v1, future-casts-only revisions, deterministic seeds, and schema v5 |
+| 0.6.0 | [Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) | Singleton obelisk, basic enemy encounter, shared Fireball combat, health/defeat flow, and schema v6 |
+| 0.6.1 | [Health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) | Correct Three.js track/fill render-queue ordering without simulation or schema changes |
+| 0.7.0 | [Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) | Shared incremental navigation, strafe/lead/dodge/retreat tactics, diagnostics, and schema v7 |
+| 0.8.0 | [Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) | Vision, personal memory/search/return, destination cache, broadphase scaling, and schema v8 |
+| 0.8.1 | [Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) | Clean playtest boot, semicolon-gated developer chrome and diagnostics, parked Spell Lab, no schema change |
+| 0.8.2 | [Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) | Exact play-camera lock, free edit camera, centered play zoom, no schema change |
+| 0.9.0 | [Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) | Anonymous Fireball sight/hearing clues, priority arbitration, deterministic investigation, and schema v9 |
+| 0.9.1 | [Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) | Map-authoring v5, multi-floor vertical bodies, holes, autonomous elevators, jumping, plates, and schema v12 |
+| 0.9.2 | [Elevator Spell Impacts](./milestones/0.9.2-elevator-spell-impacts.md) | Layer-local Fireball impacts on elevator decks and lower shafts, with schema v13 replay |
+| 0.9.3 | [M1B vertical traversal closure](./milestones/0.9.3-m1b-vertical-traversal-closure.md) | Formal closure of M1B.1–M1B.4 under schema v14; no authoring-map migration |
+
+## Historical context
+
+- [Post-M1B.4 ChatGPT handoff](./archive/handoffs/2026-08-30-post-m1b4-chatgpt-handoff.md) — archived planning context. It is not current authority; code, tests, current contracts, and the roadmap take precedence.
+
+## Version boundaries
+
+These identifiers evolve independently:
+
+- Application/package release: `0.9.3`.
+- Snapshot and command-recording schema: v18.
+- Authoring-map schema: `lantern-authoring-map` v6; v5, v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
+- Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the recording compatibility projection.
+- Fireball definition format: v1.
+- Performance-report schema: v4.
+- Default particle behavior profile: `m0.2.5-balanced`.
+- Historical replay particle profile: `m0.2`.
+- Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
+
+Release numbering does not rename frozen profiles. Schema v17 adds `observed-hole-pursuit-v1` for direct-witness local hole traversal; schemas v2-v16 disable it. Schema v16 adds `enemy-archetypes-v1` and records the wizard/Urchin encounter selection; schemas v2-v15 remain wizard-only. Schema v15 adds the inert `authored-navigation-topology-v1` compatibility envelope and replay-pinned topology capacities; schemas v2-v14 keep topology behavior disabled. Schema v14 adds `breakaway-floor-v1`, which records the latched 18-tick floor-to-hole profile while schemas v2-v13 leave authored breakaway tiles inert. Schema v13 adds `elevator-projectile-collision-v1`, which makes Fireballs impact stopped elevator decks and lower-floor shafts while preserving schema-v12 behavior. Schema v12 adds the replayed committed-jump edge and current authoring-map projection; schemas v2-v11 retain their existing command and simulation branches. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.
+</file>
+
 <file path="README.md">
 # Lantern 0.9.3 / M1B Vertical Traversal Closure
+
+![Gameplay Demo](assets/demo.gif)
 
 A browser-first fixed-step combat and graybox-authoring sandbox. Lantern combines replay-safe Fireball combat, investigative wizards, bounded dynamic clutter, a generated multi-floor editor, and deliberately limited 2.5D vertical traversal: authored holes, autonomous two-stop elevators, falling, committed jumps, and grounded pressure plates. The live enemy pool is sized for 64 while the authored encounter caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js view consumes the same read-only snapshots, map state, AI diagnostics, body state, lights, and TrueSight frame. Press `;` to open the developer toolbox.
 
@@ -19558,114 +23336,6 @@ The automation surface at `window.__lantern` supports pause/resume/step/reset, s
 `window.__lantern.presentation()` reports renderer/backend, resolution, effective DPR, warmup duration, effect groups, active/resident lights, draw counts, cached presentation and TrueSight timings, recent 32 ms spikes, GPU timing availability, snapshot timing, render CPU timing, and visual flags. Runtime metrics include raw frame spacing plus clamp/discard totals. `resetPerformanceMetrics()` clears runtime, presentation, and TrueSight timing histories. `setPixelDensityCap(value)` applies `1`, `1.5`, or `2` live; `setPresentationFlag(name, value)` accepts the lighting flags plus `trueSight`, `sightFade`, and `sightDebug` without adding simulation commands.
 
 `capturePerformance()` and its alias `startPerformanceCapture()` return the asynchronous ten-second report. `latestPerformanceReport()` and `performanceReport()` return the latest completed report or `null`.
-</file>
-
-<file path="docs/README.md">
-# Lantern Documentation
-
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v21 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
-
-## Start here
-
-- [Product vision](./product-vision.md) — Lantern's durable game identity and direction; it does not redefine shipped behavior.
-- [Current roadmap](./roadmap.md) — the authoritative ordering for transition work and future milestones.
-- [Architecture review and owner's guide](./architecture-guide.md) — a current code map, plain-language mental model, strengths and drift assessment, review route, and staged refactoring strategy.
-- [Lay of the land in pseudocode](./lay-of-the-land-pseudocode.md) — the current startup, fixed-tick, simulation, combat, AI, presentation, command, and replay flows in one compact trace.
-- [Probe and observability contract](./probe-contract.md) — rules for detached inspection, fixed-tick mutations, bounded diagnostics, and reproducible reports.
-- [Verification guide](./verification.md) — automated checks and the manual M1B traversal route.
-- [Research and inspiration shelf](./references.md) — a curated, non-authoritative bibliography of Nox references, released engines, technical foundations, talks, and later research leads.
-
-## Soft specifications
-
-These documents preserve future intent and candidate experiments. They are mutable and non-authoritative: current code, tests, and contracts still define shipped behavior.
-
-- [Soft-specification collection and promotion rules](./soft-specs/README.md) — how brainstorming becomes a candidate, implementation plan, and eventually a proven contract without rewriting milestone history.
-- [Gameplay idea bin](./soft-specs/idea-bin.md) — unprioritized mechanics, monsters, traps, spell behavior, and unfinished sparks kept as non-binding seeds.
-- [Emergent co-op simulation north star](./soft-specs/emergent-coop-simulation.md) — the rat wizard, movable furniture, stealth and sound, elemental surfaces, layered world data, AI composition, CPU/GPU authority, networking shape, portability, and architectural pressure.
-- [Retired candidate feature roadmap](./soft-specs/candidate-roadmap.md) — preserved historical ordering and idea seeds; use the current roadmap for active sequencing.
-- [Long-term improvement ledger](./soft-specs/long-term-improvements.md) — trigger-driven architecture work, beginning with moving visual particles and lighting behind a client-effect event boundary before authoritative multiplayer.
-
-## Current contracts
-
-- [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
-- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v7, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, the M1C.1 topology data envelope, and editable obelisk instances.
-- [M1C authored navigation topology](./plans/m1c-authored-navigation-topology.md) — implemented v6 topology data, editor tooling, route diagnostics, patrol, and cross-floor pursuit under the schema-v15 compatibility boundary.
-- [Editable, floor-aware obelisks](./plans/editable-floor-aware-obelisks.md) — implemented independent authored generators and reliable per-enemy cross-floor homes under schemas v19-v20.
-- [M1B.1–M1B.4 vertical bodies, elevator, holes, jumping, and breakaways](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, grounded plates, live connector authoring, and breakaway floors.
-- [Proximity walking and movement sound](./notes/proximity-walking-movement-sound.md) — silent close-pointer walking, deterministic run footsteps, a bounded shared sound queue, schema-v11 replay, and performance-report v4.
-- [Enemy dead-body lifecycle checkpoint](./notes/enemy-dead-body-lifecycle.md) — bounded dynamic-to-inert enemy bodies, deterministic overflow, schema-v10 replay, renderer parity, and performance-report v3.
-- [0.3.0 3D presentation](./milestones/0.3.0-3d-presentation.md) — stable eight-light topology, renderer warmup, diagnostics, and acceptance state.
-- [Foreground wall fading](./notes/foreground-wall-fading.md) — camera-aware 33% opacity for nearby foreground walls while complete wall geometry and gameplay authority remain intact.
-- [Kinetic explosion fragments](./notes/kinetic-fragment-pool.md) — a deterministic 512-slot presentation pool for tumbling, bouncing charcoal triangles expanded from generic explosion events.
-- [0.3.0 renderer regression notes](./notes/0.3.0-renderer-regressions.md) — cold-pipeline and stale-instance symptoms that future renderer changes must not reintroduce.
-- [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) — current player/body response contract that prevents controller contact from storing external recoil.
-- [0.3.2 spark-light affinity regression](./notes/0.3.2-spark-light-affinity.md) — carrier leases, smooth tail fades, and keyed resident-light slots.
-- [0.3.3 Render Lab and effect-local lighting](./notes/0.3.3-render-lab-performance.md) — atomic fireball light groups, URL settings, performance capture, LAN testing, and current support thresholds.
-- [0.4.0 TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) — player-centered wall LOS, shared renderer masks, local interaction gating, fades, probes, and performance-report v2.
-- [0.5.0 Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) — strict definitions, immutable revisions, effect-local seeds, schema-v5 replay, live controls, and stable presentation resources.
-- [0.6.0 Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) — singleton obelisk encounter, bounded enemy wizards, symmetric health/damage, schema-v6 replay, defeat/restart, and presentation parity.
-- [0.6.1 health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) — keeps Three.js health fills above their dark tracks through normal visibility and TrueSight fading.
-- [0.7.0 Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) — shared bounded navigation, deterministic strafe/intercept/dodge/retreat behavior, schema-v7 diagnostics, and frozen schema-v6 basic replay.
-- [0.8.0 Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) — geometry-only vision, personal memory/search/guard behavior, bounded 50-mob infrastructure, schema-v8 replay, and frozen schema-v7 tactical replay.
-- [0.8.1 Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) — clean full-viewport boot, one semicolon-gated developer workspace, parked authoring windows, and presentation-only diagnostic suppression without a schema change.
-- [0.8.2 Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) — exact local render-pose following in play, free camera authoring in edit, and pointer-stable camera input without a schema change.
-- [0.9.0 Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) — anonymous projectile and explosion clues, deterministic priority arbitration and search, schema-v9 replay, and frozen schema-v8 perception.
-- [0.9.1 Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) — multi-layer map authoring, semantic history, holes, elevators, falling, jumping, pressure plates, schema-v12 replay, and authoring-map v5.
-- [0.9.2 Elevator Spell Impacts](./milestones/0.9.2-elevator-spell-impacts.md) — Fireballs hit elevator decks and lower-floor shafts under schema-v13 replay while schema v12 remains frozen.
-- [0.9.3 M1B vertical traversal closure](./milestones/0.9.3-m1b-vertical-traversal-closure.md) — formal application closure for M1B.1–M1B.4; schema v14 adds breakaway floors while authoring-map v5 remains unchanged.
-- [AI View debug overlay](./notes/ai-view.md) — read-only Off/Selected/All mob diagnostics shared by Canvas2D and Three.js without changing AI or replay state.
-
-## Open defects
-
-- [Navigation floor transitions and debug readability](./bugs/navigation-floor-debug-and-ai.md) — near-term reports of a stale floor overlay and suspected enemy retargeting; distinguish presentation state from valid pursuit before map-authoring acceptance.
-- [Enemy health bar visible through solid walls](./bugs/enemy-health-bar-through-wall.md) — first noticed during 0.7.0 review, suspected to relate to 0.6.x health-bar presentation; investigation and repair are deferred.
-- [Elevator crowding during enemy traversal](./bugs/elevator-enemy-queueing.md) — M1C's single-rider route works, but multi-enemy upward boarding needs a later bounded queue or larger-deck decision.
-- [2026-09-11 playtest defect backlog](./bugs/2026-09-11-playtest-backlog.md) — remaining unprioritized reports on pursuit, guard return, hole-fall forgiveness, scorch seams, and aperture reuse; its lowered-elevator Fireball report is resolved in schema v18.
-
-## Release and milestone history
-
-| Version | Contract | Scope |
-| --- | --- | --- |
-| M0 | [Debug arena](./milestones/m0-debug-arena.md) | Fixed-step X/Z simulation, commands, snapshots, bounded pools, Canvas2D, probes |
-| 0.1.0 | [Blast physics](./milestones/0.1.0-blast-physics.md) | Dynamic rocks, occluded explosion impulses, scenario editing |
-| 0.2.0 | [Map-colliding sparks](./milestones/0.2.0-particle-collision.md) | Presentation-only particle sweeps and wall response |
-| 0.2.5 | [Size-linked ember lifecycles](./milestones/0.2.5-particle-lifecycle.md) | Shrink, lifetime, ground settling, replay profiles |
-| 0.3.0 | [3D presentation and dynamic lighting](./milestones/0.3.0-3d-presentation.md) | Three.js adapter, stable lights, warmup, bounded presentation profiling |
-| 0.3.1 | [Dynamic-contact velocity channels](./notes/dynamic-contact-velocity-channels.md) | Prevent controller contact from storing external recoil while preserving genuine impact knockback |
-| 0.3.2 | [Spark-light affinity](./notes/0.3.2-spark-light-affinity.md) | Prevent dying spark lights from hopping to older surviving carriers |
-| 0.3.3 | [Effect-local lighting and Render Lab](./notes/0.3.3-render-lab-performance.md) | Atomic eight-slot fireball groups, 16-light default, live render controls, capture reports, and LAN phone routes |
-| 0.4.0 | [TrueSight visibility and shroud](./notes/0.4.0-true-sight.md) | 360-degree wall LOS, shared Canvas/Three shroud, local interaction gating, and report v2 |
-| 0.5.0 | [Spell Lab and versioned Fireball authoring](./milestones/0.5.0-spell-lab.md) | Current spell registry, Fireball definition v1, future-casts-only revisions, deterministic seeds, and schema v5 |
-| 0.6.0 | [Obelisk Combat Foundation](./milestones/0.6.0-obelisk-combat.md) | Singleton obelisk, basic enemy encounter, shared Fireball combat, health/defeat flow, and schema v6 |
-| 0.6.1 | [Health-bar compositing regression](./notes/0.6.1-health-bar-compositing.md) | Correct Three.js track/fill render-queue ordering without simulation or schema changes |
-| 0.7.0 | [Tactical Wizard AI](./milestones/0.7.0-tactical-wizard-ai.md) | Shared incremental navigation, strafe/lead/dodge/retreat tactics, diagnostics, and schema v7 |
-| 0.8.0 | [Visual Perception and Hunting](./milestones/0.8.0-visual-perception-hunting.md) | Vision, personal memory/search/return, destination cache, broadphase scaling, and schema v8 |
-| 0.8.1 | [Playtest Mode and Developer Toolbox](./milestones/0.8.1-playtest-developer-toolbox.md) | Clean playtest boot, semicolon-gated developer chrome and diagnostics, parked Spell Lab, no schema change |
-| 0.8.2 | [Player-Follow Camera](./milestones/0.8.2-player-follow-camera.md) | Exact play-camera lock, free edit camera, centered play zoom, no schema change |
-| 0.9.0 | [Fireball Investigation AI](./milestones/0.9.0-fireball-investigation-ai.md) | Anonymous Fireball sight/hearing clues, priority arbitration, deterministic investigation, and schema v9 |
-| 0.9.1 | [Authoring and Vertical Traversal](./milestones/0.9.1-authoring-and-vertical-traversal.md) | Map-authoring v5, multi-floor vertical bodies, holes, autonomous elevators, jumping, plates, and schema v12 |
-| 0.9.2 | [Elevator Spell Impacts](./milestones/0.9.2-elevator-spell-impacts.md) | Layer-local Fireball impacts on elevator decks and lower shafts, with schema v13 replay |
-| 0.9.3 | [M1B vertical traversal closure](./milestones/0.9.3-m1b-vertical-traversal-closure.md) | Formal closure of M1B.1–M1B.4 under schema v14; no authoring-map migration |
-
-## Historical context
-
-- [Post-M1B.4 ChatGPT handoff](./archive/handoffs/2026-08-30-post-m1b4-chatgpt-handoff.md) — archived planning context. It is not current authority; code, tests, current contracts, and the roadmap take precedence.
-
-## Version boundaries
-
-These identifiers evolve independently:
-
-- Application/package release: `0.9.3`.
-- Snapshot and command-recording schema: v18.
-- Authoring-map schema: `lantern-authoring-map` v6; v5, v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
-- Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the recording compatibility projection.
-- Fireball definition format: v1.
-- Performance-report schema: v4.
-- Default particle behavior profile: `m0.2.5-balanced`.
-- Historical replay particle profile: `m0.2`.
-- Narrow accepted replay alias: `m0.25-balanced` normalizes to `m0.2.5-balanced`.
-
-Release numbering does not rename frozen profiles. Schema v17 adds `observed-hole-pursuit-v1` for direct-witness local hole traversal; schemas v2-v16 disable it. Schema v16 adds `enemy-archetypes-v1` and records the wizard/Urchin encounter selection; schemas v2-v15 remain wizard-only. Schema v15 adds the inert `authored-navigation-topology-v1` compatibility envelope and replay-pinned topology capacities; schemas v2-v14 keep topology behavior disabled. Schema v14 adds `breakaway-floor-v1`, which records the latched 18-tick floor-to-hole profile while schemas v2-v13 leave authored breakaway tiles inert. Schema v13 adds `elevator-projectile-collision-v1`, which makes Fireballs impact stopped elevator decks and lower-floor shafts while preserving schema-v12 behavior. Schema v12 adds the replayed committed-jump edge and current authoring-map projection; schemas v2-v11 retain their existing command and simulation branches. Schema-v2/v3/v4 recordings remain on frozen legacy Fireball and global-RNG paths; schema v5 retains versioned Fireballs with frozen pre-combat behavior; schema v6 is the obelisk-duel and frozen basic-wizard boundary; schema v7 selects the frozen omniscient tactical wizard; schema v8 selects the frozen perceptive wizard and records the 64-capacity/four-alive scaling boundary; schema v9 selects the investigative wizard without dead bodies; schema v10 keeps that AI behavior and adds `enemy-dead-body-v1` with replay-pinned capacities; schema v11 adds `proximity-walk-footsteps-v1` and a replay-pinned sound-event capacity while retaining the schema-v10 body lifecycle.
 </file>
 
 </files>
