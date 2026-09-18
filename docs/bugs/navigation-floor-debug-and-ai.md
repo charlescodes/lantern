@@ -54,3 +54,24 @@ Acceptance: play-mode floor changes refresh the correct overlay without an
 editor toggle; editor-only layer changes leave enemy behavior unchanged; and
 cross-floor enemy travel is explained by recorded pursuit/home intent rather
 than the debug view's active floor. Verify in a real browser as well as tests.
+
+## NAV-003: AI route-intent inspection is too fleeting and coarse
+
+One playtest briefly showed yellow cell-level route/goal geometry for an enemy
+trying to reach a player on another floor through an elevator. It appeared only
+once, was not reproduced, and may have been an existing transient debug draw
+rather than a rendering defect. The observation is nevertheless useful because
+the current view does not make it possible to inspect how an individual enemy
+selected, followed, failed, or abandoned its route.
+
+Investigate a read-only navigation-inspection mode under AI View (or a clearly
+paired navigation panel). For the selected enemy, it should persistently show a
+thin world-space route line or ordered segment chain, rather than only
+cell-filling highlights, along with the current local movement goal, intended
+target/home, route status, and relevant connector/layer transitions. It must
+identify unavailable or failed next steps without implying that a path exists.
+
+This is a diagnostics and reproduction aid, not permission to add a general
+navmesh or let UI/debug state influence simulation. It should remain bounded,
+read-only, deterministic for a recorded state, separated from authored graph
+geometry, and concealed/visible according to an explicit debug policy.
