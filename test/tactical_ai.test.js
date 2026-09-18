@@ -10,6 +10,7 @@ import {
   ENEMY_HOME_PROFILE_NONE,
   ENEMY_WIZARD,
   MOVEMENT_SOUND_PROFILE_NONE,
+  OBELISK_DESTRUCTION_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_NONE,
   PROJECTILE,
   PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
@@ -396,6 +397,7 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
     deadBodyProfile: DEAD_BODY_PROFILE_NONE,
     movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
     obeliskEncounterProfile: OBELISK_ENCOUNTER_PROFILE_NONE,
+    obeliskDestructionProfile: OBELISK_DESTRUCTION_PROFILE_NONE,
     projectileHeightCollisionProfile: PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
   });
   for (let tick = 0; tick < 180; tick += 1) {
@@ -433,5 +435,5 @@ test("schema-v7 tactical replay is exact while schema-v6 selects frozen basic di
   const castEvent = replayed.combatEvents.toArray().find((event) => event.type === "cast");
   assert.ok(castEvent);
   assert.equal(Object.hasOwn(castEvent, "aim"), false);
-  assert.equal(SCHEMA_VERSION, 22);
+  assert.equal(SCHEMA_VERSION, 23);
 });

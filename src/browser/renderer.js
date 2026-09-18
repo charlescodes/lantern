@@ -1,6 +1,6 @@
 // @ts-check
 
-import { EXPLOSION, SIMULATION, VERTICAL_PHYSICS } from "../config.js";
+import { EXPLOSION, OBELISK, SIMULATION, VERTICAL_PHYSICS } from "../config.js";
 import {
   getPlaceableDefinition,
   isDynamicBodyDefinition,
@@ -854,6 +854,31 @@ export class DebugRenderer {
       const z = obelisk.z;
       context.save();
       context.translate(x, z);
+      if (obelisk.destroyed) {
+        context.strokeStyle = "rgba(117, 104, 168, 0.42)";
+        context.lineWidth = line;
+        context.strokeRect(-0.42, -0.42, 0.84, 0.84);
+        const rubble = [
+          [-0.29, -0.25, 0.24, 0.15, -0.18],
+          [0.04, -0.31, 0.27, 0.13, 0.23],
+          [-0.36, 0.05, 0.19, 0.16, 0.31],
+          [-0.07, 0.08, 0.29, 0.17, -0.27],
+          [0.22, 0.14, 0.16, 0.22, 0.17],
+        ];
+        for (let index = 0; index < rubble.length; index += 1) {
+          const [pieceX, pieceZ, width, height, rotation] = rubble[index];
+          context.save();
+          context.translate(pieceX, pieceZ);
+          context.rotate(rotation);
+          context.fillStyle = index % 2 === 0 ? COLORS.obelisk : COLORS.obeliskBase;
+          context.fillRect(-width / 2, -height / 2, width, height);
+          context.strokeStyle = COLORS.obeliskEdge;
+          context.strokeRect(-width / 2, -height / 2, width, height);
+          context.restore();
+        }
+        context.restore();
+        continue;
+      }
       context.rotate(Math.PI / 4);
       context.fillStyle = COLORS.obeliskBase;
       context.fillRect(-0.38, -0.38, 0.76, 0.76);
@@ -1327,7 +1352,11 @@ export class DebugRenderer {
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #drawHealthBars(snapshot, alpha) {
-    const actors = [snapshot.player, ...(snapshot.enemies ?? [])];
+    const actors = [
+      snapshot.player,
+      ...(snapshot.enemies ?? []),
+      ...(snapshot.obelisks ?? []).filter((obelisk) => !obelisk.destroyed),
+    ];
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1);
     for (const actor of actors) {
@@ -1336,7 +1365,7 @@ export class DebugRenderer {
       const x = actor.previousX + (actor.x - actor.previousX) * alpha;
       const z = actor.previousZ + (actor.z - actor.previousZ) * alpha;
       const ratio = healthBarRatio(actor.health, actor.maximumHealth);
-      const left = x + actor.radius + HEALTH_BAR.actorGapMeters;
+      const left = x + (actor.radius ?? OBELISK.radius) + HEALTH_BAR.actorGapMeters;
       const top = z - HEALTH_BAR.heightMeters / 2;
       const fillHeight = HEALTH_BAR.heightMeters * ratio;
       context.fillStyle = colorHexCss(HEALTH_BAR.trackColor);

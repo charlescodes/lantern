@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -34,6 +34,8 @@ export const OBELISK_ENCOUNTER_PROFILE_V1 = "independent-obelisk-encounters-v1";
 export const OBELISK_ENCOUNTER_PROFILE_V2 = "sentry-obelisk-encounters-v2";
 export const OBELISK_ENCOUNTER_PROFILE_V3 = "banked-sentry-obelisk-encounters-v3";
 export const OBELISK_ENCOUNTER_PROFILE_NONE = "none";
+export const OBELISK_DESTRUCTION_PROFILE_V1 = "destructible-obelisks-v1";
+export const OBELISK_DESTRUCTION_PROFILE_NONE = "none";
 
 export const ENEMY_ARCHETYPE = Object.freeze({
   wizard: 1,
@@ -180,6 +182,9 @@ export const ENEMY_WIZARD = Object.freeze({
 export const OBELISK = Object.freeze({
   capacity: 64,
   activationRangeMeters: 20,
+  maximumHealth: ENEMY_WIZARD.maximumHealth * 6,
+  radius: Math.SQRT1_2,
+  presentationHeight: 2.2,
   defaultMaximumAlive: 4,
   maximumAliveLimit: 4,
   defaultSpawnIntervalTicks: 1_800,

@@ -145,6 +145,21 @@ test("overflow drops newest numbers and timeline or toggle resets do not resurre
   assert.equal(pool.activeCount, 0);
 });
 
+test("a same-tick structural map change retains newly applied damage feedback", () => {
+  const pool = new DamageNumberPool();
+  pool.prime(snapshot(0));
+  const changedMap = {
+    layerId: "ground",
+    width: 8,
+    height: 8,
+    cells: new Array(64).fill(0),
+  };
+  changedMap.cells[12] = 1;
+  pool.ingest(snapshot(1, [damageEvent(1)], { map: changedMap }));
+  assert.equal(pool.activeCount, 1);
+  assert.equal(pool.ingestedEvents, 1);
+});
+
 test("projection helpers preserve CSS viewport coordinates and Canvas height lift", () => {
   const camera = new Camera2D({ centerX: 4, centerZ: 4, visibleHeightMeters: 8 });
   camera.resize(800, 800);

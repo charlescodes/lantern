@@ -238,7 +238,7 @@ test("topology probes are detached and current recordings pin capacities", () =>
   probe.ports.push({ broken: true });
   assert.equal(simulation.navigationTopologySnapshot().ports.length, 0);
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 22);
+  assert.equal(recording.schemaVersion, 23);
   assert.equal(recording.configuration.authoredNavigationTopologyProfile, "authored-navigation-topology-v1");
   assert.equal(recording.configuration.navigationTopologyCapacities.ports, 160);
   assert.deepEqual(Simulation.replay(recording).snapshot().player, simulation.snapshot().player);

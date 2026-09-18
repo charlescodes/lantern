@@ -35,6 +35,10 @@ second compatibility versioning scheme.
 
 Snapshot state includes the current tick, seed, recording-schema/profile data,
 runtime/editor layer data, entity records, and bounded event/counter summaries.
+Runtime obelisk records expose health, maximum health, destroyed/solid state,
+and their encounter status; `queryAt` reports the same stable obelisk identity
+and destruction state. Destroying one changes disposable runtime collision and
+spawning only—the editor map and authored instance remain intact for reset.
 The vertical helpers return detached data sourced from snapshots or selection
 descriptions. Current bounded diagnostic retention includes a 128-entry hole
 ring and 128-entry pressure-plate and breakaway rings; snapshots expose their

@@ -2,7 +2,7 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v22, authoring-map v7. M1C.1–M1C.5 are
+> `0.9.3`, recording schema v23, authoring-map v7. M1C.1–M1C.5 are
 > implemented; the separate M1C manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 
@@ -46,7 +46,9 @@ hidden runtime graph.
 - **Editable, floor-aware obelisks:** complete. Obelisks are ordinary authored
   instances on explicit layers; schema v19 gives every enemy a stable home and
   cross-floor return route, while schema v20 enables independent obelisks with
-  authored archetypes, living caps, and spawn cadence.
+  authored archetypes, living caps, and spawn cadence. Schema v23 makes their
+  fixed 600-point runtime health destructible: death stops that encounter,
+  opens the occupied cell, and leaves presentation-only rubble until reset.
 - **M1D — Temple of Ix:** make ordinary editable authored maps and a Room Lab,
   then hand-build a complete temple. It should teach and test the established
   traversal systems and eventually offer three alternative exit goals. These
@@ -57,6 +59,15 @@ hidden runtime graph.
 - **M1F — procedural generation:** only after hand-authored rooms and the temple
   establish useful constraints. A later seeded generator should emit ordinary,
   inspectable authoring documents rather than replace authoring.
+- **M1G — progression and difficulty staging:** design an explicit level/stage
+  model only after authored encounters provide enough playtest data to balance.
+  Candidate progression axes are enemy and obelisk health, obelisk living caps
+  and spawn cadence, enemy composition, trap/puzzle damage or enabled features,
+  boss and miniboss frequency, and proportional loot/treasure rewards. The
+  system must define how player level and area/stage difficulty interact before
+  any formula becomes replay authority. Obelisk health remains fixed at 600
+  until that contract exists; intermediate cracked/damaged presentation states
+  and a bespoke destruction burst are deferred polish within this milestone.
 
 Additional spells, new actor types, expanded combat, cooperative networking,
 and larger-world systems remain later backlog. The open

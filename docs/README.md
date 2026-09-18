@@ -1,6 +1,6 @@
 # Lantern Documentation
 
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v22 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v23 and authoring-map v7. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 ## Start here
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import * as THREE from "three/webgpu";
 
-import { DEAD_BODY } from "../src/config.js";
+import { DEAD_BODY, ENEMY_WIZARD, OBELISK } from "../src/config.js";
 import { DebugRenderer } from "../src/browser/renderer.js";
 import { Camera2D } from "../src/browser/camera.js";
 import {
@@ -193,7 +193,7 @@ test("Canvas2D draws 0.10m by 0.90m tracks and bottom-up health fills", () => {
     Math.abs(call.width - HEALTH_BAR.widthMeters) < 1e-12
     && Math.abs(call.height - HEALTH_BAR.heightMeters) < 1e-12
   ));
-  assert.equal(tracks.length, 2);
+  assert.equal(tracks.length, 4);
   const amberFill = fillRects.find((call) => (
     call.color === "#e0a442" && Math.abs(call.height - 0.45) < 1e-12
   ));
@@ -281,19 +281,22 @@ test("Three preallocates bounded combat pools without recreating resident instan
 
   assert.equal(presentation.enemyMesh.instanceMatrix.count, 64);
   assert.equal(presentation.enemyFacingMesh.instanceMatrix.count, 64);
-  assert.equal(presentation.healthTrackMesh.instanceMatrix.count, 65);
-  assert.equal(presentation.healthFillMesh.instanceMatrix.count, 65);
-  assert.equal(presentation.healthFillMesh.instanceColor.count, 65);
+  const healthBarCapacity = ENEMY_WIZARD.capacity + OBELISK.capacity + 1;
+  assert.equal(presentation.healthTrackMesh.instanceMatrix.count, healthBarCapacity);
+  assert.equal(presentation.healthFillMesh.instanceMatrix.count, healthBarCapacity);
+  assert.equal(presentation.healthFillMesh.instanceColor.count, healthBarCapacity);
   assert.equal(presentation.deadBodyMesh.instanceMatrix.count, 116);
   assert.equal(presentation.enemyMesh.count, 1);
   assert.equal(presentation.enemyFacingMesh.count, 1);
-  assert.equal(presentation.healthTrackMesh.count, 2);
-  assert.equal(presentation.healthFillMesh.count, 2);
+  assert.equal(presentation.healthTrackMesh.count, 3);
+  assert.equal(presentation.healthFillMesh.count, 3);
   assert.equal(presentation.deadBodyMesh.count, 0);
   assert.equal(presentation.obeliskGroup.visible, true);
   assert.equal(presentation.obeliskInstances.length, 64);
   assert.equal(presentation.obeliskInstances[0].visible, true);
   assert.equal(presentation.obeliskInstances[1].visible, false);
+  assert.ok(presentation.obeliskInstances[0].userData.pristine.every((mesh) => mesh.visible));
+  assert.ok(presentation.obeliskInstances[0].userData.rubble.every((mesh) => !mesh.visible));
   snapshot.obelisks.push({
     ...snapshot.obelisks[0],
     id: snapshot.obelisks[0].id + 1,
@@ -337,6 +340,8 @@ test("Three preallocates bounded combat pools without recreating resident instan
   assert.equal(color.getHex(), HEALTH_BAR.green);
   presentation.healthFillMesh.getColorAt(1, color);
   assert.equal(color.getHex(), HEALTH_BAR.red);
+  presentation.healthFillMesh.getColorAt(2, color);
+  assert.equal(color.getHex(), HEALTH_BAR.green);
 
   const solidCells = snapshot.map.cells.filter((cell) => cell === 1).length;
   assert.equal(presentation.wallMesh.count, solidCells - 1);
@@ -465,6 +470,12 @@ test("Three preallocates bounded combat pools without recreating resident instan
   assert.equal(presentation.healthFillMesh, identities.fills);
   assert.equal(presentation.obeliskGroup, identities.obelisk);
   assert.ok(presentation.dynamicLights.every((light, index) => light === identities.lights[index]));
+
+  snapshot.obelisks[0].destroyed = true;
+  snapshot.obelisks[0].health = 0;
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  assert.ok(presentation.obeliskInstances[0].userData.pristine.every((mesh) => !mesh.visible));
+  assert.ok(presentation.obeliskInstances[0].userData.rubble.every((mesh) => mesh.visible));
 });
 
 test("shared dead-body pose and Three instances fall toward facing around a fixed XZ center", () => {

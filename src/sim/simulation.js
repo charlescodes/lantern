@@ -48,6 +48,8 @@ import {
   NAVIGATION_TOPOLOGY,
   normalizeParticleProfile,
   OBELISK,
+  OBELISK_DESTRUCTION_PROFILE_NONE,
+  OBELISK_DESTRUCTION_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_V2,
@@ -862,6 +864,7 @@ export class Simulation {
    * encounterEnemyArchetype?:string,
    * enemyHomeProfile?:string,
    * obeliskEncounterProfile?:string,
+   * obeliskDestructionProfile?:string,
    * soundEventCapacity?:number,
    * dynamicDeadBodyCapacity?:number,
    * inertDeadBodyCapacity?:number
@@ -934,6 +937,16 @@ export class Simulation {
     ) {
       throw new RangeError(
         `Unsupported obelisk-encounter profile: ${this.obeliskEncounterProfile}`,
+      );
+    }
+    this.obeliskDestructionProfile = options.obeliskDestructionProfile
+      ?? OBELISK_DESTRUCTION_PROFILE_V1;
+    if (
+      this.obeliskDestructionProfile !== OBELISK_DESTRUCTION_PROFILE_V1
+      && this.obeliskDestructionProfile !== OBELISK_DESTRUCTION_PROFILE_NONE
+    ) {
+      throw new RangeError(
+        `Unsupported obelisk-destruction profile: ${this.obeliskDestructionProfile}`,
       );
     }
     this.topologyRevision = 1;
@@ -1214,6 +1227,7 @@ export class Simulation {
     this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
     this.commandLogEnemyHomeProfile = this.enemyHomeProfile;
     this.commandLogObeliskEncounterProfile = this.obeliskEncounterProfile;
+    this.commandLogObeliskDestructionProfile = this.obeliskDestructionProfile;
     this.commandLogSoundEventCapacity = this.soundEvents.capacity;
     this.commandLogEnemyCapacity = this.enemies.capacity;
     this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1422,6 +1436,7 @@ export class Simulation {
       this.commandLogEncounterEnemyArchetype = this.encounterEnemyArchetype;
       this.commandLogEnemyHomeProfile = this.enemyHomeProfile;
       this.commandLogObeliskEncounterProfile = this.obeliskEncounterProfile;
+      this.commandLogObeliskDestructionProfile = this.obeliskDestructionProfile;
       this.commandLogSoundEventCapacity = this.soundEvents.capacity;
       this.commandLogEnemyCapacity = this.enemies.capacity;
       this.commandLogEncounterMaximumAlive = this.encounterMaximumAlive;
@@ -1441,6 +1456,8 @@ export class Simulation {
     this.dynamicDeadBodies.reset();
     this.inertDeadBodies.reset();
     this.soundEvents.reset();
+    this.layerMaps = this.layerIds.map((layerId) => this.scenario.compiledLayer(layerId).map);
+    this.layerMaps[this.layerIdToIndex.get(this.scenario.activeLayer.id) ?? 0] = this.scenario.map;
     this.navigationTopology = this.scenario.navigationTopology;
     this.navigationRouteEventHistory.clear();
     this.navigationRouteEventDropped = 0;
@@ -1583,6 +1600,13 @@ export class Simulation {
       successfulSpawns: 0,
       skippedBlocked: 0,
       skippedCapped: 0,
+      health: this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1
+        ? OBELISK.maximumHealth
+        : null,
+      maximumHealth: this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1
+        ? OBELISK.maximumHealth
+        : null,
+      destroyed: false,
     }));
     this.#refreshEncounterAggregate();
   }
@@ -1627,13 +1651,23 @@ export class Simulation {
           successfulSpawns: existing?.successfulSpawns ?? 0,
           skippedBlocked: existing?.skippedBlocked ?? 0,
           skippedCapped: existing?.skippedCapped ?? 0,
+          health: this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1
+            ? existing?.health ?? OBELISK.maximumHealth
+            : null,
+          maximumHealth: this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1
+            ? OBELISK.maximumHealth
+            : null,
+          destroyed: this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1
+            ? existing?.destroyed === true
+            : false,
         };
       });
+    this.#syncDestroyedObeliskMapCells();
     this.#refreshEncounterAggregate();
   }
 
   #refreshEncounterAggregate() {
-    const states = this.obeliskEncounters.filter((state) => state.enabled);
+    const states = this.obeliskEncounters.filter((state) => state.enabled && !state.destroyed);
     this.encounter.enabled = states.length > 0;
     this.encounter.nextSpawnTick = states.length > 0
       ? Math.min(...states.map((state) => state.nextSpawnTick))
@@ -1652,6 +1686,40 @@ export class Simulation {
       (sum, state) => sum + state.skippedCapped,
       0,
     );
+  }
+
+  /** Removes collision for destroyed runtime obelisks after a map recompilation. */
+  #syncDestroyedObeliskMapCells() {
+    if (this.obeliskDestructionProfile !== OBELISK_DESTRUCTION_PROFILE_V1) return;
+    for (const state of this.obeliskEncounters) {
+      if (state.destroyed) this.#clearObeliskCollision(state);
+    }
+  }
+
+  /** @param {Record<string,any>} state */
+  #clearObeliskCollision(state) {
+    const sourceMap = this.layerMaps[state.layerIndex];
+    if (!sourceMap) return false;
+    const cx = Math.floor(state.x);
+    const cz = Math.floor(state.z);
+    if (sourceMap.get(cx, cz) === 0) return false;
+    const map = sourceMap.clone();
+    map.set(cx, cz, 0);
+    this.layerMaps[state.layerIndex] = map;
+    if (this.runtimeViewLayerId === state.layerId) this.map = map;
+    this.layerMapRevisions[state.layerIndex] += 1;
+    this.mapRevision += 1;
+    this.destinationFields.reset(
+      this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1
+        ? this.layerMaps
+        : this.map,
+    );
+    if (this.runtimeViewLayerId === state.layerId) {
+      this.navigationField.reset(this.map);
+      this.reachability.reset(this.map);
+      this.broadphase.reset(this.map);
+    }
+    return true;
   }
 
   /** @param {Record<string,any>} connector */
@@ -4165,7 +4233,7 @@ export class Simulation {
   #encounterSystem(simulationTick) {
     if (!this.encounter.enabled || simulationTick < this.encounter.nextSpawnTick) return;
     for (const state of this.obeliskEncounters) {
-      if (!state.enabled || simulationTick < state.nextSpawnTick) continue;
+      if (!state.enabled || state.destroyed || simulationTick < state.nextSpawnTick) continue;
       if (!this.#obeliskCanSensePlayer(state)) continue;
       this.#attemptEnemySpawn(simulationTick, state);
       state.nextSpawnTick = this.obeliskEncounterProfile === OBELISK_ENCOUNTER_PROFILE_V3
@@ -9678,6 +9746,9 @@ export class Simulation {
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
       this.#applyExplosionToEnemy(event, index);
     }
+    for (const state of this.obeliskEncounters) {
+      this.#applyExplosionToObelisk(event, state);
+    }
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
       this.#applyExplosionToRock(event, index);
     }
@@ -10023,6 +10094,115 @@ export class Simulation {
       });
     }
     return pool.health[index];
+  }
+
+  /** @param {Record<string,any>} event @param {Record<string,any>} state */
+  #applyExplosionToObelisk(event, state) {
+    if (
+      this.obeliskDestructionProfile !== OBELISK_DESTRUCTION_PROFILE_V1
+      || state.destroyed
+      || state.layerIndex !== event.layerIndex
+    ) return;
+    let response = computeExplosionResponse({
+      originX: event.originX,
+      originZ: event.originZ,
+      bodyX: state.x,
+      bodyZ: state.z,
+      bodyRadius: OBELISK.radius,
+      massKg: 1,
+      blastRadius: event.radius,
+      pressureImpulse: event.pressureImpulse,
+      fallbackNx: -event.nx,
+      fallbackNz: -event.nz,
+    });
+    const directHit = event.hit?.kind === "obelisk"
+      && Number(event.hit.id) === state.spawnId;
+    if (!response && !directHit) return;
+    const hasBlastResponse = Boolean(response);
+    response ??= zeroImpulseResponse(event, state.x, state.z, OBELISK.radius);
+    const blocked = !directHit && hasBlastResponse
+      ? gridRayBlocked(
+        this.layerMaps[event.layerIndex] ?? this.map,
+        event.originX,
+        event.originZ,
+        state.x,
+        state.z,
+      )
+      : false;
+    const damage = this.#combatDamageFor(
+      event,
+      "obelisk",
+      state.spawnId,
+      "enemy",
+      response.surfaceDistance,
+      blocked,
+    );
+    const healthAfter = damage.amount > 0
+      ? this.#damageObelisk(state, damage.amount, event, damage.kind)
+      : state.health;
+    const described = this.#describeExplosionResponse(
+      "obelisk",
+      state.spawnId,
+      state.x,
+      state.z,
+      blocked,
+      response,
+      damage.amount,
+      healthAfter,
+    );
+    if (described) {
+      described.impulse = 0;
+      described.deltaVelocity = { x: 0, y: 0, z: 0 };
+      event.responses.push(described);
+    }
+  }
+
+  /** @param {Record<string,any>} state @param {number} amount @param {Record<string,any>} source @param {string} kind */
+  #damageObelisk(state, amount, source, kind) {
+    if (!(amount > 0) || state.destroyed || !(state.health > 0)) return state.health;
+    const before = state.health;
+    state.health = Math.max(0, before - amount);
+    const target = {
+      kind: "obelisk",
+      id: state.spawnId,
+      team: "enemy",
+      authoringId: state.authoringId,
+    };
+    this.#recordCombatEvent({
+      type: "damage",
+      id: this.nextDamageEventId++,
+      tick: this.tickCount + 1,
+      damageKind: kind,
+      amount: Math.min(amount, before),
+      requestedAmount: amount,
+      healthBefore: before,
+      healthAfter: state.health,
+      target,
+      owner: source.owner ? { ...source.owner } : null,
+      projectileId: source.projectileId ?? null,
+      effectId: source.effectId ?? null,
+      ...this.#damagePresentationMetadata(
+        state.x,
+        state.z,
+        this.layerBaseY[state.layerIndex] ?? 0,
+        OBELISK.presentationHeight,
+        state.layerIndex,
+        source,
+      ),
+    });
+    if (state.health === 0) {
+      state.destroyed = true;
+      state.enabled = false;
+      this.#clearObeliskCollision(state);
+      this.#refreshEncounterAggregate();
+      this.#recordCombatEvent({
+        type: "death",
+        tick: this.tickCount + 1,
+        target,
+        owner: source.owner ? { ...source.owner } : null,
+      });
+    }
+    return state.health;
   }
 
   /** @param {Record<string, any>} event @param {number} index */
@@ -10772,6 +10952,7 @@ export class Simulation {
       gameplayProfile: snapshot.gameplayProfile,
       enemyAiProfile: snapshot.enemyAiProfile,
       movementSoundProfile: snapshot.movementSoundProfile,
+      obeliskDestructionProfile: snapshot.obeliskDestructionProfile,
       tick: snapshot.tick,
       level: cloneUnknown(snapshot.level),
       encounter: cloneUnknown(snapshot.encounter),
@@ -11258,23 +11439,49 @@ export class Simulation {
     const obeliskLayerId = this.runtimeViewLayerId
       ?? this.layerIds[this.player.layerIndex]
       ?? this.scenario.startLayerId;
-    const obelisksForLayer = (layerId) => (this.scenario.compiledLayer(layerId)?.entities ?? [])
+    const obeliskStateBySpawnId = new Map(
+      this.obeliskEncounters.map((state) => [state.spawnId, state]),
+    );
+    const obelisksForLayer = (layerId, runtimeState = true) => (
+      this.scenario.compiledLayer(layerId)?.entities ?? []
+    )
       .filter((entity) => entity.kind === "obelisk")
-      .map((entity) => ({
-        kind: "obelisk",
-        id: entity.spawnId,
-        spawnId: entity.spawnId,
-        authoringId: entity.authoringId ?? "marker.obelisk",
-        layerId: entity.layerId,
-        enemyArchetype: entity.enemyArchetype,
-        maximumAlive: entity.maximumAlive,
-        spawnIntervalTicks: entity.spawnIntervalTicks,
-        x: entity.x,
-        z: entity.z,
-        cell: { cx: Math.floor(entity.x), cz: Math.floor(entity.z) },
-        solid: true,
-        invulnerable: true,
-      }));
+      .map((entity) => {
+        const state = runtimeState ? obeliskStateBySpawnId.get(entity.spawnId) : null;
+        const destructible = this.obeliskDestructionProfile
+          === OBELISK_DESTRUCTION_PROFILE_V1;
+        const destroyed = destructible && state?.destroyed === true;
+        const base = {
+          kind: "obelisk",
+          id: entity.spawnId,
+          spawnId: entity.spawnId,
+          authoringId: entity.authoringId ?? "marker.obelisk",
+          layerId: entity.layerId,
+          enemyArchetype: entity.enemyArchetype,
+          maximumAlive: entity.maximumAlive,
+          spawnIntervalTicks: entity.spawnIntervalTicks,
+          x: entity.x,
+          z: entity.z,
+          cell: { cx: Math.floor(entity.x), cz: Math.floor(entity.z) },
+          solid: !destroyed,
+          invulnerable: !destructible,
+        };
+        if (!destructible) return base;
+        const layerIndex = this.layerIdToIndex.get(entity.layerId) ?? 0;
+        const health = runtimeState ? state?.health ?? OBELISK.maximumHealth : OBELISK.maximumHealth;
+        return {
+          ...base,
+          health,
+          maximumHealth: OBELISK.maximumHealth,
+          destroyed,
+          radius: OBELISK.radius,
+          presentationHeight: OBELISK.presentationHeight,
+          previousX: entity.x,
+          previousZ: entity.z,
+          worldY: this.layerBaseY[layerIndex] ?? 0,
+          previousWorldY: this.layerBaseY[layerIndex] ?? 0,
+        };
+      });
     const obelisks = obelisksForLayer(obeliskLayerId);
 
     const enemies = new Array(this.enemies.activeCount);
@@ -11611,10 +11818,26 @@ export class Simulation {
           ? 1
           : 1 - floor.ticksRemaining / VERTICAL_PHYSICS.breakawayCountdownTicks,
     }));
-    const layerPresentationMap = (layerId, layerIndex) => {
+    const layerPresentationMap = (layerId, layerIndex, authored = false) => {
       const layer = this.scenario.compiledLayer(layerId);
-      const map = this.layerMaps[layerIndex] ?? layer?.map ?? this.map;
-      const isEditorLayer = layerId === this.scenario.activeLayer.id;
+      const map = authored
+        ? layer?.map ?? this.map
+        : this.layerMaps[layerIndex] ?? layer?.map ?? this.map;
+      const isActiveAuthoringLayer = layerId === this.scenario.activeLayer.id;
+      let occluderCells = isActiveAuthoringLayer
+        ? this._preparedAuthoringState.occluderCells
+        : Array.from(layer?.occluderMask ?? []);
+      if (!authored && this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1) {
+        let detachedOccluderCells = false;
+        for (const state of this.obeliskEncounters) {
+          if (!state.destroyed || state.layerId !== layerId) continue;
+          if (!detachedOccluderCells) {
+            occluderCells = [...occluderCells];
+            detachedOccluderCells = true;
+          }
+          occluderCells[map.index(Math.floor(state.x), Math.floor(state.z))] = 0;
+        }
+      }
       return {
         version: MAP_VERSION,
         layerId,
@@ -11622,16 +11845,14 @@ export class Simulation {
         width: map.width,
         height: map.height,
         cells: Array.from(map.cells),
-        occluderCells: isEditorLayer
-          ? this._preparedAuthoringState.occluderCells
-          : Array.from(layer?.occluderMask ?? []),
-        surface: isEditorLayer
+        occluderCells,
+        surface: isActiveAuthoringLayer
           ? this._preparedAuthoringState.surface
           : {
             legend: [...(layer?.surface.legend ?? [])],
             cells: Array.from(layer?.surface.cells ?? []),
           },
-        structure: isEditorLayer
+        structure: isActiveAuthoringLayer
           ? this._preparedAuthoringState.structure
           : {
             legend: [...(layer?.structure.legend ?? [])],
@@ -11650,6 +11871,7 @@ export class Simulation {
       enemyAiProfile: this.enemyAiProfile,
       enemyHomeProfile: this.enemyHomeProfile,
       obeliskEncounterProfile: this.obeliskEncounterProfile,
+      obeliskDestructionProfile: this.obeliskDestructionProfile,
       deadBodyProfile: this.deadBodyProfile,
       movementSoundProfile: this.movementSoundProfile,
       projectileHeightCollisionProfile: this.projectileHeightCollisionProfile,
@@ -11727,6 +11949,13 @@ export class Simulation {
               blocked: state.skippedBlocked,
               capped: state.skippedCapped,
             },
+            ...(this.obeliskDestructionProfile === OBELISK_DESTRUCTION_PROFILE_V1
+              ? {
+                health: state.health,
+                maximumHealth: state.maximumHealth,
+                destroyed: state.destroyed,
+              }
+              : {}),
             alive,
           };
         }),
@@ -11740,9 +11969,9 @@ export class Simulation {
       editorMap: (() => {
         const editorLayerId = this.scenario.activeLayer.id;
         const editorLayerIndex = this.layerIdToIndex.get(editorLayerId) ?? 0;
-        return layerPresentationMap(editorLayerId, editorLayerIndex);
+        return layerPresentationMap(editorLayerId, editorLayerIndex, true);
       })(),
-      editorObelisks: obelisksForLayer(this.scenario.activeLayer.id),
+      editorObelisks: obelisksForLayer(this.scenario.activeLayer.id, false),
       player: {
         kind: "player",
         index: 0,
@@ -12172,6 +12401,14 @@ export class Simulation {
   #describeObelisk(obelisk) {
     const cx = Math.floor(obelisk.x);
     const cz = Math.floor(obelisk.z);
+    const state = this.obeliskEncounters.find((candidate) => (
+      candidate.spawnId === obelisk.spawnId
+    ));
+    const destructible = this.obeliskDestructionProfile
+      === OBELISK_DESTRUCTION_PROFILE_V1;
+    const destroyed = destructible && state?.destroyed === true;
+    const layerIndex = this.layerIdToIndex.get(obelisk.layerId) ?? 0;
+    const runtimeMap = this.layerMaps[layerIndex] ?? this.map;
     return {
       kind: "obelisk",
       id: obelisk.spawnId,
@@ -12183,21 +12420,34 @@ export class Simulation {
       layerId: obelisk.layerId ?? null,
       position: {
         x: obelisk.x,
-        y: this.layerBaseY[this.layerIdToIndex.get(obelisk.layerId) ?? 0] ?? 0,
+        y: this.layerBaseY[layerIndex] ?? 0,
         z: obelisk.z,
       },
       velocity: null,
-      radius: Math.SQRT1_2,
+      radius: OBELISK.radius,
       massKg: null,
-      cell: { cx, cz, tile: 1, inBounds: true },
+      cell: { cx, cz, tile: runtimeMap.get(cx, cz), inBounds: true },
       age: null,
       lifetime: null,
+      ...(destructible
+        ? {
+          health: state?.health ?? OBELISK.maximumHealth,
+          maximumHealth: OBELISK.maximumHealth,
+          destroyed,
+        }
+        : {}),
       encounter: {
         enemyArchetype: obelisk.enemyArchetype ?? "wizard",
         maximumAlive: obelisk.maximumAlive ?? this.encounterMaximumAlive,
         spawnIntervalTicks: obelisk.spawnIntervalTicks ?? ENEMY_WIZARD.spawnIntervalTicks,
       },
-      flags: { authored: true, solid: true, protected: false, invulnerable: true },
+      flags: {
+        authored: true,
+        solid: !destroyed,
+        protected: false,
+        invulnerable: !destructible,
+        destroyed,
+      },
     };
   }
 
@@ -12825,6 +13075,7 @@ export class Simulation {
         encounterEnemyArchetype: this.commandLogEncounterEnemyArchetype,
         enemyHomeProfile: this.commandLogEnemyHomeProfile,
         obeliskEncounterProfile: this.commandLogObeliskEncounterProfile,
+        obeliskDestructionProfile: this.commandLogObeliskDestructionProfile,
         navigationTopologyCapacities: {
           authoredNodes: NAVIGATION_TOPOLOGY.authoredNodeCapacity,
           authoredLinks: NAVIGATION_TOPOLOGY.authoredLinkCapacity,
@@ -12897,6 +13148,7 @@ export class Simulation {
     let encounterEnemyArchetype = "wizard";
     let enemyHomeProfile = ENEMY_HOME_PROFILE_NONE;
     let obeliskEncounterProfile = OBELISK_ENCOUNTER_PROFILE_NONE;
+    let obeliskDestructionProfile = OBELISK_DESTRUCTION_PROFILE_NONE;
     let soundEventCapacity;
     let dynamicDeadBodyCapacity = DEAD_BODY.dynamicCapacity;
     let inertDeadBodyCapacity = DEAD_BODY.inertCapacity;
@@ -12964,6 +13216,7 @@ export class Simulation {
       || recordingSchema === 20
       || recordingSchema === 21
       || recordingSchema === 22
+      || recordingSchema === 23
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -13132,6 +13385,16 @@ export class Simulation {
           );
         }
       }
+      if (recordingSchema >= 23) {
+        obeliskDestructionProfile = String(
+          recording.configuration?.obeliskDestructionProfile ?? "",
+        );
+        if (obeliskDestructionProfile !== OBELISK_DESTRUCTION_PROFILE_V1) {
+          throw new TypeError(
+            "Schema-v23 recording has invalid or missing obelisk-destruction profile",
+          );
+        }
+      }
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -13171,6 +13434,7 @@ export class Simulation {
       encounterEnemyArchetype,
       enemyHomeProfile,
       obeliskEncounterProfile,
+      obeliskDestructionProfile,
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

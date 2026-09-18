@@ -19,6 +19,8 @@ import {
   ENEMY_HOME_PROFILE_NONE,
   ENEMY_HOME_PROFILE_V1,
   ENEMY_WIZARD,
+  OBELISK_DESTRUCTION_PROFILE_NONE,
+  OBELISK_DESTRUCTION_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_NONE,
   OBELISK_ENCOUNTER_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_V2,
@@ -431,7 +433,7 @@ test("a returning enemy routes through an elevator to its captured home layer an
   assert.ok(simulation.navigationRouteEvents().recent.some((event) => event.type === "ride"));
 });
 
-test("schema v22 records banked sentry encounters while older schemas keep frozen boundaries", () => {
+test("schema v23 adds obelisk destruction while older encounter boundaries stay frozen", () => {
   const simulation = new Simulation({ particleBurstCount: 0 });
   const current = simulation.exportCommandLog();
   assert.equal(current.schemaVersion, SCHEMA_VERSION);
@@ -440,8 +442,19 @@ test("schema v22 records banked sentry encounters while older schemas keep froze
     current.configuration.obeliskEncounterProfile,
     OBELISK_ENCOUNTER_PROFILE_V3,
   );
+  assert.equal(
+    current.configuration.obeliskDestructionProfile,
+    OBELISK_DESTRUCTION_PROFILE_V1,
+  );
 
-  const v21 = structuredClone(current);
+  const v22 = structuredClone(current);
+  v22.schemaVersion = 22;
+  delete v22.configuration.obeliskDestructionProfile;
+  const replay22 = Simulation.replay(v22);
+  assert.equal(replay22.obeliskEncounterProfile, OBELISK_ENCOUNTER_PROFILE_V3);
+  assert.equal(replay22.obeliskDestructionProfile, OBELISK_DESTRUCTION_PROFILE_NONE);
+
+  const v21 = structuredClone(v22);
   v21.schemaVersion = 21;
   v21.configuration.obeliskEncounterProfile = OBELISK_ENCOUNTER_PROFILE_V2;
   const replay21 = Simulation.replay(v21);

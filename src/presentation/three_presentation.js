@@ -609,16 +609,17 @@ export class ThreePresentation {
       side: THREE.DoubleSide,
     }));
     this.healthBarGeometry = new THREE.PlaneGeometry(1, 1);
+    const healthBarCapacity = ENEMY_WIZARD.capacity + OBELISK.capacity + 1;
     this.healthTrackMesh = createDynamicInstancedPool(
       this.healthBarGeometry,
       this.healthTrackMaterial,
-      ENEMY_WIZARD.capacity + 1,
+      healthBarCapacity,
       "actor-health-tracks",
     );
     this.healthFillMesh = createDynamicInstancedPool(
       this.healthBarGeometry,
       this.healthFillMaterial,
-      ENEMY_WIZARD.capacity + 1,
+      healthBarCapacity,
       "actor-health-fills",
       { instanceColors: true },
     );
@@ -642,6 +643,14 @@ export class ThreePresentation {
     this.obeliskGroup.name = "authored-obelisks";
     const obeliskBaseGeometry = new THREE.BoxGeometry(0.82, 0.28, 0.82);
     const obeliskShaftGeometry = new THREE.ConeGeometry(0.38, 2.05, 4);
+    const obeliskRubbleGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const rubbleLayout = [
+      [-0.28, 0.08, -0.24, 0.28, 0.16, 0.22, -0.18],
+      [0.08, 0.07, -0.29, 0.31, 0.14, 0.19, 0.24],
+      [-0.32, 0.09, 0.07, 0.21, 0.18, 0.25, 0.34],
+      [-0.04, 0.1, 0.11, 0.34, 0.2, 0.2, -0.29],
+      [0.27, 0.11, 0.19, 0.18, 0.22, 0.28, 0.19],
+    ];
     this.obeliskInstances = Array.from({ length: OBELISK.capacity }, (_, index) => {
       const group = new THREE.Group();
       group.name = `authored-obelisk-${index}`;
@@ -655,6 +664,23 @@ export class ThreePresentation {
       obeliskShaft.castShadow = true;
       obeliskShaft.receiveShadow = true;
       group.add(obeliskBase, obeliskShaft);
+      const rubble = rubbleLayout.map((layout, rubbleIndex) => {
+        const [x, y, z, width, height, depth, rotation] = layout;
+        const piece = new THREE.Mesh(
+          obeliskRubbleGeometry,
+          rubbleIndex % 2 === 0 ? this.obeliskMaterial : this.obeliskBaseMaterial,
+        );
+        piece.position.set(x, y, z);
+        piece.scale.set(width, height, depth);
+        piece.rotation.y = rotation;
+        piece.castShadow = true;
+        piece.receiveShadow = true;
+        piece.visible = false;
+        group.add(piece);
+        return piece;
+      });
+      group.userData.pristine = [obeliskBase, obeliskShaft];
+      group.userData.rubble = rubble;
       this.obeliskGroup.add(group);
       return group;
     });
@@ -1698,7 +1724,15 @@ export class ThreePresentation {
       const group = this.obeliskInstances[index];
       const obelisk = obelisks[index] ?? null;
       group.visible = Boolean(obelisk);
-      if (obelisk) group.position.set(obelisk.x, 0, obelisk.z);
+      if (obelisk) {
+        group.position.set(obelisk.x, 0, obelisk.z);
+        for (const mesh of group.userData.pristine ?? []) {
+          mesh.visible = !obelisk.destroyed;
+        }
+        for (const mesh of group.userData.rubble ?? []) {
+          mesh.visible = obelisk.destroyed === true;
+        }
+      }
     }
   }
 
@@ -1859,7 +1893,11 @@ export class ThreePresentation {
 
   /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
   #updateHealthBars(snapshot, alpha) {
-    const actors = [snapshot.player, ...(snapshot.enemies ?? [])];
+    const actors = [
+      snapshot.player,
+      ...(snapshot.enemies ?? []),
+      ...(snapshot.obelisks ?? []).filter((obelisk) => !obelisk.destroyed),
+    ];
     const visibleLayerId = snapshot.map.layerId ?? snapshot.runtimeLayerId;
     this._billboardQuaternion.copy(this.threeCamera.quaternion);
     this._cameraRight
@@ -1872,7 +1910,10 @@ export class ThreePresentation {
       .normalize();
     let count = 0;
     for (const actor of actors) {
-      if (!(actor.health > 0) || count >= ENEMY_WIZARD.capacity + 1) continue;
+      if (
+        !(actor.health > 0)
+        || count >= ENEMY_WIZARD.capacity + OBELISK.capacity + 1
+      ) continue;
       if (actor.layerId && actor.layerId !== visibleLayerId) continue;
       const x = actor.previousX + (actor.x - actor.previousX) * alpha;
       const z = actor.previousZ + (actor.z - actor.previousZ) * alpha;

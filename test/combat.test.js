@@ -8,8 +8,12 @@ import {
   ENEMY_AI_PROFILE_NONE,
   ENEMY_WIZARD,
   GAMEPLAY_PROFILE_PRE_COMBAT,
+  OBELISK,
+  OBELISK_DESTRUCTION_PROFILE_NONE,
+  OBELISK_DESTRUCTION_PROFILE_V1,
   OBELISK_ENCOUNTER_PROFILE_NONE,
   PROJECTILE_OWNER_KIND,
+  SCHEMA_VERSION,
   SCENARIO_VERSION,
 } from "../src/config.js";
 import {
@@ -249,6 +253,82 @@ test("authored-state restore restarts encounter cadence without backlogged attem
     simulation.encounter.nextSpawnTick - simulation.tickCount,
     ENEMY_WIZARD.spawnIntervalTicks,
   );
+});
+
+test("opposing Fireballs destroy an obelisk into non-solid rubble and reset restores it", () => {
+  const simulation = new Simulation({
+    scenario: obeliskScenario(),
+    particleBurstCount: 0,
+    obeliskEncounterProfile: OBELISK_ENCOUNTER_PROFILE_NONE,
+  });
+  let snapshot = simulation.snapshot();
+  assert.equal(snapshot.obeliskDestructionProfile, OBELISK_DESTRUCTION_PROFILE_V1);
+  assert.equal(snapshot.obelisks[0].health, OBELISK.maximumHealth);
+  assert.equal(snapshot.obelisks[0].maximumHealth, COMBAT.maximumHealth * 6);
+
+  for (let hit = 0; hit < OBELISK.maximumHealth / COMBAT.directDamage; hit += 1) {
+    spawnFireball(simulation, {
+      x: 7.9,
+      z: 4.5,
+      vx: 9,
+      ownerId: simulation.player.id,
+      ownerKind: PROJECTILE_OWNER_KIND.player,
+      ownerTeam: ACTOR_TEAM.player,
+      effectId: hit + 1,
+    });
+    simulation.tick(null);
+  }
+
+  snapshot = simulation.snapshot();
+  const [obelisk] = snapshot.obelisks;
+  assert.equal(obelisk.health, 0);
+  assert.equal(obelisk.destroyed, true);
+  assert.equal(obelisk.solid, false);
+  assert.equal(obelisk.invulnerable, false);
+  assert.equal(snapshot.map.cells[snapshot.map.width * 4 + 8], 0);
+  assert.equal(snapshot.encounter.obelisks[0].destroyed, true);
+  assert.equal(snapshot.encounter.enabled, false);
+  assert.equal(simulation.queryAt(8.5, 4.5).flags.destroyed, true);
+  assertOutsideSolid(simulation, 8.5, 4.5, 0.3);
+  const damageEvents = snapshot.recentCombatEvents.filter((event) => (
+    event.type === "damage" && event.target?.kind === "obelisk"
+  ));
+  assert.equal(damageEvents.length, OBELISK.maximumHealth / COMBAT.directDamage);
+  assert.equal(damageEvents.at(-1).healthAfter, 0);
+  assert.ok(snapshot.recentCombatEvents.some((event) => (
+    event.type === "death" && event.target?.kind === "obelisk"
+  )));
+
+  simulation.reset(simulation.seed);
+  snapshot = simulation.snapshot();
+  assert.equal(snapshot.obelisks[0].health, OBELISK.maximumHealth);
+  assert.equal(snapshot.obelisks[0].destroyed, false);
+  assert.equal(snapshot.map.cells[snapshot.map.width * 4 + 8], 1);
+});
+
+test("schema v23 records destructible obelisks while schema v22 keeps them invulnerable", () => {
+  const simulation = new Simulation({ scenario: obeliskScenario(), particleBurstCount: 0 });
+  simulation.tick({ cast: { x: 8.5, z: 4.5 } });
+  for (let tick = 0; tick < 60; tick += 1) simulation.tick(null);
+  assert.equal(simulation.snapshot().obelisks[0].health, OBELISK.maximumHealth - 25);
+
+  const recording = simulation.exportCommandLog();
+  assert.equal(recording.schemaVersion, SCHEMA_VERSION);
+  assert.equal(
+    recording.configuration.obeliskDestructionProfile,
+    OBELISK_DESTRUCTION_PROFILE_V1,
+  );
+  assert.deepEqual(Simulation.replay(recording).snapshot(), simulation.snapshot());
+
+  const schema22 = structuredClone(recording);
+  schema22.schemaVersion = 22;
+  delete schema22.configuration.obeliskDestructionProfile;
+  const legacy = Simulation.replay(schema22);
+  const legacyObelisk = legacy.snapshot().obelisks[0];
+  assert.equal(legacy.obeliskDestructionProfile, OBELISK_DESTRUCTION_PROFILE_NONE);
+  assert.equal(legacyObelisk.invulnerable, true);
+  assert.equal(Object.hasOwn(legacyObelisk, "health"), false);
+  assert.equal(legacy.map.get(8, 4), 1);
 });
 
 test("blocked and capped spawn attempts rotate once without queueing retries", () => {
@@ -929,7 +1009,7 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
     simulation.enemies.health[current] = 100;
   }
   const snapshot = simulation.snapshot();
-  assert.equal(snapshot.schemaVersion, 22);
+  assert.equal(snapshot.schemaVersion, SCHEMA_VERSION);
   assert.equal(snapshot.player.maximumHealth, 100);
   assert.equal(snapshot.enemies[0].maximumHealth, 100);
   assert.equal(snapshot.pools.enemies.capacity, 4);
@@ -949,7 +1029,8 @@ test("snapshots, queries, diagnostics, ownership, and combat history expose boun
   const obelisk = duel.scenario.obelisk;
   const obeliskQuery = duel.queryAt(obelisk.x, obelisk.z);
   assert.equal(obeliskQuery.kind, "obelisk");
-  assert.equal(obeliskQuery.flags.invulnerable, true);
+  assert.equal(obeliskQuery.flags.invulnerable, false);
+  assert.equal(obeliskQuery.health, OBELISK.maximumHealth);
   assert.equal(duel.resolveSelection({ kind: "obelisk", id: obeliskQuery.id }).id, obeliskQuery.id);
   const diagnostics = duel.encounterDiagnostics();
   assert.equal(diagnostics.level.state, "running");
@@ -965,7 +1046,7 @@ test("schema-v11 replay is exact and schema-v2 through v5 force frozen pre-comba
     });
   }
   const recording = live.exportCommandLog();
-  assert.equal(recording.schemaVersion, 22);
+  assert.equal(recording.schemaVersion, SCHEMA_VERSION);
   assert.equal(recording.configuration.gameplayProfile, "obelisk-duel-v1");
   assert.equal(recording.configuration.enemyAiProfile, ENEMY_AI_PROFILE_INVESTIGATIVE);
   assert.deepEqual(Simulation.replay(recording).snapshot(), live.snapshot());

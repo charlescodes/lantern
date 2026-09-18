@@ -10376,49 +10376,6 @@ handleKeyDown(event)
 dispose()
 </file>
 
-<file path="src/browser/layer_panel.js">
-// @ts-check
-⋮----
-/** @param {unknown} value */
-function finiteNumber(value)
-⋮----
-/** @param {Record<string,any>} diagnostic */
-function diagnosticText(diagnostic)
-⋮----
-export class LayerPanel
-⋮----
-/**
-   * @param {{
-   * root?:HTMLElement|null,
-   * onActivate?:(layerId:string)=>boolean,
-   * onReference?:(layerId:string|null)=>boolean,
-   * onCreate?:(direction:"above"|"below")=>string|null,
-   * onRename?:(layerId:string,name:string)=>boolean,
-   * onBaseY?:(layerId:string,baseY:number)=>boolean,
-   * onDelete?:(layerId:string)=>boolean,
-   * onSetStart?:(layerId:string)=>boolean,
-   * onValidate?:()=>Record<string,any>,
-   * }} [options]
-   */
-⋮----
-/** @param {Record<string,any>} editor */
-sync(editor)
-⋮----
-/** Display rejected parse/migration/load diagnostics without replacing the current map. */
-setExternalDiagnostics(validation)
-⋮----
-clearExternalDiagnostics()
-⋮----
-/** @param {Record<string,any>} validation */
-⋮----
-button.addEventListener("click", () => this.onCreate(/** @type {"above"|"below"} */ (direction)));
-⋮----
-/** @param {Record<string,any>} layer @param {Record<string,any>} editor */
-⋮----
-/** @param {boolean} collapsed */
-setCollapsed(collapsed)
-</file>
-
 <file path="src/core/performance.js">
 // @ts-check
 ⋮----
@@ -10620,25 +10577,6 @@ export function elevatorVisibleOnRuntimeLayer(
   player,
   upperBandMeters,
 )
-</file>
-
-<file path="src/presentation/navigation_topology_view.js">
-// @ts-check
-⋮----
-/** @param {Record<string, any>|null|undefined} target */
-function endpointKey(target)
-⋮----
-/** @param {Record<string, any>} port */
-function clonePort(port)
-⋮----
-/**
- * Renderer-neutral, detached topology diagnostics. It intentionally contains
- * only bounded authored graph data; presentation never queries runtime bodies
- * or decides a route.
- *
- * @param {{topology?:Record<string,any>|null,editor?:Record<string,any>|null,developerToolsOpen?:boolean}} input
- */
-export function createNavigationTopologyView(input =
 </file>
 
 <file path="src/presentation/player_camera.js">
@@ -11381,10 +11319,6 @@ function closeTo(actual, expected, epsilon = 1e-5)
 function sampleBurst(burst)
 </file>
 
-<file path="test/layer_panel.test.js">
-
-</file>
-
 <file path="test/movement_sound_soak.test.js">
 function soundStressMap()
 ⋮----
@@ -11595,86 +11529,6 @@ node_modules/
 coverage/
 *.log
 .DS_Store
-</file>
-
-<file path="docs/bugs/navigation-floor-debug-and-ai.md">
-# Navigation floor transitions: stale overlay and suspected AI retargeting
-
-- **Status:** Open playtest reports; not independently reproduced.
-- **Priority:** Near-term investigation before substantial map authoring.
-- **Reported:** 2026-09-15, during the transition to saved JSON arena loading.
-- **Route:** `?arena=navigation&renderer=3d`, developer tools/navigation view open.
-- **Context:** Ground-to-second-floor elevator travel. Exact seed, enemy IDs,
-  AI state/evidence, selected debug tool, and map revision were not captured.
-  The saved navigation map now permits a single urchin to simplify reproduction.
-
-## NAV-001: Navigation overlay stays on the previous floor
-
-After reaching the second floor, the visible navigation graph does not update
-until the player enters/clicks the editor. Refreshing the editor then displays
-the graph for the new floor.
-
-Expected: in play mode, the debug graph follows the player's viewed runtime
-floor automatically. In edit mode, it follows the selected editor floor.
-Opening the editor should not be needed to refresh a play-mode overlay.
-
-Investigation lead: `createNavigationTopologyView()` currently chooses its layer
-from `editor.activeLayerId`, and `src/main.js` supplies the editor view in play
-mode too. Verify that relationship during a runtime floor handoff; this is a
-code observation, not a completed diagnosis or proof that AI state changes.
-
-## NAV-002: Enemies appear to redirect upstairs when the player changes floors
-
-Ground-floor enemies appear to change navigation and head toward the elevator
-after the player reaches the second floor. Brief yellow route/goal lines flash
-on the grid, and enemies appear to seek a destination they cannot reach directly.
-The player suspects the AI is using the viewed floor's navigation graph.
-
-Expected: changing the camera/editor floor cannot retarget an enemy. Each enemy
-keeps its own runtime floor and home; cross-floor pursuit must follow the
-existing evidence rules and a valid route. A witnessed elevator pursuit may be
-correct, so distinguish it from unintended patrol/home changes.
-
-Reproduce with one enemy and compare a player elevator trip with an editor-only
-layer change. Capture enemy floor, home floor, perception state, pursuit
-evidence, route intent, local goal, and elevator phase before/after each. Include
-a trip the enemy cannot witness. Check the overlay independently: a stale or
-misfiltered route drawing does not by itself establish a simulation defect.
-
-## Debug readability follow-up
-
-The light-blue triangular graph, purple/pink markers, and transient yellow
-lines are difficult to interpret without a legend. Explain authored links,
-patrol nodes, elevator endpoints, selected enemy route, and local goal in the
-debug UI. Keep this presentation improvement separate from the two behavioral
-reports above. Record the active overlay during reproduction because AI View
-has additional colors beyond the authored navigation graph.
-
-Acceptance: play-mode floor changes refresh the correct overlay without an
-editor toggle; editor-only layer changes leave enemy behavior unchanged; and
-cross-floor enemy travel is explained by recorded pursuit/home intent rather
-than the debug view's active floor. Verify in a real browser as well as tests.
-
-## NAV-003: AI route-intent inspection is too fleeting and coarse
-
-One playtest briefly showed yellow cell-level route/goal geometry for an enemy
-trying to reach a player on another floor through an elevator. It appeared only
-once, was not reproduced, and may have been an existing transient debug draw
-rather than a rendering defect. The observation is nevertheless useful because
-the current view does not make it possible to inspect how an individual enemy
-selected, followed, failed, or abandoned its route.
-
-Investigate a read-only navigation-inspection mode under AI View (or a clearly
-paired navigation panel). For the selected enemy, it should persistently show a
-thin world-space route line or ordered segment chain, rather than only
-cell-filling highlights, along with the current local movement goal, intended
-target/home, route status, and relevant connector/layer transitions. It must
-identify unavailable or failed next steps without implying that a path exists.
-
-This is a diagnostics and reproduction aid, not permission to add a general
-navmesh or let UI/debug state influence simulation. It should remain bounded,
-read-only, deterministic for a recorded state, separated from authored graph
-geometry, and concealed/visible according to an explicit debug policy.
 </file>
 
 <file path="docs/milestones/0.3.0-3d-presentation.md">
@@ -16043,6 +15897,52 @@ then every 600 ticks; the interval is a repeating attempt schedule, not a delay
 after death. Initial-spawn timing and global obelisk defaults are unchanged.
 </file>
 
+<file path="src/browser/layer_panel.js">
+// @ts-check
+⋮----
+/** @param {unknown} value */
+function finiteNumber(value)
+⋮----
+/** @param {Record<string,any>} diagnostic */
+function diagnosticText(diagnostic)
+⋮----
+export class LayerPanel
+⋮----
+/**
+   * @param {{
+   * root?:HTMLElement|null,
+   * onActivate?:(layerId:string)=>boolean,
+   * onReference?:(layerId:string|null)=>boolean,
+   * onCreate?:(direction:"above"|"below")=>string|null,
+   * onRename?:(layerId:string,name:string)=>boolean,
+   * onBaseY?:(layerId:string,baseY:number)=>boolean,
+   * onDelete?:(layerId:string)=>boolean,
+   * onSetStart?:(layerId:string)=>boolean,
+   * onResize?:(width:number,height:number)=>boolean,
+   * onValidate?:()=>Record<string,any>,
+   * }} [options]
+   */
+⋮----
+/** @param {Record<string,any>} editor */
+sync(editor)
+⋮----
+/** Display rejected parse/migration/load diagnostics without replacing the current map. */
+setExternalDiagnostics(validation)
+⋮----
+clearExternalDiagnostics()
+⋮----
+/** @param {Record<string,any>} validation */
+⋮----
+const makeInput = (label, value) =>
+⋮----
+button.addEventListener("click", () => this.onCreate(/** @type {"above"|"below"} */ (direction)));
+⋮----
+/** @param {Record<string,any>} layer @param {Record<string,any>} editor */
+⋮----
+/** @param {boolean} collapsed */
+setCollapsed(collapsed)
+</file>
+
 <file path="src/browser/spell_lab.js">
 // @ts-check
 ⋮----
@@ -16312,6 +16212,25 @@ export function setInstancedEmissiveAt(mesh, index, color, strength)
  * @returns {boolean}
  */
 export function completeInstancedPoolSubmission(mesh)
+</file>
+
+<file path="src/presentation/navigation_topology_view.js">
+// @ts-check
+⋮----
+/** @param {Record<string, any>|null|undefined} target */
+function endpointKey(target)
+⋮----
+/** @param {Record<string, any>} port */
+function clonePort(port)
+⋮----
+/**
+ * Renderer-neutral, detached topology diagnostics. It intentionally contains
+ * only bounded authored graph data; presentation never queries runtime bodies
+ * or decides a route.
+ *
+ * @param {{topology?:Record<string,any>|null,editor?:Record<string,any>|null,layerId?:string|null,developerToolsOpen?:boolean}} input
+ */
+export function createNavigationTopologyView(input =
 </file>
 
 <file path="src/sim/aperture_fit.js">
@@ -17106,6 +17025,10 @@ getContext: ()
 getBoundingClientRect: () => (
 </file>
 
+<file path="test/layer_panel.test.js">
+
+</file>
+
 <file path="test/navigation_elevator_route.test.js">
 function borderedMap()
 ⋮----
@@ -17350,6 +17273,107 @@ That separation is not itself recorded as a bug. Revisit it only if future
 elevator, navigation, collision, or authoring work shows harmful duplication;
 any consolidation must preserve connector topology, elevator support behavior,
 and standalone-hole semantics.
+</file>
+
+<file path="docs/bugs/navigation-floor-debug-and-ai.md">
+# Navigation floor transitions: stale overlay and suspected AI retargeting
+
+- **Status:** Open playtest reports; not independently reproduced.
+- **Priority:** Near-term investigation before substantial map authoring.
+- **Reported:** 2026-09-15, during the transition to saved JSON arena loading.
+- **Route:** `?arena=navigation&renderer=3d`, developer tools/navigation view open.
+- **Context:** Ground-to-second-floor elevator travel. Exact seed, enemy IDs,
+  AI state/evidence, selected debug tool, and map revision were not captured.
+  The saved navigation map now permits a single urchin to simplify reproduction.
+
+## NAV-001: Navigation overlay stays on the previous floor
+
+**Resolved in development:** the renderer-neutral topology view now receives an
+explicit viewed layer. Play mode follows the runtime presentation floor while
+edit mode follows the active editor floor, so a stale editor selection can no
+longer hold the play overlay on the previous layer. Real-browser Canvas2D and
+Three.js verification remains part of acceptance.
+
+After reaching the second floor, the visible navigation graph does not update
+until the player enters/clicks the editor. Refreshing the editor then displays
+the graph for the new floor.
+
+Expected: in play mode, the debug graph follows the player's viewed runtime
+floor automatically. In edit mode, it follows the selected editor floor.
+Opening the editor should not be needed to refresh a play-mode overlay.
+
+Investigation lead: `createNavigationTopologyView()` currently chooses its layer
+from an explicit composition-root choice: editor identity in edit mode and the
+presented runtime map in play mode. This presentation repair does not establish
+or dismiss the separate AI-retargeting report below.
+
+## NAV-002: Enemies appear to redirect upstairs when the player changes floors
+
+Ground-floor enemies appear to change navigation and head toward the elevator
+after the player reaches the second floor. Brief yellow route/goal lines flash
+on the grid, and enemies appear to seek a destination they cannot reach directly.
+The player suspects the AI is using the viewed floor's navigation graph.
+
+Expected: changing the camera/editor floor cannot retarget an enemy. Each enemy
+keeps its own runtime floor and home; cross-floor pursuit must follow the
+existing evidence rules and a valid route. A witnessed elevator pursuit may be
+correct, so distinguish it from unintended patrol/home changes.
+
+Reproduce with one enemy and compare a player elevator trip with an editor-only
+layer change. Capture enemy floor, home floor, perception state, pursuit
+evidence, route intent, local goal, and elevator phase before/after each. Include
+a trip the enemy cannot witness. Check the overlay independently: a stale or
+misfiltered route drawing does not by itself establish a simulation defect.
+
+## Debug readability follow-up
+
+The light-blue triangular graph, purple/pink markers, and transient yellow
+lines are difficult to interpret without a legend. Explain authored links,
+patrol nodes, elevator endpoints, selected enemy route, and local goal in the
+debug UI. Keep this presentation improvement separate from the two behavioral
+reports above. Record the active overlay during reproduction because AI View
+has additional colors beyond the authored navigation graph.
+
+Acceptance: play-mode floor changes refresh the correct overlay without an
+editor toggle; editor-only layer changes leave enemy behavior unchanged; and
+cross-floor enemy travel is explained by recorded pursuit/home intent rather
+than the debug view's active floor. Verify in a real browser as well as tests.
+
+## NAV-003: AI route-intent inspection is too fleeting and coarse
+
+One playtest briefly showed yellow cell-level route/goal geometry for an enemy
+trying to reach a player on another floor through an elevator. It appeared only
+once, was not reproduced, and may have been an existing transient debug draw
+rather than a rendering defect. The observation is nevertheless useful because
+the current view does not make it possible to inspect how an individual enemy
+selected, followed, failed, or abandoned its route.
+
+Investigate a read-only navigation-inspection mode under AI View (or a clearly
+paired navigation panel). For the selected enemy, it should persistently show a
+thin world-space route line or ordered segment chain, rather than only
+cell-filling highlights, along with the current local movement goal, intended
+target/home, route status, and relevant connector/layer transitions. It must
+identify unavailable or failed next steps without implying that a path exists.
+
+This is a diagnostics and reproduction aid, not permission to add a general
+navmesh or let UI/debug state influence simulation. It should remain bounded,
+read-only, deterministic for a recorded state, separated from authored graph
+geometry, and concealed/visible according to an explicit debug policy.
+
+## NAV-004: Obelisks disappear when editing a floor other than the player floor
+
+**Resolved in development:** simulation snapshots now expose obelisks filtered
+independently for the runtime view and active editor floor. Edit presentation
+uses the editor-floor list alongside `editorMap`, while play presentation keeps
+the runtime list. This preserves per-body/runtime floor ownership and restores
+the selected floor's obelisks in both Canvas2D and Three.js.
+
+The reported reproduction places the player on an upper floor, enters edit
+mode, and activates the ground floor. The ground-floor obelisk remained
+pickable and its authoring extent could appear, but its normal visual was
+missing because the renderer received the upper runtime floor's prefiltered
+obelisk list with the ground editor map. Real-browser verification of this
+exact sequence remains part of acceptance.
 </file>
 
 <file path="docs/soft-specs/candidate-roadmap.md">
@@ -18517,49 +18541,8 @@ function borderedMap(width, height, spawn)
 const sampleContact = () =>
 </file>
 
-<file path="test/multi_layer_authoring.test.js">
-function borderedMap(width = 10, height = 10)
-⋮----
-function sourceDocument()
-⋮----
-function threeLayerDocument()
-⋮----
-function simulationFor(document)
-⋮----
-function compiledView(compiled)
-⋮----
-function historyHarness(document)
-⋮----
-apply(command, direction)
-⋮----
-document: ()
-execute(action)
-⋮----
-validatePlacement: (definitionId, x, z, rotation, ignoreId, layerId)
-commit(action)
-activateLayer(layerId)
-layerSnapshot: (layerId)
-historySnapshot: ()
-undo: ()
-redo: ()
-</file>
-
 <file path="test/navigation_route_state.test.js">
 function spawn(pool, sequence)
-</file>
-
-<file path="test/navigation_topology_view.test.js">
-
-</file>
-
-<file path="test/obelisk_authoring_home.test.js">
-function borderedMap(width = 18, height = 14)
-⋮----
-function addObelisk(document, layerId, x, z, properties)
-⋮----
-function runUntil(simulation, predicate, maximumTicks = 4_000)
-⋮----
-function homeRouteScenario()
 </file>
 
 <file path="test/render_lab.test.js">
@@ -19064,6 +19047,33 @@ export function boxBoxContact(ax, az, aHalfX, aHalfZ, bx, bz, bHalfX, bHalfZ, ou
 export function gridRayBlocked(map, startX, startZ, endX, endZ)
 </file>
 
+<file path="test/multi_layer_authoring.test.js">
+function borderedMap(width = 10, height = 10)
+⋮----
+function sourceDocument()
+⋮----
+function threeLayerDocument()
+⋮----
+function simulationFor(document)
+⋮----
+function compiledView(compiled)
+⋮----
+function historyHarness(document)
+⋮----
+apply(command, direction)
+⋮----
+document: ()
+execute(action)
+⋮----
+validatePlacement: (definitionId, x, z, rotation, ignoreId, layerId)
+commit(action)
+activateLayer(layerId)
+layerSnapshot: (layerId)
+historySnapshot: ()
+undo: ()
+redo: ()
+</file>
+
 <file path="test/navigation_patrol.test.js">
 function borderedMap(width = 30, height = 15)
 ⋮----
@@ -19080,6 +19090,20 @@ const targetForSequence = (sequence) =>
 const portAt = (cx, cz) => simulation.navigationTopology.portMetadata.findIndex(
     (port) => port.kind === "node" && port.layerId === "ground" && port.cx === cx && port.cz === cz,
   );
+</file>
+
+<file path="test/navigation_topology_view.test.js">
+
+</file>
+
+<file path="test/obelisk_authoring_home.test.js">
+function borderedMap(width = 18, height = 14)
+⋮----
+function addObelisk(document, layerId, x, z, properties)
+⋮----
+function runUntil(simulation, predicate, maximumTicks = 4_000)
+⋮----
+function homeRouteScenario()
 </file>
 
 <file path="test/performance_capture.test.js">
@@ -20019,161 +20043,6 @@ function simulationFor(document)
 
 </file>
 
-<file path="src/authoring/authoring_history.js">
-// @ts-check
-⋮----
-/** @param {unknown} value */
-function cloneJson(value)
-⋮----
-/** @param {unknown} left @param {unknown} right */
-function jsonEqual(left, right)
-⋮----
-/** @param {Record<string,any>} document @param {string} layerId */
-function layerFor(document, layerId)
-⋮----
-/**
- * History patches intentionally store stable catalog IDs rather than compact
- * grid codes. Legend patches preserve byte-for-byte authoring source when a
- * stroke introduces a definition that was not previously present.
- * @param {Record<string,any>} layer
- * @param {"surface"|"structure"} channel
- * @param {number} index
- */
-function definitionAt(layer, channel, index)
-⋮----
-/** @param {Record<string,any>} instance */
-function cloneInstance(instance)
-⋮----
-return /** @type {Record<string,any>} */ (cloneJson(instance));
-⋮----
-/** @param {unknown} input @param {string} path */
-function finiteInteger(input, path)
-⋮----
-/** @param {unknown} input @param {string} path */
-function finiteNumber(input, path)
-⋮----
-/** @param {unknown} input @param {string} path */
-function nonEmptyString(input, path)
-⋮----
-/** @param {unknown} input @param {string} instanceId @param {string} path */
-function instanceSnapshot(input, instanceId, path)
-⋮----
-const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
-⋮----
-/** @param {unknown} input @param {string} layerId @param {string} path */
-function layerSnapshot(input, layerId, path)
-⋮----
-const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
-⋮----
-/** @param {unknown} input @param {string} connectorId @param {string} path */
-function connectorSnapshot(input, connectorId, path)
-⋮----
-const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
-⋮----
-/** @param {unknown} input @param {string} stableId @param {string} path @param {"node"|"link"} kind */
-function navigationSnapshot(input, stableId, path, kind)
-⋮----
-const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
-⋮----
-/** @param {unknown} input @param {string} path */
-function playerStartSnapshot(input, path)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/**
- * Validates and detaches a command record. This is also the command-log
- * canonicalization boundary: functions, DOM objects, and runtime references
- * cannot survive the JSON clone and shape checks.
- * @param {unknown} input
- */
-export function cloneAuthoringCommand(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-const patch = /** @type {Record<string,any>} */ (value);
-⋮----
-const normalizeDefinition = (definitionId, side) =>
-⋮----
-before: /** @type {Array<string|null>} */ (cloneJson(patch.before)),
-after: /** @type {Array<string|null>} */ (cloneJson(patch.after)),
-⋮----
-/**
- * Produces a compact exact delta between two compatible authoring documents.
- * Map replacement is deliberately not represented as a history command.
- * @param {unknown} beforeInput
- * @param {unknown} afterInput
- * @param {string} label
- * @param {{id?:number}} [options]
- */
-export function createAuthoringCommand(beforeInput, afterInput, label, options =
-⋮----
-/**
- * Applies or reverses a command on a detached clone. Preconditions are checked
- * before any mutation, and final schema validation makes the operation atomic.
- * Historical reversal intentionally restores known state without re-running
- * placement policy against transient runtime bodies.
- * @param {unknown} documentInput
- * @param {unknown} commandInput
- * @param {"forward"|"reverse"} [direction]
- */
-export function applyAuthoringCommand(documentInput, commandInput, direction = "forward")
-⋮----
-// Check every precondition before touching the detached document.
-⋮----
-// Legends first so stable definition IDs can be resolved into target codes.
-⋮----
-const targetLegend = /** @type {Array<string|null>} */ (cloneJson(patch[targetSide]));
-⋮----
-/** @param {Record<string,any>} definition @param {string} verb */
-function definitionLabel(definition, verb)
-⋮----
-/**
- * Runs an existing semantic editor action against a detached source document,
- * validates the proposed compiled result, and returns its exact command delta.
- * @param {unknown} documentInput
- * @param {Record<string,any>} action
- */
-export function commandFromAuthoringAction(documentInput, action)
-⋮----
-// Compilation resolves definitions and validates placements before a command
-// can invalidate a redo branch or enter history.
-⋮----
-/** @param {unknown} result */
-function normalizedApplyResult(result)
-⋮----
-const source = /** @type {Record<string,any>} */ (result);
-⋮----
-/** @param {Function} apply @param {Record<string,any>} command @param {"forward"|"reverse"} direction */
-function invokeApply(apply, command, direction)
-⋮----
-/**
- * Editor-session-only bounded history. Revision identities are monotonic tokens,
- * not cursor indexes, so dirty tracking survives branch truncation and pruning.
- */
-export class AuthoringHistory
-⋮----
-/**
-   * @param {{
-   * capacity?:number,
-   * apply:(command:Record<string,any>,direction:"forward"|"reverse")=>unknown,
-   * }} options
-   */
-⋮----
-/** @param {unknown} commandInput */
-execute(commandInput)
-⋮----
-undo()
-⋮----
-redo()
-⋮----
-markSaved()
-⋮----
-/** Establishes a clean baseline after map creation, migration, load, or replacement. */
-clear()
-⋮----
-snapshot()
-</file>
-
 <file path="src/presentation/ai_view_model.js">
 // @ts-check
 ⋮----
@@ -20374,389 +20243,159 @@ resetPerformanceMetrics()
 metrics()
 </file>
 
-<file path="src/authoring/authoring_commands.js">
+<file path="src/authoring/authoring_history.js">
 // @ts-check
 ⋮----
-/** @param {ReturnType<typeof cloneAuthoringMap>} document @param {string|undefined} layerId */
+/** @param {unknown} value */
+function cloneJson(value)
+⋮----
+/** @param {unknown} left @param {unknown} right */
+function jsonEqual(left, right)
+⋮----
+/** @param {Record<string,any>} document @param {string} layerId */
 function layerFor(document, layerId)
 ⋮----
-/** @param {number} ordinal */
-function generatedLayerId(ordinal)
+/**
+ * History patches intentionally store stable catalog IDs rather than compact
+ * grid codes. Legend patches preserve byte-for-byte authoring source when a
+ * stroke introduces a definition that was not previously present.
+ * @param {Record<string,any>} layer
+ * @param {"surface"|"structure"} channel
+ * @param {number} index
+ */
+function definitionAt(layer, channel, index)
 ⋮----
-/** @param {number} ordinal */
-function generatedConnectorId(ordinal)
+/** @param {Record<string,any>} instance */
+function cloneInstance(instance)
+⋮----
+return /** @type {Record<string,any>} */ (cloneJson(instance));
+⋮----
+/** @param {unknown} input @param {string} path */
+function finiteInteger(input, path)
+⋮----
+/** @param {unknown} input @param {string} path */
+function finiteNumber(input, path)
+⋮----
+/** @param {unknown} input @param {string} path */
+function nonEmptyString(input, path)
+⋮----
+/** @param {unknown} input @param {string} instanceId @param {string} path */
+function instanceSnapshot(input, instanceId, path)
+⋮----
+const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+⋮----
+/** @param {unknown} input @param {string} layerId @param {string} path */
+function layerSnapshot(input, layerId, path)
+⋮----
+const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+⋮----
+/** @param {unknown} input @param {string} connectorId @param {string} path */
+function connectorSnapshot(input, connectorId, path)
+⋮----
+const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+⋮----
+/** @param {unknown} input @param {string} stableId @param {string} path @param {"node"|"link"} kind */
+function navigationSnapshot(input, stableId, path, kind)
+⋮----
+const snapshot = /** @type {Record<string,any>} */ (cloneJson(input));
+⋮----
+/** @param {unknown} input @param {string} path */
+function playerStartSnapshot(input, path)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
 ⋮----
 /**
- * Creates one blank shared-space layer relative to an existing stable layer ID.
+ * Validates and detaches a command record. This is also the command-log
+ * canonicalization boundary: functions, DOM objects, and runtime references
+ * cannot survive the JSON clone and shape checks.
  * @param {unknown} input
- * @param {string} relativeLayerId
- * @param {"above"|"below"} direction
- * @param {{name?:string,baseY?:number}} [options]
  */
-export function createLayer(input, relativeLayerId, direction, options =
+export function cloneAuthoringCommand(input)
 ⋮----
-/** @param {unknown} input @param {string} layerId */
-export function deleteLayer(input, layerId)
+const source = /** @type {Record<string,any>} */ (input);
 ⋮----
-/** @param {unknown} input @param {string} layerId @param {string} name */
-export function renameLayer(input, layerId, name)
+const patch = /** @type {Record<string,any>} */ (value);
 ⋮----
-/** @param {unknown} input @param {string} layerId @param {number} baseY */
-export function setLayerBaseY(input, layerId, baseY)
+const normalizeDefinition = (definitionId, side) =>
 ⋮----
-/** @param {unknown} input @param {string} layerId */
-export function setPlayerStartLayer(input, layerId)
+before: /** @type {Array<string|null>} */ (cloneJson(patch.before)),
+after: /** @type {Array<string|null>} */ (cloneJson(patch.after)),
 ⋮----
 /**
- * Places one map-level two-stop connector at one shared aligned X/Z point.
- * @param {unknown} input
- * @param {number} x
- * @param {number} z
- * @param {{lowerLayerId:string,upperLayerId:string,platformWidth?:number,apertureWidth?:number,travelDurationSeconds?:number,dwellSeconds?:number,initialStop?:"lower"|"upper"}} options
+ * Produces a compact exact delta between two compatible authoring documents.
+ * Map replacement is deliberately not represented as a history command.
+ * @param {unknown} beforeInput
+ * @param {unknown} afterInput
+ * @param {string} label
+ * @param {{id?:number}} [options]
  */
-export function placeElevatorConnector(input, x, z, options)
-⋮----
-/** @param {unknown} input @param {string} connectorId */
-export function removeConnector(input, connectorId)
-⋮----
-/** @param {unknown} input @param {string} connectorId @param {Record<string,unknown>} changes */
-export function updateConnector(input, connectorId, changes)
-⋮----
-/** @param {number} ordinal */
-function generatedNavigationNodeId(ordinal)
-⋮----
-/** @param {number} ordinal */
-function generatedNavigationLinkId(ordinal)
-⋮----
-/** @param {Record<string,any>} endpoint */
-function navigationEndpointKey(endpoint)
-⋮----
-/** @param {unknown} input @param {number} cx @param {number} cz @param {{layerId?:string,patrol?:boolean}} [options] */
-export function placeNavigationNode(input, cx, cz, options =
-⋮----
-/** @param {unknown} input @param {string} nodeId @param {{cx?:number,cz?:number,patrol?:boolean}} changes */
-export function updateNavigationNode(input, nodeId, changes)
-⋮----
-/** @param {unknown} input @param {string} nodeId @param {number} cx @param {number} cz */
-export function moveNavigationNode(input, nodeId, cx, cz)
-⋮----
-/** @param {unknown} input @param {string} nodeId */
-export function removeNavigationNode(input, nodeId)
+export function createAuthoringCommand(beforeInput, afterInput, label, options =
 ⋮----
 /**
- * @param {unknown} input
- * @param {{kind:"node",nodeId:string}|{kind:"connector-endpoint",connectorId:string,stop:"lower"|"upper"}} aInput
- * @param {{kind:"node",nodeId:string}|{kind:"connector-endpoint",connectorId:string,stop:"lower"|"upper"}} bInput
+ * Applies or reverses a command on a detached clone. Preconditions are checked
+ * before any mutation, and final schema validation makes the operation atomic.
+ * Historical reversal intentionally restores known state without re-running
+ * placement policy against transient runtime bodies.
+ * @param {unknown} documentInput
+ * @param {unknown} commandInput
+ * @param {"forward"|"reverse"} [direction]
  */
-export function placeNavigationLink(input, aInput, bInput)
+export function applyAuthoringCommand(documentInput, commandInput, direction = "forward")
 ⋮----
-/** @param {unknown} input @param {string} linkId */
-export function removeNavigationLink(input, linkId)
+// Check every precondition before touching the detached document.
 ⋮----
-/** @param {Record<string, any>} layer @param {number} cx @param {number} cz */
-function cellIndex(layer, cx, cz)
+// Legends first so stable definition IDs can be resolved into target codes.
 ⋮----
-/** @param {string} definitionId @param {"surface"|"structure"|"instance"|"connector"} target */
-function definitionFor(definitionId, target)
+const targetLegend = /** @type {Array<string|null>} */ (cloneJson(patch[targetSide]));
 ⋮----
-/** @param {Array<string|null>} legend @param {string} definitionId */
-function legendIndex(legend, definitionId)
+/** @param {Record<string,any>} definition @param {string} verb */
+function definitionLabel(definition, verb)
 ⋮----
 /**
- * @param {unknown} input
- * @param {Array<{cx:number,cz:number}>} cells
- * @param {"surface"|"structure"} target
- * @param {string|null} definitionId
- * @param {string} [layerId]
+ * Runs an existing semantic editor action against a detached source document,
+ * validates the proposed compiled result, and returns its exact command delta.
+ * @param {unknown} documentInput
+ * @param {Record<string,any>} action
  */
-function mutateCells(input, cells, target, definitionId, layerId)
+export function commandFromAuthoringAction(documentInput, action)
+⋮----
+// Compilation resolves definitions and validates placements before a command
+// can invalidate a redo branch or enter history.
+⋮----
+/** @param {unknown} result */
+function normalizedApplyResult(result)
+⋮----
+const source = /** @type {Record<string,any>} */ (result);
+⋮----
+/** @param {Function} apply @param {Record<string,any>} command @param {"forward"|"reverse"} direction */
+function invokeApply(apply, command, direction)
 ⋮----
 /**
- * Atomically paints a surface stroke in one cloned authoring document.
- * @param {unknown} input
- * @param {Array<{cx:number,cz:number}>} cells
- * @param {string} definitionId
- * @param {string} [layerId]
+ * Editor-session-only bounded history. Revision identities are monotonic tokens,
+ * not cursor indexes, so dirty tracking survives branch truncation and pruning.
  */
-export function paintSurfaceCells(input, cells, definitionId, layerId)
-⋮----
-/**
- * Atomically paints a structure stroke in one cloned authoring document.
- * @param {unknown} input
- * @param {Array<{cx:number,cz:number}>} cells
- * @param {string} definitionId
- * @param {string} [layerId]
- */
-export function paintStructureCells(input, cells, definitionId, layerId)
-⋮----
-/** @param {unknown} input @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
-export function eraseSurfaceCells(input, cells, layerId)
-⋮----
-/** @param {unknown} input @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
-export function eraseStructureCells(input, cells, layerId)
-⋮----
-/**
- * @param {unknown} input
- * @param {number} cx
- * @param {number} cz
- * @param {string} definitionId
- * @param {string} [layerId]
- */
-export function paintSurface(input, cx, cz, definitionId, layerId)
-⋮----
-/**
- * @param {unknown} input
- * @param {number} cx
- * @param {number} cz
- * @param {string} definitionId
- * @param {string} [layerId]
- */
-export function paintStructure(input, cx, cz, definitionId, layerId)
-⋮----
-/**
- * Resets a surface cell to the active layer's documented default (legend code 0).
- * @param {unknown} input
- * @param {number} cx
- * @param {number} cz
- * @param {string} [layerId]
- */
-export function eraseSurface(input, cx, cz, layerId)
-⋮----
-/**
- * @param {unknown} input
- * @param {number} cx
- * @param {number} cz
- * @param {string} [layerId]
- */
-export function eraseStructure(input, cx, cz, layerId)
-⋮----
-/** @param {string} definitionId @param {number} ordinal */
-function generatedInstanceId(definitionId, ordinal)
-⋮----
-/**
- * Catalog-driven placement snapping used by the editor and probe adapters.
- * @param {string} definitionId
- * @param {number} x
- * @param {number} z
- */
-export function snapDefinitionPlacement(definitionId, x, z)
-⋮----
-/**
- * @param {unknown} input
- * @param {string} definitionId
- * @param {number} x
- * @param {number} z
- * @param {{rotation?:number,properties?:Record<string,unknown>,layerId?:string}} [options]
- */
-export function placeInstance(input, definitionId, x, z, options =
-⋮----
-/**
- * Updates common sparse-instance transform fields as one semantic mutation.
- * Stable authoring identity, definition, placement order, and properties remain
- * unchanged.
- * @param {unknown} input
- * @param {string} instanceId
- * @param {{x?:number,z?:number,rotation?:number}} transform
- * @param {string} [layerId]
- */
-export function updateInstanceTransform(input, instanceId, transform, layerId)
-⋮----
-/**
- * Replaces the JSON-serializable, definition-specific property bag while
- * preserving stable identity, transform, and placement order.
- * @param {unknown} input
- * @param {string} instanceId
- * @param {Record<string,unknown>|undefined} properties
- * @param {string} [layerId]
- */
-export function updateInstanceProperties(input, instanceId, properties, layerId)
-⋮----
-/** @param {unknown} input @param {string} instanceId @param {number} x @param {number} z @param {string} [layerId] */
-export function moveInstance(input, instanceId, x, z, layerId)
-⋮----
-/** @param {unknown} input @param {string} instanceId @param {number} rotation @param {string} [layerId] */
-export function rotateInstance(input, instanceId, rotation, layerId)
-⋮----
-/**
- * @param {unknown} input
- * @param {string} instanceId
- * @param {string} [layerId]
- */
-export function removeInstance(input, instanceId, layerId)
-</file>
-
-<file path="src/browser/authoring_editor.js">
-// @ts-check
-⋮----
-/** @param {Record<string, any>|null} target */
-function cloneTarget(target)
-⋮----
-/** @param {{cx:number,cz:number}} cell */
-function cellKey(cell)
-⋮----
-/** @param {Record<string, any>} instance */
-function cloneTransform(instance)
-⋮----
-/** @param {Record<string, any>|null} layer */
-function cloneLayerSnapshot(layer)
-⋮----
-export class AuthoringEditorController
+export class AuthoringHistory
 ⋮----
 /**
    * @param {{
-   * snapshot:Record<string,any>,
-   * validatePlacement:(definitionId:string,x:number,z:number,rotation:number,ignoreId?:string|null,layerId?:string)=>Record<string,any>,
-   * commit:(action:Record<string,unknown>)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
-   * activateLayer?:(layerId:string)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
-   * layerSnapshot?:(layerId:string)=>Record<string,any>|null,
-   * validateMap?:()=>Record<string,any>,
-   * historySnapshot?:()=>Record<string,any>,
-   * undo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
-   * redo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
-   * announce?:(message:string)=>void,
+   * capacity?:number,
+   * apply:(command:Record<string,any>,direction:"forward"|"reverse")=>unknown,
    * }} options
    */
 ⋮----
-/** @param {Record<string,any>} snapshot @param {{x:number,z:number,inside:boolean}} [pointer] */
-sync(snapshot, pointer)
-⋮----
-/** Clears document-relative UI identity after an atomic load/import replacement. */
-replaceDocument(snapshot)
-⋮----
-/** @param {string} definitionId */
-setDefinition(definitionId)
-⋮----
-/** @param {string} tool */
-setTool(tool)
-⋮----
-/** @param {string} channel */
-setChannel(channel)
-⋮----
-/** @param {boolean} value */
-setShowAuthoringExtents(value)
-⋮----
-/** @param {string} layerId */
-activateLayer(layerId)
-⋮----
-/** @param {string|null} layerId */
-setReferenceLayer(layerId)
-⋮----
-/** @param {"above"|"below"} direction */
-createLayer(direction)
-⋮----
-/** @param {string} layerId @param {string} name */
-renameLayer(layerId, name)
-⋮----
-/** @param {string} layerId @param {number} baseY */
-setLayerBaseY(layerId, baseY)
-⋮----
-/** @param {string} layerId */
-deleteLayer(layerId)
-⋮----
-/** @param {string} layerId */
-setPlayerStartLayer(layerId)
-⋮----
-validateMap()
-⋮----
-/** @param {number} x @param {number} z @param {boolean} [inside] */
-pointerMove(x, z, inside = true)
-⋮----
-pointerLeave()
-⋮----
-/** @param {number} button @param {number} x @param {number} z */
-pointerDown(button, x, z)
-⋮----
-/**
-   * @param {number} button
-   * @param {number} x
-   * @param {number} z
-   * @param {{moved?:boolean}} [options]
-   */
-pointerUp(button, x, z, options =
-⋮----
-cancel()
-⋮----
-rotate()
-⋮----
-/** @param {string} instanceId @param {{x:number,z:number,rotation:number}} transform */
-updateInstanceTransform(instanceId, transform)
-⋮----
-/** @param {string} instanceId */
-removeInstance(instanceId)
-⋮----
-/** @param {number} cx @param {number} cz @param {boolean} [patrol] */
-placeNavigationNode(cx, cz, patrol = false)
-⋮----
-/** @param {string} nodeId @param {number} cx @param {number} cz */
-moveNavigationNode(nodeId, cx, cz)
-⋮----
-/** @param {string} nodeId @param {Record<string, unknown>} changes */
-updateNavigationNode(nodeId, changes)
-⋮----
-/** @param {string} nodeId */
-removeNavigationNode(nodeId)
-⋮----
-fillConnectorNavigation()
-⋮----
-/** @param {string} connectorId */
-removeConnector(connectorId)
-⋮----
-/** @param {string} connectorId @param {Record<string,unknown>} changes */
-updateConnector(connectorId, changes)
-⋮----
-/** @param {string} instanceId @param {Record<string,unknown>|undefined} properties */
-updateInstanceProperties(instanceId, properties)
+/** @param {unknown} commandInput */
+execute(commandInput)
 ⋮----
 undo()
 ⋮----
 redo()
 ⋮----
-/** @param {string} instanceId */
-selectInstance(instanceId)
+markSaved()
 ⋮----
-/** @param {string} connectorId */
-selectConnector(connectorId)
-⋮----
-/** @param {number} x @param {number} z */
-selectAt(x, z)
+/** Establishes a clean baseline after map creation, migration, load, or replacement. */
+clear()
 ⋮----
 snapshot()
-⋮----
-/** @param {number} x @param {number} z */
-⋮----
-/** @param {number} x @param {number} z */
-⋮----
-/** @param {number} x @param {number} z */
-⋮----
-/** @param {Record<string,any>} gesture */
-⋮----
-/** @param {number} x @param {number} z */
-⋮----
-/** @param {Record<string, any>} endpoint */
-⋮----
-/** @param {Record<string, any>} endpoint */
-⋮----
-/** @param {Record<string,unknown>} action */
-⋮----
-/** @param {"undo"|"redo"} operation */
-⋮----
-/** @param {string} instanceId */
-⋮----
-/** @param {string} nodeId */
-⋮----
-/** @param {string} connectorId */
-⋮----
-/** @param {Record<string,any>} instance */
-⋮----
-/** @param {string} message @param {boolean} valid */
-⋮----
-/**
- * Renderer helper kept here so Canvas and Three observe the same selection
- * footprint without depending on DOM panels.
- * @param {Record<string,any>} snapshot
- * @param {Record<string,any>|null} target
- */
-export function editorTargetCells(snapshot, target)
 </file>
 
 <file path="src/browser/map_palette.js">
@@ -20807,46 +20446,6 @@ snapshot()
 // M1A.1 exposed null while its erase pseudo-tool was active. Keep that
 // compatibility field while the richer editor snapshot retains the
 // actual selected catalog definition independently.
-</file>
-
-<file path="test/combat_presentation.test.js">
-function fakeThreeCanvas()
-⋮----
-getContext()
-addEventListener()
-removeEventListener()
-setAttribute()
-⋮----
-function fakeCanvas2d()
-⋮----
-setTransform()
-beginPath()
-closePath()
-moveTo(x, y)
-lineTo(x, y)
-arc(x, y, radius, start, end, counterclockwise = false)
-fill()
-stroke()
-strokeRect()
-setLineDash()
-save()
-restore()
-translate()
-rotate()
-scale()
-fillText()
-drawImage()
-fillRect(x, y, width, height)
-⋮----
-getContext(kind)
-getBoundingClientRect()
-⋮----
-function threePresentation(snapshot)
-⋮----
-presentation.resize = () =>
-presentation.webRenderer.render = () =>
-⋮----
-function view(snapshot, sightFrame)
 </file>
 
 <file path="test/navigation_cross_floor_pursuit.test.js">
@@ -21201,6 +20800,886 @@ ejection remain deferred after M1B.4. Breakaway floors are implemented by the
 preceding M1B.4 section; cross-layer enemy routing is the planned M1C concern.
 </file>
 
+<file path="src/authoring/authoring_commands.js">
+// @ts-check
+⋮----
+/** @param {ReturnType<typeof cloneAuthoringMap>} document @param {string|undefined} layerId */
+function layerFor(document, layerId)
+⋮----
+/** @param {number} ordinal */
+function generatedLayerId(ordinal)
+⋮----
+/** @param {number} ordinal */
+function generatedConnectorId(ordinal)
+⋮----
+/**
+ * Creates one blank shared-space layer relative to an existing stable layer ID.
+ * @param {unknown} input
+ * @param {string} relativeLayerId
+ * @param {"above"|"below"} direction
+ * @param {{name?:string,baseY?:number}} [options]
+ */
+export function createLayer(input, relativeLayerId, direction, options =
+⋮----
+/** @param {unknown} input @param {string} layerId */
+export function deleteLayer(input, layerId)
+⋮----
+/** @param {unknown} input @param {string} layerId @param {string} name */
+export function renameLayer(input, layerId, name)
+⋮----
+/** @param {unknown} input @param {string} layerId @param {number} baseY */
+export function setLayerBaseY(input, layerId, baseY)
+⋮----
+/** @param {unknown} input @param {string} layerId */
+export function setPlayerStartLayer(input, layerId)
+⋮----
+/** @param {unknown} value @param {string} label */
+function editableMapDimension(value, label)
+⋮----
+/**
+ * Resizes every authored layer against the shared origin. Existing cells in
+ * the retained rectangle keep their definitions; new cells use legend slot 0.
+ * Authored records outside a cropped extent are removed as one undoable edit.
+ * @param {unknown} input
+ * @param {number} widthInput
+ * @param {number} heightInput
+ */
+export function resizeMap(input, widthInput, heightInput)
+⋮----
+const resizeCells = (layer, channel) =>
+⋮----
+/**
+ * Places one map-level two-stop connector at one shared aligned X/Z point.
+ * @param {unknown} input
+ * @param {number} x
+ * @param {number} z
+ * @param {{lowerLayerId:string,upperLayerId:string,platformWidth?:number,apertureWidth?:number,travelDurationSeconds?:number,dwellSeconds?:number,initialStop?:"lower"|"upper"}} options
+ */
+export function placeElevatorConnector(input, x, z, options)
+⋮----
+/** @param {unknown} input @param {string} connectorId */
+export function removeConnector(input, connectorId)
+⋮----
+/** @param {unknown} input @param {string} connectorId @param {Record<string,unknown>} changes */
+export function updateConnector(input, connectorId, changes)
+⋮----
+/** @param {number} ordinal */
+function generatedNavigationNodeId(ordinal)
+⋮----
+/** @param {number} ordinal */
+function generatedNavigationLinkId(ordinal)
+⋮----
+/** @param {Record<string,any>} endpoint */
+function navigationEndpointKey(endpoint)
+⋮----
+/** @param {unknown} input @param {number} cx @param {number} cz @param {{layerId?:string,patrol?:boolean}} [options] */
+export function placeNavigationNode(input, cx, cz, options =
+⋮----
+/** @param {unknown} input @param {string} nodeId @param {{cx?:number,cz?:number,patrol?:boolean}} changes */
+export function updateNavigationNode(input, nodeId, changes)
+⋮----
+/** @param {unknown} input @param {string} nodeId @param {number} cx @param {number} cz */
+export function moveNavigationNode(input, nodeId, cx, cz)
+⋮----
+/** @param {unknown} input @param {string} nodeId */
+export function removeNavigationNode(input, nodeId)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {{kind:"node",nodeId:string}|{kind:"connector-endpoint",connectorId:string,stop:"lower"|"upper"}} aInput
+ * @param {{kind:"node",nodeId:string}|{kind:"connector-endpoint",connectorId:string,stop:"lower"|"upper"}} bInput
+ */
+export function placeNavigationLink(input, aInput, bInput)
+⋮----
+/** @param {unknown} input @param {string} linkId */
+export function removeNavigationLink(input, linkId)
+⋮----
+/** @param {Record<string, any>} layer @param {number} cx @param {number} cz */
+function cellIndex(layer, cx, cz)
+⋮----
+/** @param {string} definitionId @param {"surface"|"structure"|"instance"|"connector"} target */
+function definitionFor(definitionId, target)
+⋮----
+/** @param {Array<string|null>} legend @param {string} definitionId */
+function legendIndex(legend, definitionId)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {Array<{cx:number,cz:number}>} cells
+ * @param {"surface"|"structure"} target
+ * @param {string|null} definitionId
+ * @param {string} [layerId]
+ */
+function mutateCells(input, cells, target, definitionId, layerId)
+⋮----
+/**
+ * Atomically paints a surface stroke in one cloned authoring document.
+ * @param {unknown} input
+ * @param {Array<{cx:number,cz:number}>} cells
+ * @param {string} definitionId
+ * @param {string} [layerId]
+ */
+export function paintSurfaceCells(input, cells, definitionId, layerId)
+⋮----
+/**
+ * Atomically paints a structure stroke in one cloned authoring document.
+ * @param {unknown} input
+ * @param {Array<{cx:number,cz:number}>} cells
+ * @param {string} definitionId
+ * @param {string} [layerId]
+ */
+export function paintStructureCells(input, cells, definitionId, layerId)
+⋮----
+/** @param {unknown} input @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
+export function eraseSurfaceCells(input, cells, layerId)
+⋮----
+/** @param {unknown} input @param {Array<{cx:number,cz:number}>} cells @param {string} [layerId] */
+export function eraseStructureCells(input, cells, layerId)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {number} cx
+ * @param {number} cz
+ * @param {string} definitionId
+ * @param {string} [layerId]
+ */
+export function paintSurface(input, cx, cz, definitionId, layerId)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {number} cx
+ * @param {number} cz
+ * @param {string} definitionId
+ * @param {string} [layerId]
+ */
+export function paintStructure(input, cx, cz, definitionId, layerId)
+⋮----
+/**
+ * Resets a surface cell to the active layer's documented default (legend code 0).
+ * @param {unknown} input
+ * @param {number} cx
+ * @param {number} cz
+ * @param {string} [layerId]
+ */
+export function eraseSurface(input, cx, cz, layerId)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {number} cx
+ * @param {number} cz
+ * @param {string} [layerId]
+ */
+export function eraseStructure(input, cx, cz, layerId)
+⋮----
+/** @param {string} definitionId @param {number} ordinal */
+function generatedInstanceId(definitionId, ordinal)
+⋮----
+/**
+ * Catalog-driven placement snapping used by the editor and probe adapters.
+ * @param {string} definitionId
+ * @param {number} x
+ * @param {number} z
+ */
+export function snapDefinitionPlacement(definitionId, x, z)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {string} definitionId
+ * @param {number} x
+ * @param {number} z
+ * @param {{rotation?:number,properties?:Record<string,unknown>,layerId?:string}} [options]
+ */
+export function placeInstance(input, definitionId, x, z, options =
+⋮----
+/**
+ * Updates common sparse-instance transform fields as one semantic mutation.
+ * Stable authoring identity, definition, placement order, and properties remain
+ * unchanged.
+ * @param {unknown} input
+ * @param {string} instanceId
+ * @param {{x?:number,z?:number,rotation?:number}} transform
+ * @param {string} [layerId]
+ */
+export function updateInstanceTransform(input, instanceId, transform, layerId)
+⋮----
+/**
+ * Replaces the JSON-serializable, definition-specific property bag while
+ * preserving stable identity, transform, and placement order.
+ * @param {unknown} input
+ * @param {string} instanceId
+ * @param {Record<string,unknown>|undefined} properties
+ * @param {string} [layerId]
+ */
+export function updateInstanceProperties(input, instanceId, properties, layerId)
+⋮----
+/** @param {unknown} input @param {string} instanceId @param {number} x @param {number} z @param {string} [layerId] */
+export function moveInstance(input, instanceId, x, z, layerId)
+⋮----
+/** @param {unknown} input @param {string} instanceId @param {number} rotation @param {string} [layerId] */
+export function rotateInstance(input, instanceId, rotation, layerId)
+⋮----
+/**
+ * @param {unknown} input
+ * @param {string} instanceId
+ * @param {string} [layerId]
+ */
+export function removeInstance(input, instanceId, layerId)
+</file>
+
+<file path="src/authoring/authoring_map.js">
+// @ts-check
+⋮----
+/** M1C maps with authored navigation topology and legacy obelisk markers. */
+⋮----
+/** M1B.4 autonomous-elevator maps without authored navigation topology. */
+⋮----
+/** M1B.1-M1B.3 connector maps using speed and activation policies. */
+⋮----
+/** M1B.1 connector maps. */
+⋮----
+/** M1A.4 multi-layer maps. */
+⋮----
+export class AuthoringMapValidationError extends RangeError
+⋮----
+/** @param {Array<{severity?:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} issues */
+⋮----
+/** @param {string} path @param {string} code @param {string} message */
+function fail(path, code, message)
+⋮----
+/** @param {unknown} value */
+function isRecord(value)
+⋮----
+/**
+ * Structural validation is intentionally deterministic and non-mutating. It
+ * returns every safe-to-diagnose issue in document order; compilation adds
+ * geometry-specific diagnostics such as a blocked player start.
+ * @param {unknown} input
+ */
+function normalizeCurrentDocument(input)
+⋮----
+/** @type {Array<{severity:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} */
+⋮----
+const issue = (severity, path, code, message, layerId) =>
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+const rejectUnknownFields = (value, allowed, path, layerId) =>
+⋮----
+const stringValue = (value, path, layerId) =>
+const finiteValue = (value, path, layerId) =>
+const dimensionValue = (value, path, layerId) =>
+const positiveInteger = (value, path, layerId) =>
+const cloneJson = (value, path, seen = new WeakSet()) =>
+const pointValue = (value, path, layerId) =>
+⋮----
+const point = /** @type {Record<string,any>} */ (value);
+⋮----
+metadata = /** @type {Record<string,any>} */ (cloneJson(source.metadata, "metadata"));
+⋮----
+const layerSource = isRecord(layerValue) ? /** @type {Record<string,any>} */ (layerValue) : {};
+⋮----
+const instanceSource = isRecord(instanceValue) ? /** @type {Record<string,any>} */ (instanceValue) : {};
+⋮----
+? /** @type {Record<string,any>} */ (connectorValue)
+⋮----
+const positiveWidth = (value, field) =>
+⋮----
+const node = isRecord(nodeValue) ? /** @type {Record<string,any>} */ (nodeValue) : {};
+⋮----
+const integerCell = (value, field) =>
+⋮----
+const endpointKey = (endpoint)
+const endpointLayer = (endpoint) =>
+const normalizeEndpoint = (value, path) =>
+⋮----
+const endpoint = /** @type {Record<string,any>} */ (value);
+⋮----
+const link = isRecord(linkValue) ? /** @type {Record<string,any>} */ (linkValue) : {};
+⋮----
+// A single cell may have exactly one aperture owner. Surface holes are
+// independent (including adjacent cells), but cannot silently overlap a
+// connector endpoint at the same layer/cell.
+⋮----
+/** @param {unknown} input */
+export function authoringMapDiagnostics(input)
+⋮----
+/**
+ * Validates and returns a detached, normalized current-version document.
+ * @param {unknown} input
+ */
+export function validateAuthoringMap(input)
+⋮----
+/** @param {unknown} input */
+export function validateAuthoringMapWithDiagnostics(input)
+⋮----
+/** @param {unknown} input */
+export function isAuthoringMapDocument(input)
+⋮----
+&& /** @type {Record<string, unknown>} */ (input).format === AUTHORING_MAP_FORMAT,
+⋮----
+/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into the current schema. @param {unknown} input */
+export function migrateAuthoringMapV1(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Explicitly adds the M1B connector envelope to M1A.4 authoring-map v2. @param {unknown} input */
+export function migrateAuthoringMapV2(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** @param {Record<string, any>} source */
+function migrateClockDrivenConnectors(source)
+⋮----
+/** M1B.2 adds a catalog-backed surface-hole terrain value; v3 grids need no reshape. @param {unknown} input */
+export function migrateAuthoringMapV3(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** M1B.1-M1B.3 used connector speed and activation-policy fields. @param {unknown} input */
+export function migrateAuthoringMapV4(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Additively migrates the M1B authoring envelope without moving connectors. @param {unknown} input */
+export function migrateAuthoringMapV5(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+/** Converts the singleton layer marker into an ordinary editable obelisk instance. @param {unknown} input */
+export function migrateAuthoringMapV6(input)
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+const layer = /** @type {Record<string,any>} */ (layerValue);
+⋮----
+/**
+ * Explicitly migrates map-v1 and scenario-v2/v3 data into the authoring format.
+ * @param {unknown} input
+ * @param {{id?:string,name?:string}} [metadata]
+ */
+export function migrateLegacyMap(input, metadata =
+⋮----
+const source = /** @type {Record<string,any>} */ (input);
+⋮----
+const legacyDimension = (value, path) =>
+const legacyPoint = (value, path) =>
+⋮----
+/** @param {string | unknown} input */
+export function loadAuthoringMap(input)
+⋮----
+const version = /** @type {Record<string,any>} */ (value).version;
+⋮----
+/** @param {unknown} document */
+export function cloneAuthoringMap(document)
+⋮----
+/**
+ * Creates authoring source data for callers that still construct scenarios
+ * from the compact runtime map and legacy entity descriptors.
+ * @param {{width:number,height:number,cells:Uint8Array|number[],playerSpawn:{x:number,z:number}}} map
+ * @param {Array<Record<string, any>>} entities
+ * @param {{id?:string,name?:string}} [metadata]
+ */
+export function authoringMapFromRuntime(map, entities = [], metadata =
+</file>
+
+<file path="src/authoring/definition_catalog.js">
+// @ts-check
+⋮----
+/** @param {Record<string, any>} definition */
+function freezeDefinition(definition)
+⋮----
+/**
+ * The catalog is authoring data. Runtime systems resolve these stable IDs
+ * during compilation rather than branching on palette button names.
+ */
+⋮----
+/** @param {unknown} id */
+export function getPlaceableDefinition(id)
+⋮----
+export function listPlaceableDefinitions()
+⋮----
+/**
+ * Dynamic circular props share the existing bounded X/Z rigid-body pool.
+ * Their stable authoring definition remains the semantic identity; the pool
+ * slot is only a runtime implementation detail.
+ * @param {Record<string, any>|null|undefined} definition
+ */
+export function isDynamicCircleDefinition(definition)
+⋮----
+/** @param {Record<string, any>|null|undefined} definition */
+export function isDynamicBoxDefinition(definition)
+⋮----
+/** @param {Record<string, any>|null|undefined} definition */
+export function isDynamicBodyDefinition(definition)
+⋮----
+/** @param {Record<string, any>|null|undefined} definition */
+export function isAuthoredEnemyDefinition(definition)
+⋮----
+/** @param {string} archetype */
+export function rockDefinitionId(archetype)
+</file>
+
+<file path="src/browser/authoring_editor.js">
+// @ts-check
+⋮----
+/** @param {Record<string, any>|null} target */
+function cloneTarget(target)
+⋮----
+/** @param {{cx:number,cz:number}} cell */
+function cellKey(cell)
+⋮----
+/** @param {Record<string, any>} instance */
+function cloneTransform(instance)
+⋮----
+/** @param {Record<string, any>|null} layer */
+function cloneLayerSnapshot(layer)
+⋮----
+export class AuthoringEditorController
+⋮----
+/**
+   * @param {{
+   * snapshot:Record<string,any>,
+   * validatePlacement:(definitionId:string,x:number,z:number,rotation:number,ignoreId?:string|null,layerId?:string)=>Record<string,any>,
+   * commit:(action:Record<string,unknown>)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
+   * activateLayer?:(layerId:string)=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>},
+   * layerSnapshot?:(layerId:string)=>Record<string,any>|null,
+   * validateMap?:()=>Record<string,any>,
+   * historySnapshot?:()=>Record<string,any>,
+   * undo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
+   * redo?:()=>{ok:boolean,error?:string|null,snapshot?:Record<string,any>,label?:string},
+   * announce?:(message:string)=>void,
+   * }} options
+   */
+⋮----
+/** @param {Record<string,any>} snapshot @param {{x:number,z:number,inside:boolean}} [pointer] */
+sync(snapshot, pointer)
+⋮----
+/** Clears document-relative UI identity after an atomic load/import replacement. */
+replaceDocument(snapshot)
+⋮----
+/** @param {string} definitionId */
+setDefinition(definitionId)
+⋮----
+/** @param {string} tool */
+setTool(tool)
+⋮----
+/** @param {string} channel */
+setChannel(channel)
+⋮----
+/** @param {boolean} value */
+setShowAuthoringExtents(value)
+⋮----
+/** @param {string} layerId */
+activateLayer(layerId)
+⋮----
+/** @param {string|null} layerId */
+setReferenceLayer(layerId)
+⋮----
+/** @param {"above"|"below"} direction */
+createLayer(direction)
+⋮----
+/** @param {string} layerId @param {string} name */
+renameLayer(layerId, name)
+⋮----
+/** @param {string} layerId @param {number} baseY */
+setLayerBaseY(layerId, baseY)
+⋮----
+/** @param {string} layerId */
+deleteLayer(layerId)
+⋮----
+/** @param {string} layerId */
+setPlayerStartLayer(layerId)
+⋮----
+/** @param {number} width @param {number} height */
+resizeMap(width, height)
+⋮----
+validateMap()
+⋮----
+/** @param {number} x @param {number} z @param {boolean} [inside] */
+pointerMove(x, z, inside = true)
+⋮----
+pointerLeave()
+⋮----
+/** @param {number} button @param {number} x @param {number} z */
+pointerDown(button, x, z)
+⋮----
+/**
+   * @param {number} button
+   * @param {number} x
+   * @param {number} z
+   * @param {{moved?:boolean}} [options]
+   */
+pointerUp(button, x, z, options =
+⋮----
+cancel()
+⋮----
+rotate()
+⋮----
+/** @param {string} instanceId @param {{x:number,z:number,rotation:number}} transform */
+updateInstanceTransform(instanceId, transform)
+⋮----
+/** @param {string} instanceId */
+removeInstance(instanceId)
+⋮----
+/** @param {number} cx @param {number} cz @param {boolean} [patrol] */
+placeNavigationNode(cx, cz, patrol = false)
+⋮----
+/** @param {string} nodeId @param {number} cx @param {number} cz */
+moveNavigationNode(nodeId, cx, cz)
+⋮----
+/** @param {string} nodeId @param {Record<string, unknown>} changes */
+updateNavigationNode(nodeId, changes)
+⋮----
+/** @param {string} nodeId */
+removeNavigationNode(nodeId)
+⋮----
+fillConnectorNavigation()
+⋮----
+/** @param {string} connectorId */
+removeConnector(connectorId)
+⋮----
+/** @param {string} connectorId @param {Record<string,unknown>} changes */
+updateConnector(connectorId, changes)
+⋮----
+/** @param {string} instanceId @param {Record<string,unknown>|undefined} properties */
+updateInstanceProperties(instanceId, properties)
+⋮----
+undo()
+⋮----
+redo()
+⋮----
+/** @param {string} instanceId */
+selectInstance(instanceId)
+⋮----
+/** @param {string} connectorId */
+selectConnector(connectorId)
+⋮----
+/** @param {number} x @param {number} z */
+selectAt(x, z)
+⋮----
+snapshot()
+⋮----
+/** @param {number} x @param {number} z */
+⋮----
+/** @param {number} x @param {number} z */
+⋮----
+/** @param {number} x @param {number} z */
+⋮----
+/** @param {Record<string,any>} gesture */
+⋮----
+/** @param {number} x @param {number} z */
+⋮----
+/** @param {Record<string, any>} endpoint */
+⋮----
+/** @param {Record<string, any>} endpoint */
+⋮----
+/** @param {Record<string,unknown>} action */
+⋮----
+/** @param {"undo"|"redo"} operation */
+⋮----
+/** @param {string} instanceId */
+⋮----
+/** @param {string} nodeId */
+⋮----
+/** @param {string} connectorId */
+⋮----
+/** @param {Record<string,any>} instance */
+⋮----
+/** @param {string} message @param {boolean} valid */
+⋮----
+/**
+ * Renderer helper kept here so Canvas and Three observe the same selection
+ * footprint without depending on DOM panels.
+ * @param {Record<string,any>} snapshot
+ * @param {Record<string,any>|null} target
+ */
+export function editorTargetCells(snapshot, target)
+</file>
+
+<file path="src/presentation/light_budget.js">
+// @ts-check
+⋮----
+/** @param {number} value @param {number} minimum @param {number} maximum */
+function clamp(value, minimum, maximum)
+⋮----
+/** @param {{r:number,g:number,b:number}} left @param {{r:number,g:number,b:number}} right @param {number} amount */
+function mixColor(left, right, amount)
+⋮----
+/** @param {number} life */
+export function sparkFireColor(life)
+⋮----
+/**
+ * Writes the spark gradient into an existing color-like object so the particle
+ * mesh path does not allocate one temporary RGB object per instance.
+ * Point-light tinting deliberately happens elsewhere.
+ * @param {{setRGB:(r:number,g:number,b:number)=>unknown}} target
+ * @param {number} life
+ */
+export function writeSparkFireColor(target, life)
+⋮----
+/** @param {{r:number,g:number,b:number}} color */
+export function rec709Luminance(color)
+⋮----
+/** @param {number} seed @param {number|string} projectileId */
+export function deriveFireballTint(seed, projectileId)
+⋮----
+/**
+ * Mixes a deterministic bias into a fire color, then restores the original
+ * Rec.709 luminance. Values above one are allowed for HDR point-light colors.
+ * @param {{r:number,g:number,b:number}} color
+ * @param {ReturnType<typeof deriveFireballTint>} tint
+ * @param {boolean} [enabled]
+ */
+export function applyFireballTint(color, tint, enabled = true)
+⋮----
+/** @param {Record<string, any>} particle */
+function particleLife(particle)
+⋮----
+/** @param {Record<string, any>} left @param {Record<string, any>} right */
+function compareCarrierCandidates(left, right)
+⋮----
+/** @param {Record<string, any>} left @param {Record<string, any>} right */
+function compareRecentEffect(left, right)
+⋮----
+/** @param {number|string} value */
+function sortableId(value)
+⋮----
+/** @param {Record<string, any>} particle @param {Array<Record<string, any>>} events */
+function nearestEvent(particle, events)
+⋮----
+export class PresentationLightBudget
+⋮----
+/** @param {{capacity?:number,explosionLifetimeTicks?:number}} [options] */
+⋮----
+reset()
+⋮----
+/**
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
+   * @param {boolean} [enabled]
+   * @param {boolean} [colorVariation]
+   * @param {string|null} [activeLayerId]
+   */
+allocate(snapshot, enabled = true, colorVariation = true, activeLayerId = null)
+⋮----
+const onActiveLayer = (value) => (
+      layerId === null
+      || value.layerId === undefined
+      || value.layerId === null
+      || value.layerId === layerId
+    );
+⋮----
+diagnostics()
+⋮----
+/** @param {number} projectileId */
+⋮----
+/**
+   * @param {string} key
+   * @param {number|string} projectileId
+   * @param {"flight"|"impact"|"tail"} phase
+   * @param {number} effectTick
+   * @param {number} seed
+   */
+⋮----
+/** @param {Array<Record<string, any>>} particles */
+⋮----
+/** @param {Map<number,Record<string,any>>} particlesById @param {Map<number,Record<string,any>>} projectilesById */
+⋮----
+/** @param {Set<string>} admissionRequests */
+⋮----
+/**
+   * @param {Array<Record<string,any>>} assignments
+   * @param {Record<string,any>} group
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
+   * @param {Map<number,Record<string,any>>} particlesById
+   * @param {Map<number,Record<string,any>>} projectilesById
+   * @param {boolean} colorVariation
+   */
+⋮----
+/**
+   * @param {Record<string,any>} group
+   * @param {number} groupSlot
+   * @param {Record<string,any>} value
+   * @param {number} residentBase
+   * @param {boolean} colorVariation
+   */
+</file>
+
+<file path="test/combat_presentation.test.js">
+function fakeThreeCanvas()
+⋮----
+getContext()
+addEventListener()
+removeEventListener()
+setAttribute()
+⋮----
+function fakeCanvas2d()
+⋮----
+setTransform()
+beginPath()
+closePath()
+moveTo(x, y)
+lineTo(x, y)
+arc(x, y, radius, start, end, counterclockwise = false)
+fill()
+stroke()
+strokeRect()
+setLineDash()
+save()
+restore()
+translate()
+rotate()
+scale()
+fillText()
+drawImage()
+fillRect(x, y, width, height)
+⋮----
+getContext(kind)
+getBoundingClientRect()
+⋮----
+function threePresentation(snapshot)
+⋮----
+presentation.resize = () =>
+presentation.webRenderer.render = () =>
+⋮----
+function view(snapshot, sightFrame)
+</file>
+
+<file path="test/map_palette.test.js">
+
+</file>
+
+<file path="test/presentation_lights.test.js">
+/** @param {number} id @param {number} x @param {number} z @param {number} [size] @param {number} [age] */
+function particle(id, x, z, size = 0.06, age = 0.1)
+⋮----
+/** @param {number} id @param {number} x @param {number} z */
+function projectile(id, x, z)
+⋮----
+/** @param {number} id @param {number} projectileId @param {number} tick @param {number} x @param {number} z */
+function impact(id, projectileId, tick, x, z)
+⋮----
+function snapshot(overrides =
+⋮----
+/** @param {number} firstId @param {number} x @param {number} z @param {number} [count] */
+function burst(firstId, x, z, count = 8)
+⋮----
+let assignments = budget.allocate(/** @type {any} */ (snapshot({
+⋮----
+assignments = budget.allocate(/** @type {any} */ (snapshot({
+⋮----
+const flight = budget.allocate(/** @type {any} */ (value));
+⋮----
+const explosion = budget.allocate(/** @type {any} */ (value));
+⋮----
+const assignments = budget.allocate(/** @type {any} */ (snapshot({
+⋮----
+const assignments = budget.allocate(/** @type {any} */ (snapshot({
+⋮----
+const assignments = budget.allocate(/** @type {any} */ (snapshot({
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+const third = budget.allocate(/** @type {any} */ (value));
+⋮----
+const afterOpening = budget.allocate(/** @type {any} */ (value));
+⋮----
+const assignments = impactFirst.allocate(/** @type {any} */ (value));
+⋮----
+flightBeforeTail.allocate(/** @type {any} */ (tail));
+⋮----
+const flight = flightBeforeTail.allocate(/** @type {any} */ (tail));
+⋮----
+const initial = budget.allocate(/** @type {any} */ (value));
+⋮----
+const tail = budget.allocate(/** @type {any} */ (value));
+⋮----
+const flight = budget.allocate(/** @type {any} */ (value));
+⋮----
+const impactAssignments = budget.allocate(/** @type {any} */ (value));
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+assert.deepEqual(budget.allocate(/** @type {any} */ (value), false), []);
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+const afterSeed = budget.allocate(/** @type {any} */ (value));
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+assert.deepEqual(budget.allocate(/** @type {any} */ (value)), []);
+⋮----
+const reusedFlight = budget.allocate(/** @type {any} */ (value));
+⋮----
+const reusedImpact = budget.allocate(/** @type {any} */ (value));
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+budget.allocate(/** @type {any} */ (value));
+⋮----
+const left = first.allocate(/** @type {any} */ (value));
+const right = second.allocate(/** @type {any} */ (value));
+⋮----
+const assignments = budget.allocate(/** @type {any} */ (snapshot({
+⋮----
+const initial = budget.allocate(/** @type {any} */ (value));
+⋮----
+const fading = budget.allocate(/** @type {any} */ (value));
+⋮----
+const tail = budget.allocate(/** @type {any} */ (value));
+⋮----
+const first = budget.allocate(/** @type {any} */ (value));
+⋮----
+const second = budget.allocate(/** @type {any} */ (value));
+⋮----
+const tinted = varied.allocate(/** @type {any} */ (value), true, true);
+const untinted = plain.allocate(/** @type {any} */ (value), true, false);
+⋮----
+setRGB(r, g, b)
+⋮----
+function residentLight(id)
+⋮----
+set(x, y, z)
+⋮----
+/** @param {number} slot @param {number} [id] */
+function assignment(slot, id = slot)
+</file>
+
+<file path="test/true_sight_three_materials.test.js">
+function fakeCanvas()
+⋮----
+getContext()
+addEventListener()
+removeEventListener()
+setAttribute()
+⋮----
+presentation.resize = () =>
+presentation.webRenderer.render = () =>
+⋮----
+const render = (cells) =>
+</file>
+
+<file path="test/vertical_elevator.test.js">
+function borderedMap(spawn =
+⋮----
+function elevatorDocument(options =
+⋮----
+// Preserve the historical off-center M1B fixture so its frozen physical
+// expectations continue to exercise the exact pre-v6 deck position.
+⋮----
+function simulationFor(document)
+⋮----
+function runToStop(simulation, connectorId, stop, maximumTicks = 360)
+⋮----
+// This point is within the 0.90m square deck but just outside its former
+// circular support footprint.
+⋮----
+const run = () =>
+</file>
+
 <file path="docs/architecture-guide.md">
 # Lantern Architecture Review and Owner's Guide
 
@@ -21321,6 +21800,15 @@ nodes and writes a deterministic sparse set of ordinary same-floor links. It
 runs as one undoable command, preserves manual topology, reports endpoints with
 no safe staging cell, and is idempotent; its result remains normal editable
 authoring-map v7 data.
+
+The Layers panel exposes one editor-wide X/Z extent for all floors. Its
+authoring command preserves the shared `(0, 0)` registration, is capped at
+`128×128`, and recompiles all layers atomically. Expansion fills each layer's
+default surface and empty structure cells; confirmed shrinking removes content
+beyond the positive X/Z edges and remains one reversible history operation.
+The v7 serialization shape is unchanged because width and height were already
+persisted per layer; supported imported maps may retain older unequal extents
+until the author explicitly applies a shared size.
 
 ### Spell data
 
@@ -21755,443 +22243,6 @@ Then inspect the soak scripts in `package.json`. Tests are often easier to under
 Lantern has a real, salvageable engine core. The strongest parts are exactly the parts that are expensive to retrofit later: authority separation, fixed-step determinism, bounded data, stable identity, replay, and observability. The Three.js experiment has not contaminated gameplay authority.
 
 The prototype is now large enough that continuing to add vertical features through `Simulation` and `EnemyWizardPool` will turn concentrated debt into systemic debt. The next engineering milestone should be a replay-identical extraction pass, not a rewrite and not a new framework. If that work leaves the tick schedule obvious, systems explicit about their state, and pools just as dense and bounded, it will move the project closer to the engine you have in mind without discarding what already works.
-</file>
-
-<file path="src/authoring/authoring_map.js">
-// @ts-check
-⋮----
-/** M1C maps with authored navigation topology and legacy obelisk markers. */
-⋮----
-/** M1B.4 autonomous-elevator maps without authored navigation topology. */
-⋮----
-/** M1B.1-M1B.3 connector maps using speed and activation policies. */
-⋮----
-/** M1B.1 connector maps. */
-⋮----
-/** M1A.4 multi-layer maps. */
-⋮----
-export class AuthoringMapValidationError extends RangeError
-⋮----
-/** @param {Array<{severity?:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} issues */
-⋮----
-/** @param {string} path @param {string} code @param {string} message */
-function fail(path, code, message)
-⋮----
-/** @param {unknown} value */
-function isRecord(value)
-⋮----
-/**
- * Structural validation is intentionally deterministic and non-mutating. It
- * returns every safe-to-diagnose issue in document order; compilation adds
- * geometry-specific diagnostics such as a blocked player start.
- * @param {unknown} input
- */
-function normalizeCurrentDocument(input)
-⋮----
-/** @type {Array<{severity:"error"|"warning",path:string,code:string,message:string,layerId?:string}>} */
-⋮----
-const issue = (severity, path, code, message, layerId) =>
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-const rejectUnknownFields = (value, allowed, path, layerId) =>
-⋮----
-const stringValue = (value, path, layerId) =>
-const finiteValue = (value, path, layerId) =>
-const dimensionValue = (value, path, layerId) =>
-const positiveInteger = (value, path, layerId) =>
-const cloneJson = (value, path, seen = new WeakSet()) =>
-const pointValue = (value, path, layerId) =>
-⋮----
-const point = /** @type {Record<string,any>} */ (value);
-⋮----
-metadata = /** @type {Record<string,any>} */ (cloneJson(source.metadata, "metadata"));
-⋮----
-const layerSource = isRecord(layerValue) ? /** @type {Record<string,any>} */ (layerValue) : {};
-⋮----
-const instanceSource = isRecord(instanceValue) ? /** @type {Record<string,any>} */ (instanceValue) : {};
-⋮----
-? /** @type {Record<string,any>} */ (connectorValue)
-⋮----
-const positiveWidth = (value, field) =>
-⋮----
-const node = isRecord(nodeValue) ? /** @type {Record<string,any>} */ (nodeValue) : {};
-⋮----
-const integerCell = (value, field) =>
-⋮----
-const endpointKey = (endpoint)
-const endpointLayer = (endpoint) =>
-const normalizeEndpoint = (value, path) =>
-⋮----
-const endpoint = /** @type {Record<string,any>} */ (value);
-⋮----
-const link = isRecord(linkValue) ? /** @type {Record<string,any>} */ (linkValue) : {};
-⋮----
-// A single cell may have exactly one aperture owner. Surface holes are
-// independent (including adjacent cells), but cannot silently overlap a
-// connector endpoint at the same layer/cell.
-⋮----
-/** @param {unknown} input */
-export function authoringMapDiagnostics(input)
-⋮----
-/**
- * Validates and returns a detached, normalized current-version document.
- * @param {unknown} input
- */
-export function validateAuthoringMap(input)
-⋮----
-/** @param {unknown} input */
-export function validateAuthoringMapWithDiagnostics(input)
-⋮----
-/** @param {unknown} input */
-export function isAuthoringMapDocument(input)
-⋮----
-&& /** @type {Record<string, unknown>} */ (input).format === AUTHORING_MAP_FORMAT,
-⋮----
-/** Explicitly migrates the M1A.1-M1A.3 v1 envelope into the current schema. @param {unknown} input */
-export function migrateAuthoringMapV1(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** Explicitly adds the M1B connector envelope to M1A.4 authoring-map v2. @param {unknown} input */
-export function migrateAuthoringMapV2(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** @param {Record<string, any>} source */
-function migrateClockDrivenConnectors(source)
-⋮----
-/** M1B.2 adds a catalog-backed surface-hole terrain value; v3 grids need no reshape. @param {unknown} input */
-export function migrateAuthoringMapV3(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** M1B.1-M1B.3 used connector speed and activation-policy fields. @param {unknown} input */
-export function migrateAuthoringMapV4(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** Additively migrates the M1B authoring envelope without moving connectors. @param {unknown} input */
-export function migrateAuthoringMapV5(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-/** Converts the singleton layer marker into an ordinary editable obelisk instance. @param {unknown} input */
-export function migrateAuthoringMapV6(input)
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-const layer = /** @type {Record<string,any>} */ (layerValue);
-⋮----
-/**
- * Explicitly migrates map-v1 and scenario-v2/v3 data into the authoring format.
- * @param {unknown} input
- * @param {{id?:string,name?:string}} [metadata]
- */
-export function migrateLegacyMap(input, metadata =
-⋮----
-const source = /** @type {Record<string,any>} */ (input);
-⋮----
-const legacyDimension = (value, path) =>
-const legacyPoint = (value, path) =>
-⋮----
-/** @param {string | unknown} input */
-export function loadAuthoringMap(input)
-⋮----
-const version = /** @type {Record<string,any>} */ (value).version;
-⋮----
-/** @param {unknown} document */
-export function cloneAuthoringMap(document)
-⋮----
-/**
- * Creates authoring source data for callers that still construct scenarios
- * from the compact runtime map and legacy entity descriptors.
- * @param {{width:number,height:number,cells:Uint8Array|number[],playerSpawn:{x:number,z:number}}} map
- * @param {Array<Record<string, any>>} entities
- * @param {{id?:string,name?:string}} [metadata]
- */
-export function authoringMapFromRuntime(map, entities = [], metadata =
-</file>
-
-<file path="src/authoring/definition_catalog.js">
-// @ts-check
-⋮----
-/** @param {Record<string, any>} definition */
-function freezeDefinition(definition)
-⋮----
-/**
- * The catalog is authoring data. Runtime systems resolve these stable IDs
- * during compilation rather than branching on palette button names.
- */
-⋮----
-/** @param {unknown} id */
-export function getPlaceableDefinition(id)
-⋮----
-export function listPlaceableDefinitions()
-⋮----
-/**
- * Dynamic circular props share the existing bounded X/Z rigid-body pool.
- * Their stable authoring definition remains the semantic identity; the pool
- * slot is only a runtime implementation detail.
- * @param {Record<string, any>|null|undefined} definition
- */
-export function isDynamicCircleDefinition(definition)
-⋮----
-/** @param {Record<string, any>|null|undefined} definition */
-export function isDynamicBoxDefinition(definition)
-⋮----
-/** @param {Record<string, any>|null|undefined} definition */
-export function isDynamicBodyDefinition(definition)
-⋮----
-/** @param {Record<string, any>|null|undefined} definition */
-export function isAuthoredEnemyDefinition(definition)
-⋮----
-/** @param {string} archetype */
-export function rockDefinitionId(archetype)
-</file>
-
-<file path="src/presentation/light_budget.js">
-// @ts-check
-⋮----
-/** @param {number} value @param {number} minimum @param {number} maximum */
-function clamp(value, minimum, maximum)
-⋮----
-/** @param {{r:number,g:number,b:number}} left @param {{r:number,g:number,b:number}} right @param {number} amount */
-function mixColor(left, right, amount)
-⋮----
-/** @param {number} life */
-export function sparkFireColor(life)
-⋮----
-/**
- * Writes the spark gradient into an existing color-like object so the particle
- * mesh path does not allocate one temporary RGB object per instance.
- * Point-light tinting deliberately happens elsewhere.
- * @param {{setRGB:(r:number,g:number,b:number)=>unknown}} target
- * @param {number} life
- */
-export function writeSparkFireColor(target, life)
-⋮----
-/** @param {{r:number,g:number,b:number}} color */
-export function rec709Luminance(color)
-⋮----
-/** @param {number} seed @param {number|string} projectileId */
-export function deriveFireballTint(seed, projectileId)
-⋮----
-/**
- * Mixes a deterministic bias into a fire color, then restores the original
- * Rec.709 luminance. Values above one are allowed for HDR point-light colors.
- * @param {{r:number,g:number,b:number}} color
- * @param {ReturnType<typeof deriveFireballTint>} tint
- * @param {boolean} [enabled]
- */
-export function applyFireballTint(color, tint, enabled = true)
-⋮----
-/** @param {Record<string, any>} particle */
-function particleLife(particle)
-⋮----
-/** @param {Record<string, any>} left @param {Record<string, any>} right */
-function compareCarrierCandidates(left, right)
-⋮----
-/** @param {Record<string, any>} left @param {Record<string, any>} right */
-function compareRecentEffect(left, right)
-⋮----
-/** @param {number|string} value */
-function sortableId(value)
-⋮----
-/** @param {Record<string, any>} particle @param {Array<Record<string, any>>} events */
-function nearestEvent(particle, events)
-⋮----
-export class PresentationLightBudget
-⋮----
-/** @param {{capacity?:number,explosionLifetimeTicks?:number}} [options] */
-⋮----
-reset()
-⋮----
-/**
-   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
-   * @param {boolean} [enabled]
-   * @param {boolean} [colorVariation]
-   * @param {string|null} [activeLayerId]
-   */
-allocate(snapshot, enabled = true, colorVariation = true, activeLayerId = null)
-⋮----
-const onActiveLayer = (value) => (
-      layerId === null
-      || value.layerId === undefined
-      || value.layerId === null
-      || value.layerId === layerId
-    );
-⋮----
-diagnostics()
-⋮----
-/** @param {number} projectileId */
-⋮----
-/**
-   * @param {string} key
-   * @param {number|string} projectileId
-   * @param {"flight"|"impact"|"tail"} phase
-   * @param {number} effectTick
-   * @param {number} seed
-   */
-⋮----
-/** @param {Array<Record<string, any>>} particles */
-⋮----
-/** @param {Map<number,Record<string,any>>} particlesById @param {Map<number,Record<string,any>>} projectilesById */
-⋮----
-/** @param {Set<string>} admissionRequests */
-⋮----
-/**
-   * @param {Array<Record<string,any>>} assignments
-   * @param {Record<string,any>} group
-   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
-   * @param {Map<number,Record<string,any>>} particlesById
-   * @param {Map<number,Record<string,any>>} projectilesById
-   * @param {boolean} colorVariation
-   */
-⋮----
-/**
-   * @param {Record<string,any>} group
-   * @param {number} groupSlot
-   * @param {Record<string,any>} value
-   * @param {number} residentBase
-   * @param {boolean} colorVariation
-   */
-</file>
-
-<file path="test/map_palette.test.js">
-
-</file>
-
-<file path="test/presentation_lights.test.js">
-/** @param {number} id @param {number} x @param {number} z @param {number} [size] @param {number} [age] */
-function particle(id, x, z, size = 0.06, age = 0.1)
-⋮----
-/** @param {number} id @param {number} x @param {number} z */
-function projectile(id, x, z)
-⋮----
-/** @param {number} id @param {number} projectileId @param {number} tick @param {number} x @param {number} z */
-function impact(id, projectileId, tick, x, z)
-⋮----
-function snapshot(overrides =
-⋮----
-/** @param {number} firstId @param {number} x @param {number} z @param {number} [count] */
-function burst(firstId, x, z, count = 8)
-⋮----
-let assignments = budget.allocate(/** @type {any} */ (snapshot({
-⋮----
-assignments = budget.allocate(/** @type {any} */ (snapshot({
-⋮----
-const flight = budget.allocate(/** @type {any} */ (value));
-⋮----
-const explosion = budget.allocate(/** @type {any} */ (value));
-⋮----
-const assignments = budget.allocate(/** @type {any} */ (snapshot({
-⋮----
-const assignments = budget.allocate(/** @type {any} */ (snapshot({
-⋮----
-const assignments = budget.allocate(/** @type {any} */ (snapshot({
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-const third = budget.allocate(/** @type {any} */ (value));
-⋮----
-const afterOpening = budget.allocate(/** @type {any} */ (value));
-⋮----
-const assignments = impactFirst.allocate(/** @type {any} */ (value));
-⋮----
-flightBeforeTail.allocate(/** @type {any} */ (tail));
-⋮----
-const flight = flightBeforeTail.allocate(/** @type {any} */ (tail));
-⋮----
-const initial = budget.allocate(/** @type {any} */ (value));
-⋮----
-const tail = budget.allocate(/** @type {any} */ (value));
-⋮----
-const flight = budget.allocate(/** @type {any} */ (value));
-⋮----
-const impactAssignments = budget.allocate(/** @type {any} */ (value));
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-assert.deepEqual(budget.allocate(/** @type {any} */ (value), false), []);
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-const afterSeed = budget.allocate(/** @type {any} */ (value));
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-assert.deepEqual(budget.allocate(/** @type {any} */ (value)), []);
-⋮----
-const reusedFlight = budget.allocate(/** @type {any} */ (value));
-⋮----
-const reusedImpact = budget.allocate(/** @type {any} */ (value));
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-budget.allocate(/** @type {any} */ (value));
-⋮----
-const left = first.allocate(/** @type {any} */ (value));
-const right = second.allocate(/** @type {any} */ (value));
-⋮----
-const assignments = budget.allocate(/** @type {any} */ (snapshot({
-⋮----
-const initial = budget.allocate(/** @type {any} */ (value));
-⋮----
-const fading = budget.allocate(/** @type {any} */ (value));
-⋮----
-const tail = budget.allocate(/** @type {any} */ (value));
-⋮----
-const first = budget.allocate(/** @type {any} */ (value));
-⋮----
-const second = budget.allocate(/** @type {any} */ (value));
-⋮----
-const tinted = varied.allocate(/** @type {any} */ (value), true, true);
-const untinted = plain.allocate(/** @type {any} */ (value), true, false);
-⋮----
-setRGB(r, g, b)
-⋮----
-function residentLight(id)
-⋮----
-set(x, y, z)
-⋮----
-/** @param {number} slot @param {number} [id] */
-function assignment(slot, id = slot)
-</file>
-
-<file path="test/true_sight_three_materials.test.js">
-function fakeCanvas()
-⋮----
-getContext()
-addEventListener()
-removeEventListener()
-setAttribute()
-⋮----
-presentation.resize = () =>
-presentation.webRenderer.render = () =>
-⋮----
-const render = (cells) =>
-</file>
-
-<file path="test/vertical_elevator.test.js">
-function borderedMap(spawn =
-⋮----
-function elevatorDocument(options =
-⋮----
-// Preserve the historical off-center M1B fixture so its frozen physical
-// expectations continue to exercise the exact pre-v6 deck position.
-⋮----
-function simulationFor(document)
-⋮----
-function runToStop(simulation, connectorId, stop, maximumTicks = 360)
-⋮----
-// This point is within the 0.90m square deck but just outside its former
-// circular support footprint.
-⋮----
-const run = () =>
 </file>
 
 <file path="docs/plans/m1c-authored-navigation-topology.md">
@@ -23654,130 +23705,6 @@ const settled = (id) => (
 const comparable = (value) =>
 </file>
 
-<file path="docs/notes/map-authoring-foundation.md">
-# M1A.1–M1A.4 Map-authoring kit
-
-> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v6 · **Current runtime recording schema:** v15 (M1C.1 advances both envelopes without enabling enemy movement)
-
-M1A.1 separates friendly saved source from the compact grid and bounded pools used by the live simulation. M1A.2 adds deterministic selection, inspection, previews, and practical sparse-instance edits. M1A.3 wraps those edits in bounded undo/redo and saved-revision tracking. M1A.4 makes the same kit multi-layer, validates complete documents with structured diagnostics, and makes replacement atomic. The editor still changes authoritative state only through fixed-tick commands, and its palette and compiler resolve stable catalog IDs instead of treating HTML button names as gameplay data.
-
-## Source document and compiled state
-
-An authoring document contains map metadata, `nextLayerOrdinal`, `nextConnectorOrdinal`, one authoritative top-level `playerStart` with a stable `layerId`, an ordered nonempty layer collection, and a deterministic map-level connector collection. Each layer has an opaque stable `id`, human name, signed finite `baseY`, dimensions, separate surface and structure grids, sparse instances, layer-owned markers, and `nextInstanceOrdinal`. Surface and structure grids store compact legend indices; the legends contain stable definition IDs. Sparse instances contain a stable string `id`, `definitionId`, X/Z position, quarter-turn `rotation`, and optional JSON properties. Layer, instance, and connector IDs never derive from array position or display name.
-
-Every layer is compiled independently into a deterministic recipe keyed by stable layer ID. Each recipe contains its own `GridMap` collision cells, occluder mask, surface/structure codes, markers, initial bounded dynamic-body descriptors, and connector endpoints. Identical X/Z cells on different floors never share masks. Wall structures and pillar footprints contribute static occupied cells and TrueSight occlusion. A table instead compiles into the bounded dynamic-body pool as a fixed-orientation box: it blocks physical movement at its live position but contributes no TrueSight occluder cells. Moss changes presentation data only. A standing torch compiles as a lightweight upright circular body and declares a small presentation-only lamp; it does not become a TrueSight occluder or authoritative light source. The map compiler also emits each two-stop connector once as a bounded runtime elevator recipe.
-
-The authoring document is never a pool snapshot. Runtime rock, torch, and table positions and velocities, pool indices, enemies, projectiles, particles, health, and AI state are absent. Moving a prop in physics therefore cannot rewrite its saved placement; **Restore positions**, reset, load, and replay reconstruct runtime state from the authoring source.
-
-The central modules are:
-
-- `src/authoring/definition_catalog.js`: stable IDs, labels, categories, placement modes, footprints, debug appearance, future asset slots, and runtime traits.
-- `src/authoring/authoring_map.js`: format validation, JSON-safe cloning, and explicit legacy migration.
-- `src/authoring/authoring_commands.js`: atomic surface/structure strokes, sparse-instance edits, stable layer mutations, and map-level connector operations.
-- `src/authoring/authoring_history.js`: plain-data command diffs, atomic forward/reverse reduction, action labeling, bounded history, revision identity, and saved-state tracking.
-- `src/authoring/footprint.js`: the shared anchor, quarter-turn rotation, occupied-cell, bounds, and simple extent calculations.
-- `src/authoring/placement_validation.js`: lightweight, non-mutating bounds and overlap checks shared by previews and compilation.
-- `src/authoring/editor_interaction.js`: DOM-free editor state, deterministic picking, target reconciliation, and eyedropper rules.
-- `src/authoring/map_compiler.js`: deterministic, DOM-free authoring-to-runtime compilation.
-- `src/sim/scenario.js`: compatibility adapter between the authoring source, the legacy scenario projection, and the simulation.
-- `src/browser/layer_panel.js`: fixed layer management, reference selection, and concise structured validation diagnostics.
-
-Stable authoring IDs are mapped to numeric runtime spawn IDs where a pool needs one. Neither identity is a pool index.
-
-## Layer identity, coordinate space, and activation
-
-All floors share one finite X/Z cell space. Width and height remain on each layer for direct migration compatibility, but validation requires every layer to match; the engine's cell size is the fixed one-meter grid and layers cannot define independent origins or cell sizes. `baseY` is a signed world-space elevation in meters, not identity and not an X/Z offset. Three.js translates the complete active world and camera target by `baseY`; Canvas2D remains a top-down shared-X/Z view and reports the floor height through editor UI/probes.
-
-M1B.1 retains these editor/runtime distinctions while making runtime layer ownership per body:
-
-- **Active editor layer:** transient controller state; all paint, erase, stamp, pick, drag, eyedropper, inspector, and extent operations target this layer only.
-- **Reference layer:** zero or one transient, dim alignment overlay. It is never picked, edited, compiled into the active masks, or activated for gameplay merely by being visible.
-- **Player-start layer:** saved in the authoritative top-level `playerStart.layerId`; the same record owns the one initial X/Z spawn.
-- **Visible runtime layer:** the floor currently presented and used for player-facing map queries. Each live body separately owns its authoritative runtime layer.
-
-The fixed Layers panel lists stable ID, name, signed base Y, player-start badge, dimensions, and instance count. It creates blank layers above or below the active floor at a default three-meter offset, renames, edits base Y, activates a floor, chooses a reference, assigns the player-start floor, and deletes with confirmation. A map retains at least one layer, supports up to 16, and rejects deletion of the current player-start layer until the start is reassigned. Switching active/reference floors is UI state and never dirties history. Create, delete, rename, base-height, and start-layer changes are semantic history commands; delete/restore carries one full layer snapshot so stable layer and instance IDs and deterministic ordering survive undo.
-
-Initial play starts the player on the saved player-start layer. M1B.1 keeps every authored layer recipe and dynamic prop loaded; actors and clutter query collision by their own layer, while presentation follows the visible player/editor layer. An elevator or falling handoff changes one body rather than replacing the global simulation. Entering edit pauses on the player's current runtime floor, editor layer switches remain view-only, and leaving edit resumes the same live body state. See [M1B.1 vertical bodies and elevator](./generic-vertical-bodies-and-elevator.md) for support and transition behavior.
-
-## Selection, picking, and footprints
-
-An editor instance target is `{ kind: "instance", layerId, instanceId }`; a cell target is `{ kind: "cell", layerId, x, z }`. Selection stores only the stable authoring ID. It never retains a runtime pool index, Three.js object, Canvas reference, or mutable entity-array slot. Recompilation and pool compaction therefore cannot redirect a selection. Deleting the instance or loading a document that lacks the ID clears it during state reconciliation.
-
-Picking uses the active layer and authoring extents rather than renderer geometry. A connector endpoint wins first, then instances win over their underlying cell. If multiple extents overlap, the connector or instance later in document placement order wins; stable ID descending is the final deterministic tie-breaker within that target kind. Outside-layer clicks clear selection. Runtime prop movement is deliberately ignored: authoring-space picking continues to find each prop at its saved starting transform.
-
-Sparse X/Z identifies the center of an **anchor cell**. Catalog footprint offsets are integer cells rotated around that fixed anchor; the anchor does not drift when rotation changes. Quarter turns normalize to `0`, `1`, `2`, or `3`. Thus `object.table` occupies anchor plus `+X` at rotation 0 and anchor plus `+Z` at rotation 1. Bounds checks, overlap validation, picking, selection outlines, previews, and extents all call the same `getOccupiedCells()` operation. The table's runtime box is centered on those rotated footprint bounds while retaining the authored quarter turn.
-
-## Tools and inspector
-
-Editor interaction state is transient and never saved: active tool, active channel, selected catalog definition, hover, selection, preview rotation/validity, drag candidate, and the authoring-extents toggle. Catalog selection chooses the matching surface, structure, instance, or connector channel and returns to Paint / stamp. The tools are:
-
-- **Select:** selects instances before cells; dragging an instance previews one candidate and commits one stable-ID transform on release.
-- **Paint / stamp:** accumulates surface or structure cells into one release-time stroke, commits one sparse instance stamp, or places one map-level connector endpoint.
-- **Erase:** resets surface cells to legend code 0, clears structure cells, or removes an instance according to the explicitly active channel. RMB is a temporary channel-aware erase gesture.
-- **Eyedropper:** samples the active channel first, then falls back instance → structure → surface, selects the existing catalog definition, and returns to Paint / stamp. Selecting the Surface channel explicitly samples beneath a wall.
-
-`R` rotates the stamp preview or selected instance in edit mode; the palette and inspector also expose buttons. Escape cancels the current drag or stroke. Pointer previews do not mutate or recompile source. Each release, inspector submission, erase, rotation, or placement is one fixed-tick semantic action and one undoable history entry.
-
-The fixed, collapsible inspector reads authoring source and compiled diagnostics. Instance IDs/layer are read-only; X/Z, quarter-turn rotation, and the JSON property bag validate through the authoring API before compilation. Each accepted form submission is one command rather than one command per keystroke. Rejection leaves the source and stable selection unchanged and reports a message. Cell inspection shows source surface/structure definitions and read-only solid/occluding flags. The property editor preserves unknown JSON without introducing a catalog property-schema language.
-
-## Semantic history and saved state
-
-History commands are detached data records. Cell patches identify layer, channel, cell index, and stable definition IDs before/after. Legend patches preserve the compact source representation exactly when a stroke introduces a new definition. Instance patches carry the complete before/after snapshot, stable authoring ID, and before/after placement index. Small layer-field patches preserve name, `baseY`, and ordinals; layer add/delete uses one full before/after layer record plus ordering index; the player-start record is a map-level patch. Records contain no functions, DOM nodes, renderer objects, pool indices, physics references, or mutable source aliases.
-
-The reducer checks every patch precondition before mutating a detached document, applies forward and reverse through the same path, then validates the complete result. A command is sent through the fixed-tick simulation boundary only after the proposed edited document compiles successfully. The simulation recompiles collision/occlusion data and reconciles authored runtime recipes after execute, undo, and redo: untouched live bodies, effects, and lights retain their disposable state, while added, removed, or explicitly transformed authored props are synchronized exactly once. Reset, Restore positions, and load/import remain the explicit full authored-state reconstruction paths. Undo/redo traversal never records another command.
-
-Surface and structure pointer gestures are transactions. Pointer down begins a transient stroke, movement accumulates each cell once, and pointer up emits one deterministic delta containing the original pre-stroke value and final value. Stamp, delete, rotate, accepted inspector submission, and completed drag each emit one command. Preview movement never edits source. Escape and pointer cancellation discard the pending gesture; requesting undo or redo during a gesture cancels it without traversing history, so a second request performs the traversal.
-
-History retains at most 256 semantic commands by default. Oldest reachable entries are pruned at the boundary. Editing after undo permanently drops that redo branch. Monotonic revision identities—not array indexes—track the current and last successfully saved authoring states, so pruning and branch changes cannot produce a false clean state. A successful scenario download or probe save marks the current revision clean without clearing undo. Undoing or redoing exactly to that identity is clean; either side is dirty. Failed saves do not advance it. Loading/importing/replacing a document clears history and establishes a clean baseline. Simulation reset, **Restore positions**, and edit/play transitions leave authoring history untouched.
-
-The palette shows **Undo**, **Redo**, their next command labels, disabled states, and a modest Saved/Unsaved changes indicator. In edit mode, `Ctrl+Z` or `Meta+Z` undoes; `Ctrl+Y`, `Meta+Y`, `Ctrl+Shift+Z`, or `Meta+Shift+Z` redoes. Text inputs, textareas, selects, and content-editable controls retain native text undo. Selection is not historical state: it remains attached when its stable ID survives traversal and is reconciled to empty if traversal removes that instance.
-
-Gameplay and presentation state never enter this history. Pushing a rock, table, or torch changes only the live bounded body. It neither dirties the map nor changes an authored starting transform. Explicit reset/load paths respawn each at its source transform; ordinary authoring commands reconcile only added, removed, or directly transformed authored props. The table remains a fixed-orientation, movement-blocking, non-occluding box, while the torch remains an upright movable body with exactly one presentation light following its current runtime position.
-
-## Catalog and palette
-
-The generated palette groups the catalog's current definitions:
-
-- Surfaces: `surface.stone`, `surface.moss`, `surface.hole`
-- Structures: `structure.wall`
-- Objects: `object.rock.small`, `object.rock.medium`, `object.rock.large`, `object.pillar`, `object.torch`, `object.table`, `object.obelisk`, `actor.enemy.wizard`, `actor.enemy.urchin`
-- Connectors: `connector.elevator.two-stop`
-
-Definitions declare `paint` or `stamp`; input behavior follows that metadata. The plain table is a pushable 2×1 directional placeholder with a 320 kg fixed-orientation box, slightly heavier than the medium rock. Physics can translate it but has no angular state, so pushing never pivots, tips, or changes its authored quarter turn. It blocks movement without blocking TrueSight. The standing torch is a lightweight, pushable circular prop that stays upright; Three.js renders a 1.72m post plus a red-orange lamp for an approximately 2m total height. Its catalog light leases a bounded resident presentation-light slot and never casts a point-light shadow. Tool, channel, rotate, extents, and restore controls are generic palette actions, not placeable definitions. Canvas2D and Three.js read the same source and runtime prop state.
-
-Wizard and urchin stamps are authored starting actors. They instantiate immediately when explicitly placed and on reset/load, retain an authoring ID beside their disposable runtime ID, and return to their authored guard point without an obelisk owner. Removing their authored instance removes the matching live actor; a runtime debug despawn leaves the authored start intact so reset/load restores it. Obelisks remain independent encounter sources: current authored obelisks require the player on the same floor, within 20 meters, with unobstructed map line-of-sight. A loaded/reset obelisk may spawn on the first tick when eligible; an obelisk added to a running editor waits one configured interval before its first attempt.
-
-To add a definition:
-
-1. Add one entry to `PLACEABLE_DEFINITIONS` with a unique stable ID, target, placement mode, footprint, debug appearance, `renderAsset` slot, and traits.
-2. A new surface generally needs only catalog debug/render metadata. It must not set movement or sight blocking. `surface.hole` is the deliberate exception: it compiles one centered supporting-frame aperture recipe and uses the shared vertical aperture contract; it remains a surface paint/erase/eyedrop/history action.
-3. A new cell structure declares its blocking traits; the compiler folds the footprint into masks.
-4. A new sparse placeholder declares instance snapping and blocking traits. Add specialized runtime-spawn or final presentation handling only if it needs behavior beyond the generic static footprint/placeholder path.
-5. Add migration only when replacing a previously persisted identity. Never silently reuse an old ID for different semantics.
-
-## Validation and atomic persistence
-
-Validation emits deterministic records with `severity`, stable `code`, source `path`, human message, and affected `layerId` where available. Errors cover format/version, metadata, the nonempty 16-layer-bounded collection, unique IDs, nonempty names, finite base heights/transforms, shared dimensions, exact grid lengths and legend codes, known catalog definitions, canonical rotations, JSON-safe properties, footprint bounds/overlap, dynamic-pool capacity, player-start ownership/bounds/solid overlap, current obelisk constraints, and complete connector references/geometry/timing. Duplicate base heights are valid but produce warnings. Unknown newer authoring versions are explicit errors; definitions and malformed values are never replaced with defaults.
-
-Load/import parses into a candidate, detects and migrates its supported version, validates the whole source, compiles every layer, checks bounded runtime capacity, and only then swaps the simulation document. Any failure leaves the current source, runtime layer, selection, history, dirty checkpoint, bodies, and lights intact and puts structured diagnostics in the Layers panel. A successful replacement activates the player-start layer, clears selection/reference and history, and establishes a clean revision. Saving recompiles and validates first, permits warnings, refuses errors, and marks clean only after successful JSON export. Editor layer/reference state, selection, hover, previews, history, runtime transforms, pooled bodies, and emitters are never serialized.
-
-## Legacy loading and recordings
-
-Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. V6 migrates its singleton obelisk marker to an ordinary, stable `object.obelisk` instance on the marker's owning layer. Saving after any migration emits authoring-map v7 only.
-
-Snapshot/recording schema is v15. Recordings keep their compiled scenario-v3 field for frozen compatibility and add `initialAuthoringMap` for current authoring data. Schema v15 pins the inert authored-topology profile and capacities; schema v14 adds the breakaway-floor profile; schema v13 additionally records the elevator-projectile collision profile; schema v12 retains its committed jump edge and frozen projectile behavior. Replay uses `initialAuthoringMap` for schema v12 and later, preserving older schema fixtures and branches.
-
-The probe preserves the M1A.1–M1A.3 surface and adds safe layer activation/reference/validation, connector, and layer-operation adapters. `authoring()` reports schema/revision, detached layer/connector summaries, editor/reference/start/runtime layer IDs, compiled layer IDs, base heights/dimensions/counts, validation diagnostics/counts, layer capacity, catalog IDs, active placed instances, runtime mappings, hover/selection, preview transform/validity, the extents toggle, undo/redo depths and labels, dirty and saved revision identities, and active-transaction state without exposing mutable commands, masks, or internal arrays.
-
-## Deferred
-
-Persistent history across reloads, history inside map JSON, autosave/crash recovery, applying pushed physics transforms back to source, runtime time travel, copy/paste, duplication, multi-selection, marquee selection, layer duplication/resizing/reordering UI, moving selections between layers, full property schemas, arbitrary or rotating collider shapes, final assets, table tipping/destruction, authoritative lighting, dynamic point-light shadows, cross-layer sound/navigation/sight/projectiles, regions, general trigger graphs, wiring, stairs, arbitrary or merged multi-cell holes, portals, general cross-layer actor routing, retained inactive-floor snapshots, prefabs, streaming, and collaboration remain deferred. M1B.4's breakaway surface is deliberately a narrow implemented trap, not a general trigger system. Pillars temporarily occupy collision/occlusion cells; tables and torches reuse the bounded dynamic-body solver with translation only and never become TrueSight occluders.
-
-## Try it
-
-Run `npm start -- --port 4174` if the default port is occupied, open the printed Canvas2D or 3D URL, press `;`, then `E`. In **Layers**, create Upper and Basement above/below Ground, assign distinct positive/negative heights, and switch the active editor floor. Choose at most one Reference overlay to align X/Z cells without making that floor pickable. Use **Validate map** for current warnings/errors. The generated palette paints stone/moss and holes plus walls; stamps rocks, pillars, torches, and horizontal/vertical tables; and places a two-stop elevator between the active and nearest differently elevated layer. Select/drag, inspect exact transforms/properties, rotate with `R`, use channel-specific Erase/Eyedropper, and toggle authoring extents. Layer operations and long strokes each undo as one action. Save/reload and confirm layer/instance/connector IDs and authored starts survive. Leaving edit resumes the paused live simulation; **Restore positions** explicitly reconstructs authored starts. Push a torch or table to confirm live physics and light follow the runtime body without dirtying source.
-</file>
-
 <file path="docs/lay-of-the-land-pseudocode.md">
 # Lantern: Lay of the Land in Pseudocode
 
@@ -24354,6 +24281,130 @@ const isInstance = (name, value) => (
     );
 </file>
 
+<file path="docs/notes/map-authoring-foundation.md">
+# M1A.1–M1A.4 Map-authoring kit
+
+> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v6 · **Current runtime recording schema:** v15 (M1C.1 advances both envelopes without enabling enemy movement)
+
+M1A.1 separates friendly saved source from the compact grid and bounded pools used by the live simulation. M1A.2 adds deterministic selection, inspection, previews, and practical sparse-instance edits. M1A.3 wraps those edits in bounded undo/redo and saved-revision tracking. M1A.4 makes the same kit multi-layer, validates complete documents with structured diagnostics, and makes replacement atomic. The editor still changes authoritative state only through fixed-tick commands, and its palette and compiler resolve stable catalog IDs instead of treating HTML button names as gameplay data.
+
+## Source document and compiled state
+
+An authoring document contains map metadata, `nextLayerOrdinal`, `nextConnectorOrdinal`, one authoritative top-level `playerStart` with a stable `layerId`, an ordered nonempty layer collection, and a deterministic map-level connector collection. Each layer has an opaque stable `id`, human name, signed finite `baseY`, dimensions, separate surface and structure grids, sparse instances, layer-owned markers, and `nextInstanceOrdinal`. Surface and structure grids store compact legend indices; the legends contain stable definition IDs. Sparse instances contain a stable string `id`, `definitionId`, X/Z position, quarter-turn `rotation`, and optional JSON properties. Layer, instance, and connector IDs never derive from array position or display name.
+
+Every layer is compiled independently into a deterministic recipe keyed by stable layer ID. Each recipe contains its own `GridMap` collision cells, occluder mask, surface/structure codes, markers, initial bounded dynamic-body descriptors, and connector endpoints. Identical X/Z cells on different floors never share masks. Wall structures and pillar footprints contribute static occupied cells and TrueSight occlusion. A table instead compiles into the bounded dynamic-body pool as a fixed-orientation box: it blocks physical movement at its live position but contributes no TrueSight occluder cells. Moss changes presentation data only. A standing torch compiles as a lightweight upright circular body and declares a small presentation-only lamp; it does not become a TrueSight occluder or authoritative light source. The map compiler also emits each two-stop connector once as a bounded runtime elevator recipe.
+
+The authoring document is never a pool snapshot. Runtime rock, torch, and table positions and velocities, pool indices, enemies, projectiles, particles, health, and AI state are absent. Moving a prop in physics therefore cannot rewrite its saved placement; **Restore positions**, reset, load, and replay reconstruct runtime state from the authoring source.
+
+The central modules are:
+
+- `src/authoring/definition_catalog.js`: stable IDs, labels, categories, placement modes, footprints, debug appearance, future asset slots, and runtime traits.
+- `src/authoring/authoring_map.js`: format validation, JSON-safe cloning, and explicit legacy migration.
+- `src/authoring/authoring_commands.js`: atomic surface/structure strokes, sparse-instance edits, stable layer mutations, and map-level connector operations.
+- `src/authoring/authoring_history.js`: plain-data command diffs, atomic forward/reverse reduction, action labeling, bounded history, revision identity, and saved-state tracking.
+- `src/authoring/footprint.js`: the shared anchor, quarter-turn rotation, occupied-cell, bounds, and simple extent calculations.
+- `src/authoring/placement_validation.js`: lightweight, non-mutating bounds and overlap checks shared by previews and compilation.
+- `src/authoring/editor_interaction.js`: DOM-free editor state, deterministic picking, target reconciliation, and eyedropper rules.
+- `src/authoring/map_compiler.js`: deterministic, DOM-free authoring-to-runtime compilation.
+- `src/sim/scenario.js`: compatibility adapter between the authoring source, the legacy scenario projection, and the simulation.
+- `src/browser/layer_panel.js`: fixed layer management, reference selection, and concise structured validation diagnostics.
+
+Stable authoring IDs are mapped to numeric runtime spawn IDs where a pool needs one. Neither identity is a pool index.
+
+## Layer identity, coordinate space, and activation
+
+All floors share one finite X/Z cell space. Width and height remain on each layer for direct migration compatibility, but validation requires every layer to match; the engine's cell size is the fixed one-meter grid and layers cannot define independent origins or cell sizes. `baseY` is a signed world-space elevation in meters, not identity and not an X/Z offset. Three.js translates the complete active world and camera target by `baseY`; Canvas2D remains a top-down shared-X/Z view and reports the floor height through editor UI/probes.
+
+M1B.1 retains these editor/runtime distinctions while making runtime layer ownership per body:
+
+- **Active editor layer:** transient controller state; all paint, erase, stamp, pick, drag, eyedropper, inspector, and extent operations target this layer only.
+- **Reference layer:** zero or one transient, dim alignment overlay. It is never picked, edited, compiled into the active masks, or activated for gameplay merely by being visible.
+- **Player-start layer:** saved in the authoritative top-level `playerStart.layerId`; the same record owns the one initial X/Z spawn.
+- **Visible runtime layer:** the floor currently presented and used for player-facing map queries. Each live body separately owns its authoritative runtime layer.
+
+The fixed Layers panel lists stable ID, name, signed base Y, player-start badge, dimensions, and instance count. It creates blank layers above or below the active floor at a default three-meter offset, renames, edits base Y, activates a floor, chooses a reference, assigns the player-start floor, and deletes with confirmation. A map retains at least one layer, supports up to 16, and rejects deletion of the current player-start layer until the start is reassigned. Switching active/reference floors is UI state and never dirties history. Create, delete, rename, base-height, and start-layer changes are semantic history commands; delete/restore carries one full layer snapshot so stable layer and instance IDs and deterministic ordering survive undo.
+
+Initial play starts the player on the saved player-start layer. M1B.1 keeps every authored layer recipe and dynamic prop loaded; actors and clutter query collision by their own layer, while presentation follows the visible player/editor layer. An elevator or falling handoff changes one body rather than replacing the global simulation. Entering edit pauses on the player's current runtime floor, editor layer switches remain view-only, and leaving edit resumes the same live body state. See [M1B.1 vertical bodies and elevator](./generic-vertical-bodies-and-elevator.md) for support and transition behavior.
+
+## Selection, picking, and footprints
+
+An editor instance target is `{ kind: "instance", layerId, instanceId }`; a cell target is `{ kind: "cell", layerId, x, z }`. Selection stores only the stable authoring ID. It never retains a runtime pool index, Three.js object, Canvas reference, or mutable entity-array slot. Recompilation and pool compaction therefore cannot redirect a selection. Deleting the instance or loading a document that lacks the ID clears it during state reconciliation.
+
+Picking uses the active layer and authoring extents rather than renderer geometry. A connector endpoint wins first, then instances win over their underlying cell. If multiple extents overlap, the connector or instance later in document placement order wins; stable ID descending is the final deterministic tie-breaker within that target kind. Outside-layer clicks clear selection. Runtime prop movement is deliberately ignored: authoring-space picking continues to find each prop at its saved starting transform.
+
+Sparse X/Z identifies the center of an **anchor cell**. Catalog footprint offsets are integer cells rotated around that fixed anchor; the anchor does not drift when rotation changes. Quarter turns normalize to `0`, `1`, `2`, or `3`. Thus `object.table` occupies anchor plus `+X` at rotation 0 and anchor plus `+Z` at rotation 1. Bounds checks, overlap validation, picking, selection outlines, previews, and extents all call the same `getOccupiedCells()` operation. The table's runtime box is centered on those rotated footprint bounds while retaining the authored quarter turn.
+
+## Tools and inspector
+
+Editor interaction state is transient and never saved: active tool, active channel, selected catalog definition, hover, selection, preview rotation/validity, drag candidate, and the authoring-extents toggle. Catalog selection chooses the matching surface, structure, instance, or connector channel and returns to Paint / stamp. The tools are:
+
+- **Select:** selects instances before cells; dragging an instance previews one candidate and commits one stable-ID transform on release.
+- **Paint / stamp:** accumulates surface or structure cells into one release-time stroke, commits one sparse instance stamp, or places one map-level connector endpoint.
+- **Erase:** resets surface cells to legend code 0, clears structure cells, or removes an instance according to the explicitly active channel. RMB is a temporary channel-aware erase gesture.
+- **Eyedropper:** samples the active channel first, then falls back instance → structure → surface, selects the existing catalog definition, and returns to Paint / stamp. Selecting the Surface channel explicitly samples beneath a wall.
+
+`R` rotates the stamp preview or selected instance in edit mode; the palette and inspector also expose buttons. Escape cancels the current drag or stroke. Pointer previews do not mutate or recompile source. Each release, inspector submission, erase, rotation, or placement is one fixed-tick semantic action and one undoable history entry.
+
+The fixed, collapsible inspector reads authoring source and compiled diagnostics. Instance IDs/layer are read-only; X/Z, quarter-turn rotation, and the JSON property bag validate through the authoring API before compilation. Each accepted form submission is one command rather than one command per keystroke. Rejection leaves the source and stable selection unchanged and reports a message. Cell inspection shows source surface/structure definitions and read-only solid/occluding flags. The property editor preserves unknown JSON without introducing a catalog property-schema language.
+
+## Semantic history and saved state
+
+History commands are detached data records. Cell patches identify layer, channel, cell index, and stable definition IDs before/after. Legend patches preserve the compact source representation exactly when a stroke introduces a new definition. Instance patches carry the complete before/after snapshot, stable authoring ID, and before/after placement index. Small layer-field patches preserve name, `baseY`, and ordinals; layer add/delete uses one full before/after layer record plus ordering index; the player-start record is a map-level patch. Records contain no functions, DOM nodes, renderer objects, pool indices, physics references, or mutable source aliases.
+
+The reducer checks every patch precondition before mutating a detached document, applies forward and reverse through the same path, then validates the complete result. A command is sent through the fixed-tick simulation boundary only after the proposed edited document compiles successfully. The simulation recompiles collision/occlusion data and reconciles authored runtime recipes after execute, undo, and redo: untouched live bodies, effects, and lights retain their disposable state, while added, removed, or explicitly transformed authored props are synchronized exactly once. Reset, Restore positions, and load/import remain the explicit full authored-state reconstruction paths. Undo/redo traversal never records another command.
+
+Surface and structure pointer gestures are transactions. Pointer down begins a transient stroke, movement accumulates each cell once, and pointer up emits one deterministic delta containing the original pre-stroke value and final value. Stamp, delete, rotate, accepted inspector submission, and completed drag each emit one command. Preview movement never edits source. Escape and pointer cancellation discard the pending gesture; requesting undo or redo during a gesture cancels it without traversing history, so a second request performs the traversal.
+
+History retains at most 256 semantic commands by default. Oldest reachable entries are pruned at the boundary. Editing after undo permanently drops that redo branch. Monotonic revision identities—not array indexes—track the current and last successfully saved authoring states, so pruning and branch changes cannot produce a false clean state. A successful scenario download or probe save marks the current revision clean without clearing undo. Undoing or redoing exactly to that identity is clean; either side is dirty. Failed saves do not advance it. Loading/importing/replacing a document clears history and establishes a clean baseline. Simulation reset, **Restore positions**, and edit/play transitions leave authoring history untouched.
+
+The palette shows **Undo**, **Redo**, their next command labels, disabled states, and a modest Saved/Unsaved changes indicator. In edit mode, `Ctrl+Z` or `Meta+Z` undoes; `Ctrl+Y`, `Meta+Y`, `Ctrl+Shift+Z`, or `Meta+Shift+Z` redoes. Text inputs, textareas, selects, and content-editable controls retain native text undo. Selection is not historical state: it remains attached when its stable ID survives traversal and is reconciled to empty if traversal removes that instance.
+
+Gameplay and presentation state never enter this history. Pushing a rock, table, or torch changes only the live bounded body. It neither dirties the map nor changes an authored starting transform. Explicit reset/load paths respawn each at its source transform; ordinary authoring commands reconcile only added, removed, or directly transformed authored props. The table remains a fixed-orientation, movement-blocking, non-occluding box, while the torch remains an upright movable body with exactly one presentation light following its current runtime position.
+
+## Catalog and palette
+
+The generated palette groups the catalog's current definitions:
+
+- Surfaces: `surface.stone`, `surface.moss`, `surface.hole`
+- Structures: `structure.wall`
+- Objects: `object.rock.small`, `object.rock.medium`, `object.rock.large`, `object.pillar`, `object.torch`, `object.table`, `object.obelisk`, `actor.enemy.wizard`, `actor.enemy.urchin`
+- Connectors: `connector.elevator.two-stop`
+
+Definitions declare `paint` or `stamp`; input behavior follows that metadata. The plain table is a pushable 2×1 directional placeholder with a 320 kg fixed-orientation box, slightly heavier than the medium rock. Physics can translate it but has no angular state, so pushing never pivots, tips, or changes its authored quarter turn. It blocks movement without blocking TrueSight. The standing torch is a lightweight, pushable circular prop that stays upright; Three.js renders a 1.72m post plus a red-orange lamp for an approximately 2m total height. Its catalog light leases a bounded resident presentation-light slot and never casts a point-light shadow. Tool, channel, rotate, extents, and restore controls are generic palette actions, not placeable definitions. Canvas2D and Three.js read the same source and runtime prop state.
+
+Wizard and urchin stamps are authored starting actors. They instantiate immediately when explicitly placed and on reset/load, retain an authoring ID beside their disposable runtime ID, and return to their authored guard point without an obelisk owner. Removing their authored instance removes the matching live actor; a runtime debug despawn leaves the authored start intact so reset/load restores it. Obelisks remain independent encounter sources: current authored obelisks require the player on the same floor, within 20 meters, with unobstructed map line-of-sight. A loaded/reset obelisk may spawn on the first tick when eligible; an obelisk added to a running editor waits one configured interval before its first attempt.
+
+To add a definition:
+
+1. Add one entry to `PLACEABLE_DEFINITIONS` with a unique stable ID, target, placement mode, footprint, debug appearance, `renderAsset` slot, and traits.
+2. A new surface generally needs only catalog debug/render metadata. It must not set movement or sight blocking. `surface.hole` is the deliberate exception: it compiles one centered supporting-frame aperture recipe and uses the shared vertical aperture contract; it remains a surface paint/erase/eyedrop/history action.
+3. A new cell structure declares its blocking traits; the compiler folds the footprint into masks.
+4. A new sparse placeholder declares instance snapping and blocking traits. Add specialized runtime-spawn or final presentation handling only if it needs behavior beyond the generic static footprint/placeholder path.
+5. Add migration only when replacing a previously persisted identity. Never silently reuse an old ID for different semantics.
+
+## Validation and atomic persistence
+
+Validation emits deterministic records with `severity`, stable `code`, source `path`, human message, and affected `layerId` where available. Errors cover format/version, metadata, the nonempty 16-layer-bounded collection, unique IDs, nonempty names, finite base heights/transforms, bounded dimensions, exact grid lengths and legend codes, known catalog definitions, canonical rotations, JSON-safe properties, footprint bounds/overlap, dynamic-pool capacity, player-start ownership/bounds/solid overlap, current obelisk constraints, and complete connector references/geometry/timing. Duplicate base heights are valid but produce warnings. Unknown newer authoring versions are explicit errors; definitions and malformed values are never replaced with defaults.
+
+Load/import parses into a candidate, detects and migrates its supported version, validates the whole source, compiles every layer, checks bounded runtime capacity, and only then swaps the simulation document. Any failure leaves the current source, runtime layer, selection, history, dirty checkpoint, bodies, and lights intact and puts structured diagnostics in the Layers panel. A successful replacement activates the player-start layer, clears selection/reference and history, and establishes a clean revision. Saving recompiles and validates first, permits warnings, refuses errors, and marks clean only after successful JSON export. Editor layer/reference state, selection, hover, previews, history, runtime transforms, pooled bodies, and emitters are never serialized.
+
+## Legacy loading and recordings
+
+Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. V6 migrates its singleton obelisk marker to an ordinary, stable `object.obelisk` instance on the marker's owning layer. Saving after any migration emits authoring-map v7 only.
+
+Snapshot/recording schema is v15. Recordings keep their compiled scenario-v3 field for frozen compatibility and add `initialAuthoringMap` for current authoring data. Schema v15 pins the inert authored-topology profile and capacities; schema v14 adds the breakaway-floor profile; schema v13 additionally records the elevator-projectile collision profile; schema v12 retains its committed jump edge and frozen projectile behavior. Replay uses `initialAuthoringMap` for schema v12 and later, preserving older schema fixtures and branches.
+
+The probe preserves the M1A.1–M1A.3 surface and adds safe layer activation/reference/validation, connector, and layer-operation adapters. `authoring()` reports schema/revision, detached layer/connector summaries, editor/reference/start/runtime layer IDs, compiled layer IDs, base heights/dimensions/counts, validation diagnostics/counts, layer capacity, catalog IDs, active placed instances, runtime mappings, hover/selection, preview transform/validity, the extents toggle, undo/redo depths and labels, dirty and saved revision identities, and active-transaction state without exposing mutable commands, masks, or internal arrays.
+
+## Deferred
+
+Persistent history across reloads, history inside map JSON, autosave/crash recovery, applying pushed physics transforms back to source, runtime time travel, copy/paste, duplication, multi-selection, marquee selection, layer duplication/reordering, independent per-floor extents, moving selections between layers, compact or chunked map storage, full property schemas, arbitrary or rotating collider shapes, final assets, table tipping/destruction, authoritative lighting, dynamic point-light shadows, cross-layer sound/navigation/sight/projectiles, regions, general trigger graphs, wiring, stairs, arbitrary or merged multi-cell holes, portals, general cross-layer actor routing, retained inactive-floor snapshots, prefabs, streaming, and collaboration remain deferred. M1B.4's breakaway surface is deliberately a narrow implemented trap, not a general trigger system. Pillars temporarily occupy collision/occlusion cells; tables and torches reuse the bounded dynamic-body solver with translation only and never become TrueSight occluders.
+
+## Try it
+
+Run `npm start -- --port 4174` if the default port is occupied, open the printed Canvas2D or 3D URL, press `;`, then `E`. In **Layers**, set one shared map extent, create Upper and Basement above/below Ground, assign distinct positive/negative heights, and switch the active editor floor. Choose at most one Reference overlay to align X/Z cells without making that floor pickable. Use **Validate map** for current warnings/errors. The generated palette paints stone/moss and holes plus walls; stamps rocks, pillars, torches, and horizontal/vertical tables; and places a two-stop elevator between the active and nearest differently elevated layer. Select/drag, inspect exact transforms/properties, rotate with `R`, use channel-specific Erase/Eyedropper, and toggle authoring extents. Layer operations, map resizing, and long strokes each undo as one action. Save/reload and confirm layer/instance/connector IDs and authored starts survive. Leaving edit resumes the paused live simulation; **Restore positions** explicitly reconstructs authored starts. Push a torch or table to confirm live physics and light follow the runtime body without dirtying source.
+</file>
+
 <file path="test/tactical_ai.test.js">
 function borderedMap(width, height, spawn)
 ⋮----
@@ -24362,6 +24413,89 @@ function tacticalSimulation(map, options =
 function spawnEnemy(simulation, x, z, options =
 ⋮----
 function spawnPlayerFireball(simulation, value)
+</file>
+
+<file path="src/browser/ui.js">
+// @ts-check
+⋮----
+/** @param {number} value @param {number} [digits] */
+function number(value, digits = 2)
+⋮----
+/** @param {unknown} value */
+function rounded(value)
+⋮----
+/** @param {string} id */
+function required(id)
+⋮----
+/**
+ * Assigning identical textContent still replaces the DOM text node and clears
+ * a user's text selection, so live instruments only write on real changes.
+ * @param {{textContent:string|null}} element
+ * @param {string} text
+ */
+export function setTextContentIfChanged(element, text)
+⋮----
+export class ArenaUi
+⋮----
+this.pauseButton = /** @type {HTMLButtonElement} */ (required("pause-button"));
+this.modeButton = /** @type {HTMLButtonElement} */ (required("mode-button"));
+this.canvas = /** @type {HTMLCanvasElement} */ (required("arena"));
+⋮----
+this.despawnEnemyButton = /** @type {HTMLButtonElement} */ (
+⋮----
+this.rockBar = /** @type {HTMLElement} */ (required("rock-bar"));
+this.enemyBar = /** @type {HTMLElement} */ (required("enemy-bar"));
+this.dynamicDeadBodyBar = /** @type {HTMLElement} */ (
+⋮----
+this.inertDeadBodyBar = /** @type {HTMLElement} */ (required("inert-dead-body-bar"));
+this.projectileBar = /** @type {HTMLElement} */ (required("projectile-bar"));
+this.soundEventBar = /** @type {HTMLElement} */ (required("sound-event-bar"));
+this.particleBar = /** @type {HTMLElement} */ (required("particle-bar"));
+⋮----
+/** @param {"2d"|"3d"} renderer */
+beginPresentationWarmup(renderer)
+⋮----
+const element = /** @type {HTMLButtonElement|HTMLInputElement} */ (control);
+⋮----
+finishPresentationWarmup()
+⋮----
+failPresentationWarmup()
+⋮----
+/** @param {"play"|"edit"} mode */
+setMode(mode)
+⋮----
+/** @param {string} tool */
+setEditorTool(tool)
+⋮----
+const element = /** @type {HTMLButtonElement} */ (button);
+⋮----
+/** @param {string} message */
+announce(message)
+⋮----
+/** @param {unknown} error */
+showError(error)
+⋮----
+clearError()
+⋮----
+/**
+   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
+   * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
+   * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinned?:{kind:string,id:number|string}|null,pinnedHidden?:boolean,mode:string,developerToolsOpen?:boolean}} view
+   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>,kineticFragments?:{active:number,capacity:number,dropped:number}}} presentation
+   */
+update(snapshot, metrics, view, presentation)
+</file>
+
+<file path="test/perception_replay.test.js">
+function runFixture(simulation, ticks = 360)
+⋮----
+function withoutBroadphase(snapshot)
+⋮----
+function withoutM1cDiagnostics(snapshot)
+⋮----
+function schemaV8GoldenPoint(simulation)
+⋮----
+function schemaV7GoldenPoint(simulation)
 </file>
 
 <file path="styles.css">
@@ -24516,6 +24650,18 @@ body[data-mode="edit"] .layer-panel {
 .layer-panel-body {
 ⋮----
 .layer-panel-summary {
+⋮----
+.map-extent-control {
+⋮----
+.map-extent-control strong {
+⋮----
+.map-extent-fields {
+⋮----
+.map-extent-fields label {
+⋮----
+.map-extent-fields input {
+⋮----
+.map-extent-control p {
 ⋮----
 .layer-panel-actions,
 ⋮----
@@ -24843,89 +24989,6 @@ body[data-developer-tools="closed"] {
 body[data-developer-tools="closed"] .workspace {
 ⋮----
 body[data-developer-tools="closed"] .arena-shell {
-</file>
-
-<file path="src/browser/ui.js">
-// @ts-check
-⋮----
-/** @param {number} value @param {number} [digits] */
-function number(value, digits = 2)
-⋮----
-/** @param {unknown} value */
-function rounded(value)
-⋮----
-/** @param {string} id */
-function required(id)
-⋮----
-/**
- * Assigning identical textContent still replaces the DOM text node and clears
- * a user's text selection, so live instruments only write on real changes.
- * @param {{textContent:string|null}} element
- * @param {string} text
- */
-export function setTextContentIfChanged(element, text)
-⋮----
-export class ArenaUi
-⋮----
-this.pauseButton = /** @type {HTMLButtonElement} */ (required("pause-button"));
-this.modeButton = /** @type {HTMLButtonElement} */ (required("mode-button"));
-this.canvas = /** @type {HTMLCanvasElement} */ (required("arena"));
-⋮----
-this.despawnEnemyButton = /** @type {HTMLButtonElement} */ (
-⋮----
-this.rockBar = /** @type {HTMLElement} */ (required("rock-bar"));
-this.enemyBar = /** @type {HTMLElement} */ (required("enemy-bar"));
-this.dynamicDeadBodyBar = /** @type {HTMLElement} */ (
-⋮----
-this.inertDeadBodyBar = /** @type {HTMLElement} */ (required("inert-dead-body-bar"));
-this.projectileBar = /** @type {HTMLElement} */ (required("projectile-bar"));
-this.soundEventBar = /** @type {HTMLElement} */ (required("sound-event-bar"));
-this.particleBar = /** @type {HTMLElement} */ (required("particle-bar"));
-⋮----
-/** @param {"2d"|"3d"} renderer */
-beginPresentationWarmup(renderer)
-⋮----
-const element = /** @type {HTMLButtonElement|HTMLInputElement} */ (control);
-⋮----
-finishPresentationWarmup()
-⋮----
-failPresentationWarmup()
-⋮----
-/** @param {"play"|"edit"} mode */
-setMode(mode)
-⋮----
-/** @param {string} tool */
-setEditorTool(tool)
-⋮----
-const element = /** @type {HTMLButtonElement} */ (button);
-⋮----
-/** @param {string} message */
-announce(message)
-⋮----
-/** @param {unknown} error */
-showError(error)
-⋮----
-clearError()
-⋮----
-/**
-   * @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot
-   * @param {ReturnType<import('../runtime/fixed_step_runtime.js').FixedStepRuntime['metrics']>} metrics
-   * @param {{mouseWorld:{x:number,z:number},hover:Record<string,unknown>|null,inspected:Record<string,unknown>|null,pinned?:{kind:string,id:number|string}|null,pinnedHidden?:boolean,mode:string,developerToolsOpen?:boolean}} view
-   * @param {{requestedRenderer:string,activeBackend:string,drawCalls:number,triangles:number,activeLightCount:number,residentLightCount:number,warmup:{state:string,durationMs:number},presentationCpuMs:Record<string,{last:number,p50:number,p95:number,p99:number,max:number}>,recentSpikes:Array<Record<string,any>>,kineticFragments?:{active:number,capacity:number,dropped:number}}} presentation
-   */
-update(snapshot, metrics, view, presentation)
-</file>
-
-<file path="test/perception_replay.test.js">
-function runFixture(simulation, ticks = 360)
-⋮----
-function withoutBroadphase(snapshot)
-⋮----
-function withoutM1cDiagnostics(snapshot)
-⋮----
-function schemaV8GoldenPoint(simulation)
-⋮----
-function schemaV7GoldenPoint(simulation)
 </file>
 
 <file path="test/combat.test.js">
@@ -25774,6 +25837,7 @@ onRename: (layerId, name) =>
 onBaseY: (layerId, baseY) =>
 onDelete: (layerId) =>
 onSetStart: (layerId) =>
+onResize: (width, height) =>
 onValidate: ()
 ⋮----
 onUpdate: (instanceId, transform) =>
@@ -26851,6 +26915,10 @@ enemyDiagnostics(id)
 ⋮----
 snapshot()
 ⋮----
+const obelisksForLayer = (layerId) => (this.scenario.compiledLayer(layerId)?.entities ?? [])
+      .filter((entity) => entity.kind === "obelisk")
+.map((entity) => (
+⋮----
 const layerPresentationMap = (layerId, layerIndex) =>
 ⋮----
 /** @param {number} x @param {number} z */
@@ -27184,9 +27252,9 @@ There is no component-mask or ECS dispatch layer yet. Systems explicitly process
 
 ## Scenario editor
 
-Press `;`, then `E` to open the generated map palette, inspector, and Layers panel. Its catalog currently provides stone, moss, and single-cell hole surfaces, walls, three existing movable-rock sizes, a blocking pillar, a standing torch, a pushable table, and a two-stop elevator connector. Paint definitions drag across cells; stamp definitions place once. LMB applies the selection and RMB or **Erase** follows the active channel. Invalid placements over a wall, the player, an enemy, or another authored/active body are rejected. Layers can be created above/below, renamed, assigned signed base heights, and viewed through one non-editable reference overlay.
+Press `;`, then `E` to open the generated map palette, inspector, and Layers panel. Its catalog currently provides stone, moss, and single-cell hole surfaces, walls, three existing movable-rock sizes, a blocking pillar, a standing torch, a pushable table, and a two-stop elevator connector. Paint definitions drag across cells; stamp definitions place once. LMB applies the selection and RMB or **Erase** follows the active channel. Invalid placements over a wall, the player, an enemy, or another authored/active body are rejected. Layers can be created above/below, renamed, assigned signed base heights, and viewed through one non-editable reference overlay. **Shared map extent** resizes every floor from the common `(0, 0)` origin up to `128×128` cells. Expansion preserves existing coordinates and fills default floor; confirmed shrinking crops the positive X/Z edges as one undoable edit and refuses to crop the player start.
 
-New saves emit `lantern-authoring-map` v6 with metadata, an explicit player-start layer, independently compiled named floors, separate surface/structure grids, stable layer/instance IDs, signed base heights, layer-owned markers, independent floor apertures, one map-level connector collection, and bounded authored navigation nodes/links. Elevators are autonomous: each stop dwells for one second and each leg takes two seconds by default, regardless of floor-height gap. Newly placed or moved elevators snap to cell centers; migrated off-center v5 elevators retain their exact deck coordinates until moved. The default obelisk occupies cell `(20, 18)` at `(20.5, 18.5)`; its structure and marker are protected from editor erasure. Authoring-map v5/v4/v3/v2/v1, legacy map v1, and scenario v2/v3 JSON migrate explicitly and resave in v6. Entering edit pauses the live simulation on the player’s current floor; authoring changes recompile and reconcile only affected authored content, while **Restore positions**, reset, and load/import explicitly reconstruct authored body/elevator starts. The singleton obelisk is map-owned and always spawns its encounter on its authored layer. Save exports authored transforms, so runtime pushing, falling, elevator travel, and body layer transitions never rewrite them.
+New saves emit `lantern-authoring-map` v7 with metadata, an explicit player-start layer, independently compiled named floors, separate surface/structure grids, stable layer/instance IDs, signed base heights, independent floor apertures, ordinary floor-owned obelisk/enemy instances, one map-level connector collection, and bounded authored navigation nodes/links. Elevators are autonomous: each stop dwells for one second and each leg takes two seconds by default, regardless of floor-height gap. Newly placed or moved elevators snap to cell centers; migrated off-center v5 elevators retain their exact deck coordinates until moved. Earlier authoring maps, legacy map v1, and scenario v2/v3 JSON migrate explicitly and resave in v7. Entering edit pauses the live simulation on the player’s current floor; authoring changes recompile and reconcile authored content, while **Restore positions**, reset, and load/import explicitly reconstruct authored body/elevator starts. Save exports authored transforms, so runtime pushing, falling, elevator travel, and body layer transitions never rewrite them.
 
 For the focused M1B fixture, start `?arena=elevator` (or `?arena=elevator&renderer=3d`). For the full traversal playground, start `?arena=holes`. Its three staggered autonomous lifts connect four floors alongside holes, jumping, pressure plates, a fitting torch/rock, and an oversized table. Start `?arena=navigation` to test authored cross-floor routes against low-damage Urchins instead of Fireball-casting wizards. The lift carries any supported body without centering or locking X/Z control; it keeps cycling whether empty or occupied. The console probes `__lantern.elevators()`, `__lantern.verticalBody(kind, id)`, `__lantern.cycleElevator(id)`, and `__lantern.summonElevator(id, stop)` expose deterministic diagnostics.
 

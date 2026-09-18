@@ -215,17 +215,30 @@ export class DamageNumberPool {
     const mapHash = scorchMapHash(snapshot?.map, snapshot?.obelisks ?? []);
     const events = this.#damageEvents(snapshot);
     const timelineCleared = this.observedEventIds.size > 0 && events.length === 0;
+    const tickRewound = this.lastTick !== null && tick < this.lastTick;
+    const seedChanged = this.lastSeed !== null && seed !== this.lastSeed;
+    const mapChanged = this.lastMapHash !== null && mapHash !== this.lastMapHash;
     if (
-      (this.lastTick !== null && tick < this.lastTick)
-      || (this.lastSeed !== null && seed !== this.lastSeed)
-      || (this.lastMapHash !== null && mapHash !== this.lastMapHash)
+      tickRewound
+      || seedChanged
+      || mapChanged
       || timelineCleared
     ) {
       const changed = this.activeCount > 0;
       this.activeCount = 0;
       this.resets += 1;
       this.#primeTimeline(snapshot);
-      return changed;
+      let spawned = 0;
+      if (mapChanged && !tickRewound && !seedChanged && !timelineCleared) {
+        for (const event of events) {
+          if (Math.trunc(finiteNumber(event.tick) ?? -1) !== tick) continue;
+          const number = createDamageNumber(event, seed);
+          if (!number) continue;
+          this.ingestedEvents += 1;
+          if (this.spawn(number)) spawned += 1;
+        }
+      }
+      return changed || spawned > 0;
     }
 
     const previousTick = this.lastTick ?? tick;
