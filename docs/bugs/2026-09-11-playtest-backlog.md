@@ -62,6 +62,21 @@ the first `0.20m` below the floor plane, then commit to the ordinary fall. The
 exact threshold and snap feel remain subject to manual tuning; this is a feel
 request rather than a fixed physics contract.
 
+## Vertical-state authority needs a consolidation audit
+
+Capture a follow-up investigation into how a body's jump/fall height and
+vertical velocity are represented and consumed across the simulation. In
+particular, verify which world-Y values are authoritative for jump and fall
+resolution, height-aware Fireball contacts, supports, and layer transitions;
+then identify any duplicated, stale, or presentation-only height paths that
+could diverge from that authority.
+
+This is not yet a claim that a specific jump or Fireball behavior is broken.
+The desired outcome is a compact, documented vertical-state contract and a
+smallest-safe consolidation plan, preserving Lantern's limited 2.5D model:
+authoritative X/Z movement with per-body world Y, rather than general 3D
+physics.
+
 ## Wall scorch marks clip at segment boundaries
 
 A blast mark near the edge of a wall segment is cut off instead of continuing
