@@ -4,7 +4,7 @@ import * as THREE from "three/webgpu";
 import { attribute, instancedDynamicBufferAttribute, pass } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 
-import { ENEMY_WIZARD, ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
+import { ENEMY_WIZARD, OBELISK, ROCK_ARCHETYPES, VERTICAL_PHYSICS } from "../config.js";
 import {
   DamageNumberOverlay,
   DamageNumberPool,
@@ -639,23 +639,25 @@ export class ThreePresentation {
       metalness: 0.08,
     }));
     this.obeliskGroup = new THREE.Group();
-    this.obeliskGroup.name = "authored-obelisk";
-    const obeliskBase = new THREE.Mesh(
-      new THREE.BoxGeometry(0.82, 0.28, 0.82),
-      this.obeliskBaseMaterial,
-    );
-    obeliskBase.position.y = 0.14;
-    const obeliskShaft = new THREE.Mesh(
-      new THREE.ConeGeometry(0.38, 2.05, 4),
-      this.obeliskMaterial,
-    );
-    obeliskShaft.position.y = 1.18;
-    obeliskShaft.rotation.y = Math.PI / 4;
-    obeliskBase.castShadow = true;
-    obeliskBase.receiveShadow = true;
-    obeliskShaft.castShadow = true;
-    obeliskShaft.receiveShadow = true;
-    this.obeliskGroup.add(obeliskBase, obeliskShaft);
+    this.obeliskGroup.name = "authored-obelisks";
+    const obeliskBaseGeometry = new THREE.BoxGeometry(0.82, 0.28, 0.82);
+    const obeliskShaftGeometry = new THREE.ConeGeometry(0.38, 2.05, 4);
+    this.obeliskInstances = Array.from({ length: OBELISK.capacity }, (_, index) => {
+      const group = new THREE.Group();
+      group.name = `authored-obelisk-${index}`;
+      const obeliskBase = new THREE.Mesh(obeliskBaseGeometry, this.obeliskBaseMaterial);
+      obeliskBase.position.y = 0.14;
+      const obeliskShaft = new THREE.Mesh(obeliskShaftGeometry, this.obeliskMaterial);
+      obeliskShaft.position.y = 1.18;
+      obeliskShaft.rotation.y = Math.PI / 4;
+      obeliskBase.castShadow = true;
+      obeliskBase.receiveShadow = true;
+      obeliskShaft.castShadow = true;
+      obeliskShaft.receiveShadow = true;
+      group.add(obeliskBase, obeliskShaft);
+      this.obeliskGroup.add(group);
+      return group;
+    });
     this.obeliskGroup.visible = false;
     this.scene.add(this.obeliskGroup);
 
@@ -1039,6 +1041,12 @@ export class ThreePresentation {
           capacity: this.healthFillMesh.userData.capacity,
         },
         obeliskVisible: this.obeliskGroup.visible,
+        obelisks: {
+          active: this.obeliskGroup.visible
+            ? this.obeliskInstances.filter((instance) => instance.visible).length
+            : 0,
+          capacity: this.obeliskInstances.length,
+        },
       },
       lightGroups: this.lightBudget.diagnostics(),
       trueSightTransport: this.sightTransport.diagnostics(),
@@ -1684,9 +1692,14 @@ export class ThreePresentation {
 
   /** @param {Array<{x:number,z:number}>} obelisks */
   #updateObelisk(obelisks) {
-    const obelisk = obelisks[0] ?? null;
-    this.obeliskGroup.visible = Boolean(obelisk);
-    if (obelisk) this.obeliskGroup.position.set(obelisk.x, 0, obelisk.z);
+    const count = Math.min(obelisks.length, this.obeliskInstances.length);
+    this.obeliskGroup.visible = count > 0;
+    for (let index = 0; index < this.obeliskInstances.length; index += 1) {
+      const group = this.obeliskInstances[index];
+      const obelisk = obelisks[index] ?? null;
+      group.visible = Boolean(obelisk);
+      if (obelisk) group.position.set(obelisk.x, 0, obelisk.z);
+    }
   }
 
   /** @param {number} capacity */

@@ -11258,7 +11258,7 @@ export class Simulation {
     const obeliskLayerId = this.runtimeViewLayerId
       ?? this.layerIds[this.player.layerIndex]
       ?? this.scenario.startLayerId;
-    const obelisks = (this.scenario.compiledLayer(obeliskLayerId)?.entities ?? [])
+    const obelisksForLayer = (layerId) => (this.scenario.compiledLayer(layerId)?.entities ?? [])
       .filter((entity) => entity.kind === "obelisk")
       .map((entity) => ({
         kind: "obelisk",
@@ -11275,6 +11275,7 @@ export class Simulation {
         solid: true,
         invulnerable: true,
       }));
+    const obelisks = obelisksForLayer(obeliskLayerId);
 
     const enemies = new Array(this.enemies.activeCount);
     for (let index = 0; index < enemies.length; index += 1) {
@@ -11741,6 +11742,7 @@ export class Simulation {
         const editorLayerIndex = this.layerIdToIndex.get(editorLayerId) ?? 0;
         return layerPresentationMap(editorLayerId, editorLayerIndex);
       })(),
+      editorObelisks: obelisksForLayer(this.scenario.activeLayer.id),
       player: {
         kind: "player",
         index: 0,

@@ -118,6 +118,15 @@ runs as one undoable command, preserves manual topology, reports endpoints with
 no safe staging cell, and is idempotent; its result remains normal editable
 authoring-map v7 data.
 
+The Layers panel exposes one editor-wide X/Z extent for all floors. Its
+authoring command preserves the shared `(0, 0)` registration, is capped at
+`128×128`, and recompiles all layers atomically. Expansion fills each layer's
+default surface and empty structure cells; confirmed shrinking removes content
+beyond the positive X/Z edges and remains one reversible history operation.
+The v7 serialization shape is unchanged because width and height were already
+persisted per layer; supported imported maps may retain older unequal extents
+until the author explicitly applies a shared size.
+
 ### Spell data
 
 - [`src/spells/fireball_definition.js`](../src/spells/fireball_definition.js) defines and validates the data contract for Fireball.

@@ -1,6 +1,9 @@
 // @ts-check
 
-import { snapDefinitionPlacement } from "../authoring/authoring_commands.js";
+import {
+  MAX_EDITABLE_MAP_DIMENSION,
+  snapDefinitionPlacement,
+} from "../authoring/authoring_commands.js";
 import {
   AUTHORING_CHANNELS,
   authoringCellAt,
@@ -263,6 +266,19 @@ export class AuthoringEditorController {
   setPlayerStartLayer(layerId) {
     const ok = this.#commit({ type: "setPlayerStartLayer", layerId });
     if (ok) this.#message(`Player now starts on ${layerId}`, true);
+    return ok;
+  }
+
+  /** @param {number} width @param {number} height */
+  resizeMap(width, height) {
+    this.cancel();
+    const ok = this.#commit({ type: "resizeMap", width, height });
+    if (ok) {
+      this.pointer.inside = false;
+      this.state.setHoveredTarget(null);
+      this.state.setSelectedTarget(null);
+      this.#message(`Resized every floor to ${width}×${height}`, true);
+    }
     return ok;
   }
 
@@ -747,6 +763,7 @@ export class AuthoringEditorController {
       playerStartLayerId: this.currentSnapshot.authoring.playerStartLayerId,
       runtimeLayerId: this.currentSnapshot.authoring.runtimeLayerId,
       layerCapacity: this.currentSnapshot.authoring.layerCapacity,
+      mapDimensionLimit: MAX_EDITABLE_MAP_DIMENSION,
       validation: {
         diagnostics: (this.currentSnapshot.authoring.validation?.diagnostics ?? [])
           .map((entry) => ({ ...entry })),

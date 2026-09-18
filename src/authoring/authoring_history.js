@@ -20,6 +20,7 @@ import {
   removeNavigationLink,
   removeNavigationNode,
   removeInstance,
+  resizeMap,
   setLayerBaseY,
   setPlayerStartLayer,
   updateInstanceProperties,
@@ -443,20 +444,30 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
     }
     const beforeLayer = beforeEntry.layer;
     const afterLayer = afterEntry.layer;
+    if (
+      beforeLayer.width !== afterLayer.width
+      || beforeLayer.height !== afterLayer.height
+    ) {
+      patches.push({
+        kind: "layer-record",
+        layerId,
+        before: cloneJson(beforeLayer),
+        after: cloneJson(afterLayer),
+        beforeIndex: beforeEntry.index,
+        afterIndex: afterEntry.index,
+      });
+      continue;
+    }
     const immutableBefore = {
       id: beforeLayer.id,
-      width: beforeLayer.width,
-      height: beforeLayer.height,
       markers: beforeLayer.markers,
     };
     const immutableAfter = {
       id: afterLayer.id,
-      width: afterLayer.width,
-      height: afterLayer.height,
       markers: afterLayer.markers,
     };
     if (!jsonEqual(immutableBefore, immutableAfter)) {
-      throw new RangeError("Authoring history cannot resize layers or replace layer markers in this slice");
+      throw new RangeError("Authoring history cannot replace layer markers in this slice");
     }
     for (const field of ["name", "baseY"]) {
       if (beforeLayer[field] !== afterLayer[field]) {
@@ -968,6 +979,10 @@ export function commandFromAuthoringAction(documentInput, action) {
       label = `Set Start Layer ${target.name}`;
       break;
     }
+    case "resizeMap":
+      after = resizeMap(before, Number(action.width), Number(action.height));
+      label = `Resize Map to ${after.layers[0].width}×${after.layers[0].height}`;
+      break;
     case "placeConnector": {
       const result = placeElevatorConnector(before, Number(action.x), Number(action.z), {
         lowerLayerId: String(action.lowerLayerId),

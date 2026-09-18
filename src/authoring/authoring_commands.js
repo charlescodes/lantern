@@ -8,7 +8,9 @@ import {
 } from "./authoring_map.js";
 import { VERTICAL_PHYSICS } from "../config.js";
 import { getPlaceableDefinition } from "./definition_catalog.js";
-import { normalizeQuarterTurns } from "./footprint.js";
+import { getOccupiedCells, normalizeQuarterTurns } from "./footprint.js";
+
+export const MAX_EDITABLE_MAP_DIMENSION = 128;
 
 /** @param {ReturnType<typeof cloneAuthoringMap>} document @param {string|undefined} layerId */
 function layerFor(document, layerId) {
@@ -128,6 +130,92 @@ export function setPlayerStartLayer(input, layerId) {
   const document = cloneAuthoringMap(input);
   layerFor(document, layerId);
   document.playerStart.layerId = layerId;
+  return cloneAuthoringMap(document);
+}
+
+/** @param {unknown} value @param {string} label */
+function editableMapDimension(value, label) {
+  const dimension = Number(value);
+  if (
+    !Number.isInteger(dimension)
+    || dimension < 1
+    || dimension > MAX_EDITABLE_MAP_DIMENSION
+  ) {
+    throw new RangeError(
+      `${label} must be an integer from 1 through ${MAX_EDITABLE_MAP_DIMENSION}`,
+    );
+  }
+  return dimension;
+}
+
+/**
+ * Resizes every authored layer against the shared origin. Existing cells in
+ * the retained rectangle keep their definitions; new cells use legend slot 0.
+ * Authored records outside a cropped extent are removed as one undoable edit.
+ * @param {unknown} input
+ * @param {number} widthInput
+ * @param {number} heightInput
+ */
+export function resizeMap(input, widthInput, heightInput) {
+  const width = editableMapDimension(widthInput, "Map X size");
+  const height = editableMapDimension(heightInput, "Map Z size");
+  const document = cloneAuthoringMap(input);
+  if (
+    document.playerStart.x < 0
+    || document.playerStart.z < 0
+    || document.playerStart.x >= width
+    || document.playerStart.z >= height
+  ) {
+    throw new RangeError(
+      `Move the player start inside the requested ${width}×${height} map before shrinking`,
+    );
+  }
+  const resizeCells = (layer, channel) => {
+    const cells = new Array(width * height).fill(0);
+    const copyWidth = Math.min(width, layer.width);
+    const copyHeight = Math.min(height, layer.height);
+    for (let cz = 0; cz < copyHeight; cz += 1) {
+      for (let cx = 0; cx < copyWidth; cx += 1) {
+        cells[cz * width + cx] = layer[channel].cells[cz * layer.width + cx];
+      }
+    }
+    return cells;
+  };
+  for (const layer of document.layers) {
+    layer.surface.cells = resizeCells(layer, "surface");
+    layer.structure.cells = resizeCells(layer, "structure");
+    layer.width = width;
+    layer.height = height;
+    layer.instances = layer.instances.filter((instance) => {
+      const definition = getPlaceableDefinition(instance.definitionId);
+      return Boolean(definition && getOccupiedCells(definition, instance).every((cell) => (
+        cell.cx >= 0 && cell.cz >= 0 && cell.cx < width && cell.cz < height
+      )));
+    });
+  }
+  const retainedConnectorIds = new Set();
+  document.connectors = document.connectors.filter((connector) => {
+    const retained = connector.x >= 0
+      && connector.z >= 0
+      && connector.x < width
+      && connector.z < height;
+    if (retained) retainedConnectorIds.add(connector.id);
+    return retained;
+  });
+  const retainedNodeIds = new Set();
+  document.navigationNodes = document.navigationNodes.filter((node) => {
+    const retained = node.cx >= 0
+      && node.cz >= 0
+      && node.cx < width
+      && node.cz < height;
+    if (retained) retainedNodeIds.add(node.id);
+    return retained;
+  });
+  document.navigationLinks = document.navigationLinks.filter((link) => (
+    [link.a, link.b].every((endpoint) => endpoint.kind === "node"
+      ? retainedNodeIds.has(endpoint.nodeId)
+      : retainedConnectorIds.has(endpoint.connectorId))
+  ));
   return cloneAuthoringMap(document);
 }
 

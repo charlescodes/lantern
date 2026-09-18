@@ -328,9 +328,19 @@ test("runtime obelisk presentation stays on the viewed floor when the editor cha
   const simulation = new Simulation({ scenario: new ArenaScenario(document), particleBurstCount: 0 });
 
   simulation.tick({ actions: [{ type: "activateLayer", layerId: upper.layerId }] });
-  assert.deepEqual(simulation.snapshot().obelisks.map((item) => item.layerId), [lowerLayerId]);
-  assert.equal(simulation.activateRuntimeLayer(upper.layerId), true);
-  assert.deepEqual(simulation.snapshot().obelisks.map((item) => item.layerId), [upper.layerId]);
+  let snapshot = simulation.snapshot();
+  assert.deepEqual(snapshot.obelisks.map((item) => item.layerId), [lowerLayerId]);
+  assert.deepEqual(snapshot.editorObelisks.map((item) => item.layerId), [upper.layerId]);
+
+  document.playerStart.layerId = upper.layerId;
+  const upperSimulation = new Simulation({
+    scenario: new ArenaScenario(document),
+    particleBurstCount: 0,
+  });
+  upperSimulation.tick({ actions: [{ type: "activateLayer", layerId: lowerLayerId }] });
+  snapshot = upperSimulation.snapshot();
+  assert.deepEqual(snapshot.obelisks.map((item) => item.layerId), [upper.layerId]);
+  assert.deepEqual(snapshot.editorObelisks.map((item) => item.layerId), [lowerLayerId]);
 });
 
 function homeRouteScenario() {

@@ -168,7 +168,11 @@ const runtime = new FixedStepRuntime({
       authoringInspector?.update(snapshot, editorView);
     }
     const presentationSnapshot = mode === "edit" && snapshot.editorMap
-      ? { ...snapshot, map: snapshot.editorMap }
+      ? {
+        ...snapshot,
+        map: snapshot.editorMap,
+        obelisks: snapshot.editorObelisks ?? [],
+      }
       : snapshot;
     const navigationTopologySnapshot = developerToolsOpen
       ? simulation.navigationTopologySnapshot()
@@ -188,6 +192,9 @@ const runtime = new FixedStepRuntime({
     const navigationTopology = createNavigationTopologyView({
       topology: topologyPresentationInput,
       editor: editorView,
+      layerId: mode === "edit"
+        ? editorView?.activeLayerId ?? presentationSnapshot.map.layerId
+        : presentationSnapshot.map.layerId ?? snapshot.runtimeLayerId,
       developerToolsOpen,
     });
     presentation.render(presentationSnapshot, alpha, {
@@ -552,6 +559,11 @@ layerPanel = new LayerPanel({
   },
   onSetStart: (layerId) => {
     const ok = authoringEditor.setPlayerStartLayer(layerId);
+    if (ok) layerPanel.clearExternalDiagnostics();
+    return ok;
+  },
+  onResize: (width, height) => {
+    const ok = authoringEditor.resizeMap(width, height);
     if (ok) layerPanel.clearExternalDiagnostics();
     return ok;
   },

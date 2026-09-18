@@ -10,6 +10,12 @@
 
 ## NAV-001: Navigation overlay stays on the previous floor
 
+**Resolved in development:** the renderer-neutral topology view now receives an
+explicit viewed layer. Play mode follows the runtime presentation floor while
+edit mode follows the active editor floor, so a stale editor selection can no
+longer hold the play overlay on the previous layer. Real-browser Canvas2D and
+Three.js verification remains part of acceptance.
+
 After reaching the second floor, the visible navigation graph does not update
 until the player enters/clicks the editor. Refreshing the editor then displays
 the graph for the new floor.
@@ -19,9 +25,9 @@ floor automatically. In edit mode, it follows the selected editor floor.
 Opening the editor should not be needed to refresh a play-mode overlay.
 
 Investigation lead: `createNavigationTopologyView()` currently chooses its layer
-from `editor.activeLayerId`, and `src/main.js` supplies the editor view in play
-mode too. Verify that relationship during a runtime floor handoff; this is a
-code observation, not a completed diagnosis or proof that AI state changes.
+from an explicit composition-root choice: editor identity in edit mode and the
+presented runtime map in play mode. This presentation repair does not establish
+or dismiss the separate AI-retargeting report below.
 
 ## NAV-002: Enemies appear to redirect upstairs when the player changes floors
 
@@ -75,3 +81,18 @@ This is a diagnostics and reproduction aid, not permission to add a general
 navmesh or let UI/debug state influence simulation. It should remain bounded,
 read-only, deterministic for a recorded state, separated from authored graph
 geometry, and concealed/visible according to an explicit debug policy.
+
+## NAV-004: Obelisks disappear when editing a floor other than the player floor
+
+**Resolved in development:** simulation snapshots now expose obelisks filtered
+independently for the runtime view and active editor floor. Edit presentation
+uses the editor-floor list alongside `editorMap`, while play presentation keeps
+the runtime list. This preserves per-body/runtime floor ownership and restores
+the selected floor's obelisks in both Canvas2D and Three.js.
+
+The reported reproduction places the player on an upper floor, enters edit
+mode, and activates the ground floor. The ground-floor obelisk remained
+pickable and its authoring extent could appear, but its normal visual was
+missing because the renderer received the upper runtime floor's prefiltered
+obelisk list with the ground editor map. Real-browser verification of this
+exact sequence remains part of acceptance.

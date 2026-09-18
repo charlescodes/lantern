@@ -17,6 +17,9 @@ test("multi-layer UI is one generated fixed panel with guarded semantic controls
   assert.match(panel, /New above/);
   assert.match(panel, /New below/);
   assert.match(panel, /Reference overlay/);
+  assert.match(panel, /Shared map extent/);
+  assert.match(panel, /Maximum \$\{dimensionLimit\}×\$\{dimensionLimit\}/);
+  assert.match(main, /onResize:[\s\S]*?authoringEditor\.resizeMap/);
   assert.match(panel, /Set start/);
   assert.match(panel, /window\.confirm/);
   assert.match(panel, /Validate map/);
@@ -32,4 +35,5 @@ test("play activation and probes keep editor, reference, start, and runtime IDs 
   assert.match(main, /currentRuntimeLayerId:/);
   assert.match(main, /activateAuthoringLayer\(layerId\)/);
   assert.match(main, /validateAuthoringMap\(\)/);
+  assert.match(main, /map: snapshot\.editorMap,[\s\S]*?obelisks: snapshot\.editorObelisks/);
 });

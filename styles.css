@@ -560,6 +560,50 @@ body[data-mode="edit"] .layer-panel {
   font-size: 9px;
 }
 
+.map-extent-control {
+  margin: 0 0 8px;
+  padding: 7px;
+  border: 1px solid rgba(67, 88, 91, 0.72);
+  background: rgba(18, 25, 25, 0.82);
+}
+
+.map-extent-control strong {
+  color: var(--amber);
+  font: 8px var(--mono);
+}
+
+.map-extent-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 5px;
+  align-items: end;
+  margin-top: 5px;
+}
+
+.map-extent-fields label {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.map-extent-fields input {
+  width: 100%;
+  min-width: 0;
+  height: 27px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: #101617;
+  color: var(--ink);
+  font: 9px var(--mono);
+}
+
+.map-extent-control p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+}
+
 .layer-panel-actions,
 .layer-row-actions {
   display: grid;

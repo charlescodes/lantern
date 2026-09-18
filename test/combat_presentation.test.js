@@ -291,6 +291,20 @@ test("Three preallocates bounded combat pools without recreating resident instan
   assert.equal(presentation.healthFillMesh.count, 2);
   assert.equal(presentation.deadBodyMesh.count, 0);
   assert.equal(presentation.obeliskGroup.visible, true);
+  assert.equal(presentation.obeliskInstances.length, 64);
+  assert.equal(presentation.obeliskInstances[0].visible, true);
+  assert.equal(presentation.obeliskInstances[1].visible, false);
+  snapshot.obelisks.push({
+    ...snapshot.obelisks[0],
+    id: snapshot.obelisks[0].id + 1,
+    spawnId: snapshot.obelisks[0].spawnId + 1,
+    authoringId: "instance-second-obelisk",
+    x: snapshot.obelisks[0].x + 2,
+    cell: { cx: snapshot.obelisks[0].cell.cx + 2, cz: snapshot.obelisks[0].cell.cz },
+  });
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  assert.equal(presentation.obeliskInstances[1].visible, true);
+  assert.equal(presentation.obeliskInstances[1].position.x, snapshot.obelisks[1].x);
   assert.equal(presentation.healthTrackMaterial.transparent, true);
   assert.equal(presentation.healthFillMaterial.transparent, true);
   assert.equal(presentation.healthTrackMaterial.depthTest, false);

@@ -24,6 +24,7 @@ export class LayerPanel {
    * onBaseY?:(layerId:string,baseY:number)=>boolean,
    * onDelete?:(layerId:string)=>boolean,
    * onSetStart?:(layerId:string)=>boolean,
+   * onResize?:(width:number,height:number)=>boolean,
    * onValidate?:()=>Record<string,any>,
    * }} [options]
    */
@@ -37,6 +38,7 @@ export class LayerPanel {
     this.onBaseY = options.onBaseY ?? (() => false);
     this.onDelete = options.onDelete ?? (() => false);
     this.onSetStart = options.onSetStart ?? (() => false);
+    this.onResize = options.onResize ?? (() => false);
     this.onValidate = options.onValidate ?? (() => ({
       diagnostics: [],
       errorCount: 0,
@@ -90,6 +92,7 @@ export class LayerPanel {
       reference: editor.referenceLayerId,
       start: editor.playerStartLayerId,
       capacity: editor.layerCapacity,
+      mapDimensionLimit: editor.mapDimensionLimit,
       layers: editor.layers,
       revision: editor.history?.currentRevisionId ?? null,
       diagnostics: validation.diagnostics ?? [],
@@ -142,6 +145,68 @@ export class LayerPanel {
       ? `Editing ${active.name} · ${active.baseY} m · ${editor.layers.length}/${editor.layerCapacity}`
       : "No active layer";
     this.body.append(summary);
+
+    const firstLayer = editor.layers[0] ?? null;
+    if (firstLayer) {
+      const extent = document.createElement("section");
+      extent.className = "map-extent-control";
+      const extentHeading = document.createElement("strong");
+      extentHeading.textContent = "Shared map extent";
+      const fields = document.createElement("div");
+      fields.className = "map-extent-fields";
+      const dimensionLimit = Number(editor.mapDimensionLimit ?? 128);
+      const makeInput = (label, value) => {
+        const wrapper = document.createElement("label");
+        wrapper.append(label);
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "1";
+        input.max = String(dimensionLimit);
+        input.step = "1";
+        input.value = String(value);
+        wrapper.append(input);
+        return { wrapper, input };
+      };
+      const xSize = makeInput("X cells", firstLayer.width);
+      const zSize = makeInput("Z cells", firstLayer.height);
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.textContent = "Apply size";
+      apply.addEventListener("click", () => {
+        const width = Number(xSize.input.value);
+        const height = Number(zSize.input.value);
+        if (
+          !Number.isInteger(width)
+          || !Number.isInteger(height)
+          || width < 1
+          || height < 1
+          || width > dimensionLimit
+          || height > dimensionLimit
+        ) {
+          xSize.input.value = String(firstLayer.width);
+          zSize.input.value = String(firstLayer.height);
+          return;
+        }
+        const shrinking = editor.layers.some((layer) => (
+          width < layer.width || height < layer.height
+        ));
+        if (
+          shrinking
+          && !window.confirm(
+            "Shrink every floor from the +X/+Z edges? Out-of-bounds cells and authored objects will be cropped; Undo can restore them.",
+          )
+        ) return;
+        if (!this.onResize(width, height)) {
+          xSize.input.value = String(firstLayer.width);
+          zSize.input.value = String(firstLayer.height);
+        }
+      });
+      fields.append(xSize.wrapper, zSize.wrapper, apply);
+      const help = document.createElement("p");
+      help.textContent = `All floors share origin (0, 0). Maximum ${dimensionLimit}×${dimensionLimit}.`;
+      extent.append(extentHeading, fields, help);
+      this.body.append(extent);
+    }
 
     const createControls = document.createElement("div");
     createControls.className = "layer-panel-actions";

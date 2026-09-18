@@ -28,12 +28,12 @@ function clonePort(port) {
  * only bounded authored graph data; presentation never queries runtime bodies
  * or decides a route.
  *
- * @param {{topology?:Record<string,any>|null,editor?:Record<string,any>|null,developerToolsOpen?:boolean}} input
+ * @param {{topology?:Record<string,any>|null,editor?:Record<string,any>|null,layerId?:string|null,developerToolsOpen?:boolean}} input
  */
 export function createNavigationTopologyView(input = {}) {
   const topology = input.topology;
   const editor = input.editor;
-  const layerId = editor?.activeLayerId ?? editor?.layers?.[0]?.id ?? null;
+  const layerId = input.layerId ?? editor?.activeLayerId ?? editor?.layers?.[0]?.id ?? null;
   if (!input.developerToolsOpen || !topology || !layerId) {
     return {
       visible: false,

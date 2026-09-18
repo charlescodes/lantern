@@ -53,6 +53,18 @@ test("topology view remains empty while developer diagnostics are closed", () =>
   });
 });
 
+test("an explicit viewed floor overrides stale editor state during play", () => {
+  const view = createNavigationTopologyView({
+    topology,
+    editor: { activeLayerId: "ground" },
+    layerId: "upper",
+    developerToolsOpen: true,
+  });
+  assert.equal(view.layerId, "upper");
+  assert.deepEqual(view.ports.map((port) => port.key), ["connector:e1:upper"]);
+  assert.equal(view.nodes.length, 0);
+});
+
 test("selected runtime patrol route and local goal are detached presentation data", () => {
   const selectedRoute = [topology.ports[0], topology.ports[1]];
   const view = createNavigationTopologyView({

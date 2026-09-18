@@ -13,10 +13,15 @@ import {
 import {
   createLayer,
   deleteLayer,
+  MAX_EDITABLE_MAP_DIMENSION,
   paintStructure,
   paintSurface,
+  placeElevatorConnector,
   placeInstance,
+  placeNavigationLink,
+  placeNavigationNode,
   renameLayer,
+  resizeMap,
   setLayerBaseY,
 } from "../src/authoring/authoring_commands.js";
 import {
@@ -186,6 +191,82 @@ test("stable layer IDs survive rename and base-height edits", () => {
   assert.equal(layer?.id, upperId);
   assert.equal(layer?.name, "Temple Gallery");
   assert.equal(layer?.baseY, 7.25);
+});
+
+test("one bounded map resize preserves shared-origin cells on every floor", () => {
+  const { document, upperId } = threeLayerDocument();
+  let edited = paintSurface(document, 8, 8, "surface.moss", "ground");
+  edited = paintStructure(edited, 8, 8, "structure.wall", upperId);
+  edited = placeInstance(edited, "object.torch", 8.5, 7.5, { layerId: upperId }).document;
+  const expanded = resizeMap(edited, 12, 11);
+
+  assert.equal(expanded.layers.every((layer) => layer.width === 12 && layer.height === 11), true);
+  const ground = expanded.layers.find((layer) => layer.id === "ground");
+  const upper = expanded.layers.find((layer) => layer.id === upperId);
+  assert.equal(ground.surface.legend[ground.surface.cells[8 * 12 + 8]], "surface.moss");
+  assert.equal(upper.structure.legend[upper.structure.cells[8 * 12 + 8]], "structure.wall");
+  assert.equal(upper.instances.some((instance) => instance.x === 8.5), true);
+  assert.equal(ground.surface.cells[10 * 12 + 11], 0, "new cells use the layer default");
+  assert.equal(ground.structure.cells[10 * 12 + 11], 0, "new structure cells are empty");
+  assert.throws(
+    () => resizeMap(edited, MAX_EDITABLE_MAP_DIMENSION + 1, 10),
+    /Map X size must be an integer from 1 through 128/,
+  );
+
+  const simulation = simulationFor(edited);
+  const command = commandFromAuthoringAction(edited, {
+    type: "resizeMap",
+    width: 12,
+    height: 11,
+  });
+  simulation.tick({ type: "applyAuthoringCommand", command, direction: "forward" });
+  assert.equal(simulation.lastError, null);
+  assert.equal(simulation.snapshot().map.width, 12);
+  assert.equal(simulation.snapshot().map.height, 11);
+  assert.equal(
+    simulation.authoringDocument().layers.every((layer) => layer.width === 12 && layer.height === 11),
+    true,
+  );
+  const replayed = Simulation.replay(simulation.exportCommandLog());
+  assert.deepEqual(replayed.authoringDocument(), simulation.authoringDocument());
+});
+
+test("shrinking crops out-of-bounds records and resize undo restores the exact map", () => {
+  const { document, upperId } = threeLayerDocument();
+  let edited = placeInstance(document, "object.torch", 8.5, 8.5, { layerId: upperId }).document;
+  const connector = placeElevatorConnector(edited, 8, 8, {
+    lowerLayerId: "ground",
+    upperLayerId: upperId,
+  });
+  edited = connector.document;
+  const node = placeNavigationNode(edited, 8, 7, { layerId: upperId });
+  edited = node.document;
+  edited = placeNavigationLink(
+    edited,
+    { kind: "node", nodeId: node.nodeId },
+    { kind: "connector-endpoint", connectorId: connector.connectorId, stop: "upper" },
+  ).document;
+  const cropped = resizeMap(edited, 7, 7);
+  assert.equal(cropped.layers.every((layer) => layer.width === 7 && layer.height === 7), true);
+  assert.equal(cropped.layers.flatMap((layer) => layer.instances).length, 0);
+  assert.equal(cropped.connectors.length, 0);
+  assert.equal(cropped.navigationNodes.length, 0);
+  assert.equal(cropped.navigationLinks.length, 0);
+
+  const harness = historyHarness(edited);
+  assert.equal(harness.execute({ type: "resizeMap", width: 7, height: 7 }).ok, true);
+  assert.deepEqual(harness.document(), cropped);
+  assert.equal(harness.history.undo().ok, true);
+  assert.deepEqual(harness.document(), edited);
+  assert.equal(harness.history.redo().ok, true);
+  assert.deepEqual(harness.document(), cropped);
+});
+
+test("shrinking refuses to crop the authoritative player start", () => {
+  const document = sourceDocument();
+  document.playerStart.x = 8.5;
+  document.playerStart.z = 8.5;
+  assert.throws(() => resizeMap(document, 8, 8), /Move the player start inside/);
 });
 
 test("at least ten floors are supported and the configured sixteen-layer cap is enforced", () => {
