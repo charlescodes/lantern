@@ -1,6 +1,6 @@
 # M1B.1–M1B.4 Generic vertical bodies, elevator, holes, jumping, plates, and breakaways
 
-> **Status:** current 0.9.3 implementation contract · **Authoring format:** `lantern-authoring-map` v6 · **Runtime recording schema:** v18
+> **Status:** current 0.9.3 implementation contract · **Repository boundary:** `lantern-authoring-map` v7 / recording schema v23 · **Vertical/projectile compatibility boundary:** schema v18
 
 M1B.1 keeps Lantern's authoritative X/Z collision model and adds one bounded
 world-Y degree of freedom. It is not a general 3D rigid-body system. Floors and
@@ -303,19 +303,21 @@ selection, and the inspector remain generic. Plates cannot be placed on holes or
 elevator apertures. `__lantern.pressurePlates()` and
 `__lantern.pressurePlateEvents()` return detached diagnostics.
 
-The current replay/snapshot schema is v18. Schema v18 adds height-aware
+The current repository replay/snapshot schema is v23. The last profile change
+owned by this vertical contract is schema v18, which adds height-aware
 projectile contacts; schema v13 adds elevator projectile collision; schema v12
 retains its committed-jump edge but no elevator projectile collision; v2–v11
 commands have no jump edge
-and retain their frozen behavior. Authoring-map v5 is unchanged because pressure
-plates use the existing sparse-instance format.
+and retain their frozen behavior. Pressure plates continue to use the sparse
+instance shape introduced by authoring-map v5; later v6/v7 migrations do not
+change their representation.
 
 ## Deferred
 
 Levitation, clutter
 stacking/support, tipping, crushing, explosion-launched Y, general 3D interval or
-mesh collision, doors, cross-layer enemy routing, deliberate AI elevator use,
-cross-layer sight/sound/navigation/projectiles, simulation streaming/dormancy,
+mesh collision, doors, cross-layer sight/sound/projectiles, simulation streaming/dormancy,
 inactive-floor live-state persistence, multiplayer, and pathological enclosed
 ejection remain deferred after M1B.4. Breakaway floors are implemented by the
-preceding M1B.4 section; cross-layer enemy routing is the planned M1C concern.
+preceding M1B.4 section. Cross-layer enemy routing and autonomous-elevator use
+were delivered later by M1C and are governed by its completed implementation plan.

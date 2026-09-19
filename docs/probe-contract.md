@@ -60,6 +60,6 @@ authoritative state needed to reproduce a simulation failure.
 ### Current gaps deliberately left for later
 
 There is no generic per-system event bus, no unbounded trace log, and no promise
-that every internal helper becomes public. M1C should add topology-specific
-diagnostics only when topology exists. Cross-floor AI, general triggers, and
+that every internal helper becomes public. M1C adds topology-specific
+diagnostics only when topology exists. Broader trigger/mechanism diagnostics and
 network inspection remain future work, not reasons to widen the probe now.

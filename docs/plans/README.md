@@ -6,11 +6,16 @@ ordering. Historical milestone documents remain under `docs/milestones/`.
 
 ## Active
 
-- [M1C authored navigation topology](./m1c-authored-navigation-topology.md) —
-  five bounded slices from persisted topology through deterministic patrol and
-  observed, non-clairvoyant elevator pursuit.
+No implementation plan is currently active. The [roadmap](../roadmap.md) remains
+the authority for choosing the next train.
 
 ## Implemented
 
+- [M1C authored navigation topology](./m1c-authored-navigation-topology.md) —
+  delivered persisted topology, editor tooling, deterministic patrol,
+  autonomous elevator traversal, and observed cross-floor pursuit.
+
 - [Editable, floor-aware obelisks and reliable enemy homes](./editable-floor-aware-obelisks.md)
-  — delivered across schema v19, schema v20, and authoring-map v7.
+  — delivered floor-aware homes and independent authored encounters across
+  schemas v19-v21 and authoring-map v7; later encounter/destruction profiles
+  are summarized by the [platform contract](../platform.md).

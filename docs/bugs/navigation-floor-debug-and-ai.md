@@ -1,6 +1,8 @@
 # Navigation floor transitions: stale overlay and suspected AI retargeting
 
-- **Status:** Open playtest reports; not independently reproduced.
+- **Status:** Mixed ledger. The stale topology overlay and wrong-floor obelisk
+  presentation are resolved; remaining playtest reports are open and not yet
+  independently reproduced.
 - **Priority:** Near-term investigation before substantial map authoring.
 - **Reported:** 2026-09-15, during the transition to saved JSON arena loading.
 - **Route:** `?arena=navigation&renderer=3d`, developer tools/navigation view open.

@@ -56,6 +56,10 @@ hidden runtime graph.
 - **M1E — mechanisms:** extend proven, content-driven mechanisms only after the
   temple exposes a real need. Pressure plates are a foundation; triggers,
   levers, chains, doors, and richer trap behavior are not assumed together.
+  A door or moving blocker first needs the bounded geometry and camera questions
+  in the [doors and dynamic occlusion candidate](./soft-specs/doors-and-dynamic-occlusion.md)
+  resolved. The archived provisional “Candidate M1C” label for doors is
+  historical and does not redefine the completed navigation M1C.
 - **M1F — procedural generation:** only after hand-authored rooms and the temple
   establish useful constraints. A later seeded generator should emit ordinary,
   inspectable authoring documents rather than replace authoring.

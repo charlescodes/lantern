@@ -1,6 +1,8 @@
 # Playtest Defect Backlog — 2026-09-11
 
-- **Status:** Open, unprioritized, and not yet independently reproduced.
+- **Status:** Mixed ledger. The lowered-elevator Fireball report is resolved in
+  schema v18; remaining reports are open, unprioritized, and not yet
+  independently reproduced.
 - **Context:** Manual play in the multi-floor navigation arena, including the
   third/top floor. Exact renderer, backend, seed, enemy IDs, and elevator phase
   were not captured.

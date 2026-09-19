@@ -1,9 +1,11 @@
 # Lantern: Lay of the Land in Pseudocode
 
-> **Descriptive snapshot:** Lantern 0.9.3 post-M1B.4 development runtime,
-> snapshot/recording schema v15 and authoring-map v6.
+> **Orientation guide:** originally written against the post-M1B.4 schema-v15 /
+> authoring-map-v6 runtime. The current repository boundary is schema v23 and
+> authoring-map v7. The authority flow remains useful, but live source and the
+> [platform contract](./platform.md) own exact profiles and subsystem inventory.
 >
-> This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the current program, not a proposed rewrite. Names are simplified where that makes ownership clearer.
+> This is the control-flow companion to the [architecture review and owner's guide](./architecture-guide.md). It describes the governing program shape, not a proposed rewrite or a complete current inventory. Names are simplified where that makes ownership clearer.
 
 ## The one-screen model
 
@@ -63,7 +65,7 @@ TrueSight never gives knowledge to AI
 
 ```text
 FUNCTION boot()
-    simulation      := new Simulation(default scenario, schema-v17 profiles)
+    simulation      := new Simulation(default scenario, current profile bundle)
     initialSnapshot := simulation.snapshot()
 
     options   := parse renderer/backend/visual flags from URL
@@ -459,7 +461,7 @@ FUNCTION exportCommandLog()
 END
 
 FUNCTION Simulation.replay(recording)
-    validate schema v2..v11
+    validate a supported schema through the current boundary
     choose its frozen behavior profile:
         v2-v4 legacy effects
         v5    versioned Fireball / pre-combat
@@ -469,6 +471,10 @@ FUNCTION Simulation.replay(recording)
         v9    investigative wizard, no dead bodies, no movement sounds
         v10   investigative wizard + dead bodies, no movement sounds
         v11   proximity walking + queued footsteps/Fireball sounds
+        v12-v14 committed jump, elevator impacts, breakaway floors
+        v15-v17 authored topology, enemy archetypes, witnessed hole pursuit
+        v18     height-aware projectile contacts
+        v19-v23 floor-aware homes and versioned obelisk encounter/destruction
 
     replayed := new Simulation(recorded initial state)
     FOR command IN recording.commands

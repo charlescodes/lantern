@@ -1,8 +1,16 @@
-# Lantern 0.9.3 / M1B Vertical Traversal Closure
+# Lantern 0.9.3
 
 ![Gameplay Demo](assets/demo.gif)
 
-A browser-first fixed-step combat and graybox-authoring sandbox. Lantern combines replay-safe Fireball combat, investigative wizards, bounded dynamic clutter, a generated multi-floor editor, and deliberately limited 2.5D vertical traversal: authored holes, autonomous two-stop elevators, falling, committed jumps, and grounded pressure plates. The live enemy pool is sized for 64 while the authored encounter caps at four alive. Canvas2D remains the regression presentation; an opt-in Three.js view consumes the same read-only snapshots, map state, AI diagnostics, body state, lights, and TrueSight frame. Press `;` to open the developer toolbox.
+A browser-first fixed-step combat and graybox-authoring sandbox. The `0.9.3`
+application release closes M1B vertical traversal; the current development
+runtime extends it through recording schema v23 and authoring-map v7 with
+authored navigation, cross-floor enemy routes, independent obelisks, and
+destructible encounters. Lantern combines replay-safe Fireball combat,
+investigative wizards, bounded dynamic clutter, a generated multi-floor editor,
+and deliberately limited 2.5D vertical traversal. Canvas2D remains the
+regression presentation; an opt-in Three.js view consumes the same read-only
+simulation state. Press `;` to open the developer toolbox.
 
 ## Run
 
@@ -52,6 +60,7 @@ npm run test:soak:dead-bodies
 npm run test:soak:ai
 npm run test:soak:perception
 npm run test:soak:sound
+npm run test:soak:navigation
 ```
 
 The browser-only 50-mob production-adapter fixture is available at
@@ -61,7 +70,19 @@ mutation probe.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md), then the current [product vision](./docs/product-vision.md), [roadmap](./docs/roadmap.md), [probe contract](./docs/probe-contract.md), and [verification guide](./docs/verification.md). They distinguish current direction and operating practice from mutable [soft specifications](./docs/soft-specs/README.md), frozen milestone contracts, and archived context. Release [`0.9.3`](./docs/milestones/0.9.3-m1b-vertical-traversal-closure.md) formally closes M1B. The current authoring kit emits authoring-map v7; [M1C.1](./docs/plans/m1c-authored-navigation-topology.md) adds authored navigation data, bounded compilation and pure queries under recording schema v15 without changing enemy movement. [Editable, floor-aware obelisks](./docs/plans/editable-floor-aware-obelisks.md) promote the former singleton marker to independent authored instances and give each spawned enemy a stable home. [M1B.1–M1B.4](./docs/notes/generic-vertical-bodies-and-elevator.md) remains the authority for continuous gameplay Y, per-body layers, autonomous elevators, holes, jumps, pressure plates, Fireball/elevator impacts, live connector authoring, and breakaway floors. App, recording-schema, authoring-map, and historical-profile versions remain independent boundaries.
+Start with the [documentation index](./docs/README.md), then the current
+[product vision](./docs/product-vision.md), [roadmap](./docs/roadmap.md),
+[platform contract](./docs/platform.md), [probe contract](./docs/probe-contract.md),
+and [verification guide](./docs/verification.md). Release
+[`0.9.3`](./docs/milestones/0.9.3-m1b-vertical-traversal-closure.md) formally
+closes M1B, while the completed
+[M1C topology train](./docs/plans/m1c-authored-navigation-topology.md) documents
+authored topology, patrol, autonomous elevator traversal, and observed
+cross-floor pursuit across schemas v15-v17. The current authoring kit emits
+authoring-map v7, and [editable, floor-aware obelisks](./docs/plans/editable-floor-aware-obelisks.md)
+cover independent encounter sources and stable enemy homes. App,
+recording-schema, authoring-map, and historical-profile versions remain
+independent boundaries.
 
 ## Playtest controls and developer toolbox
 

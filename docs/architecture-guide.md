@@ -1,6 +1,6 @@
 # Lantern Architecture Review and Owner's Guide
 
-> **Review snapshot:** post-M1B.4 working tree at `cb98dfa` (application `0.9.3`, recording schema v14, authoring-map v5), reviewed 2026-09-01. Line counts and module boundaries are descriptive, not release contracts.
+> **Review snapshot:** post-M1B.4 working tree at `cb98dfa` (application `0.9.3`, recording schema v14, authoring-map v5), reviewed 2026-09-01. The current repository boundary is schema v23 and authoring-map v7. Architectural findings remain useful, but line counts, inventories, and sequencing claims are point-in-time evidence rather than current contracts.
 >
 > **Purpose:** explain the code as it exists, distinguish strong foundations from accumulating debt, and provide a practical route for reviewing and later refactoring it. This is a living engineering guide, not a frozen release contract. For a control-flow-first view, use the companion [lay of the land in pseudocode](./lay-of-the-land-pseudocode.md).
 
