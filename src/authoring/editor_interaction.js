@@ -10,11 +10,12 @@ import {
   pointHitsInstanceExtent,
 } from "./footprint.js";
 
-export const EDITOR_TOOLS = Object.freeze(["select", "paint", "erase", "eyedropper", "link"]);
-export const AUTHORING_CHANNELS = Object.freeze(["surface", "structure", "instance", "connector", "navigation"]);
+export const EDITOR_TOOLS = Object.freeze(["select", "paint", "erase", "eyedropper", "link", "wire"]);
+export const AUTHORING_CHANNELS = Object.freeze(["surface", "structure", "instance", "connector", "navigation", "mechanisms"]);
 
 /** @param {Record<string, any>} definition */
 export function authoringChannelForDefinition(definition) {
+  if (definition?.mechanism) return "mechanisms";
   if (definition?.placementTarget === "surface") return "surface";
   if (definition?.placementTarget === "structure") return "structure";
   if (definition?.placementTarget === "instance") return "instance";

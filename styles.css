@@ -1890,3 +1890,10 @@ body[data-developer-tools="closed"] .arena-shell {
   border-right: 0;
   border-bottom: 0;
 }
+/* Mechanism graph controls remain in the existing developer palette. */
+.mechanism-panel { display: grid; gap: 0.4rem; padding-block: 0.6rem; }
+.mechanism-panel[hidden] { display: none; }
+.mechanism-node-list { display: grid; gap: 0.25rem; max-height: 12rem; overflow: auto; }
+.mechanism-panel button { overflow-wrap: anywhere; text-align: left; }
+.mechanism-panel textarea { width: 100%; min-height: 5rem; }
+.authoring-properties-form label { display: flex; justify-content: space-between; gap: 0.5rem; }

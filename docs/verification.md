@@ -18,6 +18,11 @@ inspection and command categories.
 
 ## M1B manual route
 
+For the M1E controls-and-gates slice, follow the dedicated
+[mechanism acceptance route](./notes/authored-mechanisms.md#acceptance-and-next-pass)
+at `?arena=mechanisms`, then repeat with `&renderer=3d`. Its manual browser/GPU
+acceptance is still pending. The M1B regression route below remains applicable.
+
 Start the app and open `?arena=holes` (add `&renderer=3d` for the Three.js
 route). From the deterministic bottom spawn:
 

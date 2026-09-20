@@ -6,8 +6,10 @@ ordering. Historical milestone documents remain under `docs/milestones/`.
 
 ## Active
 
-No implementation plan is currently active. The [roadmap](../roadmap.md) remains
-the authority for choosing the next train.
+- [M1E authored mechanisms](./m1e-mechanisms.md) — two implementation passes.
+  Pass A (M1E.1 + M1E.2) is implemented with manual browser acceptance pending;
+  Pass B (M1E.3 + M1E.4) remains planned. See the
+  [runtime contract](../notes/authored-mechanisms.md) for the delivered boundary.
 
 ## Implemented
 

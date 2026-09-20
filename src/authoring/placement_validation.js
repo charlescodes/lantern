@@ -1,6 +1,7 @@
 // @ts-check
 
 import { PLAYER } from "../config.js";
+import { wallFace } from "./mechanism_catalog.js";
 import { circleCellContact, firstSolidContact } from "../sim/collision.js";
 import {
   getPlaceableDefinition,
@@ -208,6 +209,14 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
         transform,
         occupiedCells,
       );
+    }
+  } else if (definition.traits.wallMounted) {
+    const face = wallFace(transform);
+    const cx = Math.floor(face.x + face.dx * 0.5), cz = Math.floor(face.z + face.dz * 0.5);
+    const anchor = occupiedCells[0];
+    if (layer.structure.legend[layer.structure.cells[anchor.cz * layer.width + anchor.cx]] !== "structure.wall"
+      || cx < 0 || cz < 0 || cx >= layer.width || cz >= layer.height || blockingCells.has(`${cx}:${cz}`)) {
+      return invalid("wall_mount", "Wall device needs a wall anchor and an open outward cell", layerId, definitionId, transform, occupiedCells);
     }
   } else if (occupiedCells.some((cell) => structureCells.has(footprintCellKey(cell)))) {
     return invalid(

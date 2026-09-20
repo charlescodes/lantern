@@ -1,4 +1,5 @@
 // @ts-check
+import { mechanismVisual, mechanismWires, visibleMechanismInstances } from "./mechanism_view.js";
 
 import * as THREE from "three/webgpu";
 import { attribute, instancedDynamicBufferAttribute, pass } from "three/tsl";
@@ -222,6 +223,7 @@ export class ThreePresentation {
     this.torchLampMesh = null;
     this.tableMesh = null;
     this.pressurePlateMesh = null;
+    this.mechanismMesh = null;
     this.authoringOverlayMesh = null;
     this.elevatorPlatformMesh = null;
     this.elevatorShaftMesh = null;
@@ -894,7 +896,7 @@ export class ThreePresentation {
     this.#syncSightFrame(view.sightFrame ?? null);
     if (this.flags.values.damageNumbers) this.damageNumbers.ingest(snapshot);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
-    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
+    this.#updateAuthoringInstances(visibleMechanismInstances(snapshot), snapshot.pressurePlates ?? [], snapshot.mechanisms?.devices ?? []);
     this.#updateWallOcclusion(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
     this.#updateKineticFragments(snapshot, alpha);
@@ -1107,7 +1109,7 @@ export class ThreePresentation {
     this.#setActiveBaseY(snapshot.map.baseY);
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
-    this.#updateAuthoringInstances(snapshot.authoring?.instances ?? [], snapshot.pressurePlates ?? []);
+    this.#updateAuthoringInstances(visibleMechanismInstances(snapshot), snapshot.pressurePlates ?? [], snapshot.mechanisms?.devices ?? []);
     this.#updateWallOcclusion(snapshot.player, 0);
     this.#updateKineticFragments(snapshot, 0);
     this.#updateObelisk(snapshot.obelisks ?? []);
@@ -1587,6 +1589,7 @@ export class ThreePresentation {
     if (this.pillarMesh) this.worldRoot.remove(this.pillarMesh);
     if (this.tableMesh) this.worldRoot.remove(this.tableMesh);
     if (this.pressurePlateMesh) this.worldRoot.remove(this.pressurePlateMesh);
+    if (this.mechanismMesh) this.worldRoot.remove(this.mechanismMesh);
     if (this.authoringOverlayMesh) this.worldRoot.remove(this.authoringOverlayMesh);
     this.pillarMesh = createDynamicInstancedPool(
       this.pillarGeometry,
@@ -1613,10 +1616,13 @@ export class ThreePresentation {
     );
     this.pressurePlateMesh.castShadow = true;
     this.pressurePlateMesh.receiveShadow = true;
+    this.mechanismMesh = createDynamicInstancedPool(this.authoringOverlayGeometry, this.pressurePlateMaterial, 256, "mechanism-devices", { instanceColors: true });
+    this.mechanismMesh.castShadow = true; this.mechanismMesh.receiveShadow = true;
+    this.worldRoot.add(this.mechanismMesh);
     this.authoringOverlayMesh = createDynamicInstancedPool(
       this.authoringOverlayGeometry,
       this.authoringOverlayMaterial,
-      capacity * 3 + 1_024,
+      capacity * 3 + 1_024 + 4096,
       "authoring-footprint-overlays",
       { instanceColors: true },
     );
@@ -1632,11 +1638,12 @@ export class ThreePresentation {
   }
 
   /** @param {Array<Record<string, any>>} instances */
-  #updateAuthoringInstances(instances, pressurePlates = []) {
+  #updateAuthoringInstances(instances, pressurePlates = [], devices = []) {
     let nextHash = hashAuthoringInstances(instances);
     for (const plate of pressurePlates) {
       nextHash = Math.imul(nextHash ^ (plate.pressed ? 1 : 0), 16_777_619);
     }
+    for (const device of devices) nextHash = Math.imul(nextHash ^ (device.open ? 1 : 0) ^ (device.on ? 2 : 0) ^ (device.blocked ? 4 : 0), 16_777_619);
     if (nextHash === this.authoringInstanceHash) return;
     this.authoringInstanceHash = nextHash;
     if (!this.pillarMesh || !this.tableMesh || !this.pressurePlateMesh) {
@@ -1645,10 +1652,18 @@ export class ThreePresentation {
     let pillarCount = 0;
     let tableCount = 0;
     let plateCount = 0;
+    let mechanismCount = 0;
     for (const instance of instances) {
       const definition = getPlaceableDefinition(instance.definitionId);
       if (isDynamicBodyDefinition(definition)) continue;
-      if (definition?.traits.shape === "pillar") {
+      const visual = mechanismVisual(instance, devices.find((d) => d.id === instance.id));
+      if (visual) {
+        this._position.set(visual.x, visual.y, visual.z);
+        this._scale.set(visual.width / 0.94, visual.height / 0.025, visual.depth / 0.94);
+        this._matrix.compose(this._position, this._quaternion, this._scale);
+        this.mechanismMesh.setMatrixAt(mechanismCount, this._matrix);
+        this._color.setHex(visual.color); this.mechanismMesh.setColorAt(mechanismCount++, this._color);
+      } else if (definition?.traits.shape === "pillar") {
         this._position.set(instance.x, 0.95, instance.z);
         this._scale.set(1, 1, 1);
         this._matrix.compose(this._position, this._quaternion, this._scale);
@@ -1668,6 +1683,7 @@ export class ThreePresentation {
     publishInstancedPool(this.pillarMesh, pillarCount);
     publishInstancedPool(this.tableMesh, tableCount);
     publishInstancedPool(this.pressurePlateMesh, plateCount, { instanceColors: true });
+    publishInstancedPool(this.mechanismMesh, mechanismCount, { instanceColors: true });
   }
 
   /** @param {Record<string, any>} player @param {number} alpha */
@@ -2433,6 +2449,19 @@ export class ThreePresentation {
         const port = arc.from.layerId === topology.layerId ? arc.from : arc.to;
         addPoint(port, 0xd8b5ff, 0.08);
       }
+    }
+    if (editor) {
+      const wires = mechanismWires(snapshot.authoring, editor.selectedMechanismId);
+      for (const segment of wires.segments) {
+        if (count >= mesh.userData.capacity) break;
+        const dx = segment.to.x - segment.from.x, dz = segment.to.z - segment.from.z;
+        this._matrix.makeRotationY(-Math.atan2(dz, dx));
+        this._scale.set(Math.hypot(dx, dz) / 0.94, 1, 0.045 / 0.94);
+        this._matrix.scale(this._scale);
+        this._matrix.setPosition((segment.from.x + segment.to.x) / 2, 0.12, (segment.from.z + segment.to.z) / 2);
+        mesh.setMatrixAt(count, this._matrix); this._color.setHex(segment.color); mesh.setColorAt(count++, this._color);
+      }
+      for (const badge of wires.badges) addCells([{ cx: Math.floor(badge.x), cz: Math.floor(badge.z) }], 0xd8b5ff, 0.15);
     }
     // A paint stroke grows this pool one cell at a time. Do not expose a new
     // draw slot until the frame that uploads its matrix/color has submitted;

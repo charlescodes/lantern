@@ -553,7 +553,7 @@ test("reset preserves the applied revision and makes it the schema-v11 recording
   assert.equal(simulation.projectiles.activeCount, 0);
   assert.deepEqual(simulation.spells.diagnostics()[0].revisions, [2]);
   const recording = simulation.exportCommandLog();
-  assert.equal(recording.schemaVersion, 23);
+  assert.equal(recording.schemaVersion, 24);
   assert.equal(recording.configuration.spells[0].currentRevision, 2);
   assert.equal(recording.configuration.spells[0].revisionCounter, 2);
   assert.equal(recording.configuration.spells[0].definition.projectile.speed, 14);
@@ -582,8 +582,8 @@ test("schema-v11 recording replays definitions, revisions, effects, and explicit
   simulation.tick({ cast: { x: 8, z: 3.5, variationSeed: 20 } });
   for (let tick = 0; tick < 80; tick += 1) simulation.tick(null);
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 23);
-  assert.equal(recording.schemaVersion, 23);
+  assert.equal(SCHEMA_VERSION, 24);
+  assert.equal(recording.schemaVersion, 24);
   assert.equal(recording.commands[0].command.cast.variationSeed, 10);
   assert.equal(recording.commands[2].command.cast.variationSeed, 20);
   const replayed = Simulation.replay(recording);
@@ -614,6 +614,7 @@ test("a genuine schema-v5 recording retains exact versioned-spell behavior witho
     movementSoundProfile: MOVEMENT_SOUND_PROFILE_NONE,
     obeliskEncounterProfile: OBELISK_ENCOUNTER_PROFILE_NONE,
     obeliskDestructionProfile: OBELISK_DESTRUCTION_PROFILE_NONE,
+    mechanismProfile: "none",
     projectileHeightCollisionProfile: PROJECTILE_HEIGHT_COLLISION_PROFILE_NONE,
   });
   simulation.tick({ cast: { x: 8, z: 3.5, variationSeed: 0x501 } });

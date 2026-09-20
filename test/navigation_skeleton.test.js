@@ -14,6 +14,7 @@ import {
   commandFromAuthoringAction,
 } from "../src/authoring/authoring_history.js";
 import { generateConnectorNavigationSkeleton } from "../src/authoring/navigation_skeleton.js";
+import { loadAuthoringMap } from "../src/authoring/authoring_map.js";
 import { GridMap } from "../src/sim/grid_map.js";
 import { ArenaScenario } from "../src/sim/scenario.js";
 
@@ -87,7 +88,7 @@ test("connector skeleton preserves manual nodes and joins them with sparse links
   let document = chainedConnectorDocument();
   const manual = placeNavigationNode(document, 2, 2, { layerId: "ground", patrol: true });
   document = manual.document;
-  const generated = generateConnectorNavigationSkeleton(document);
+  const generated = generateConnectorNavigationSkeleton(loadAuthoringMap(document));
   const retained = generated.document.navigationNodes.find((node) => node.id === manual.nodeId);
   assert.deepEqual(retained, {
     id: manual.nodeId, layerId: "ground", cx: 2, cz: 2, patrol: true,
@@ -158,7 +159,7 @@ test("the authored navigation-testing-v2 map carries the generated connector ske
     new URL("../maps/navigation-testing-v2.json", import.meta.url),
     "utf8",
   ));
-  const generated = generateConnectorNavigationSkeleton(document);
+  const generated = generateConnectorNavigationSkeleton(loadAuthoringMap(document));
   assert.deepEqual(generated.addedNodeIds, []);
   assert.deepEqual(generated.addedLinkIds, []);
   assert.deepEqual(generated.unresolvedEndpoints, []);

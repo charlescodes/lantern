@@ -114,6 +114,26 @@ function fakeCanvas2d() {
   return { canvas, context, fillRects, filledPaths };
 }
 
+test("Three renders visible-floor mechanism devices and updates gate geometry without pool replacement", () => {
+  const snapshot = new Simulation({ particleBurstCount: 0 }).snapshot();
+  const gate = { id: "render-gate", definitionId: "mechanism.gate", layerId: snapshot.map.layerId,
+    x: 4.5, z: 4.5, rotation: 0, open: false, on: false, blocked: false };
+  snapshot.mechanisms.devices = [gate, { ...gate, id: "remote-gate", layerId: "remote-floor" }];
+  const { presentation, sightFrame } = threePresentation(snapshot);
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  const mesh = presentation.mechanismMesh;
+  assert.equal(mesh.count, 1);
+  assert.equal(mesh.instanceMatrix.count, 256);
+  const matrix = new THREE.Matrix4();
+  mesh.getMatrixAt(0, matrix);
+  assert.ok(Math.abs(matrix.elements[13] - 0.95) < 1e-6);
+  gate.open = true;
+  presentation.render(snapshot, 0, view(snapshot, sightFrame));
+  assert.equal(presentation.mechanismMesh, mesh);
+  mesh.getMatrixAt(0, matrix);
+  assert.ok(Math.abs(matrix.elements[13] - 0.035) < 1e-6);
+});
+
 function threePresentation(snapshot) {
   const options = parsePresentationOptions("?renderer=3d&aa=1&lights=8");
   const flags = new PresentationFlags(options);

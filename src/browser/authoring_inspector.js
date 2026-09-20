@@ -1,4 +1,5 @@
 // @ts-check
+import { mechanismPropertyForm } from "./mechanism_panel.js";
 
 import { getPlaceableDefinition } from "../authoring/definition_catalog.js";
 import { getFootprintBounds, getOccupiedCells } from "../authoring/footprint.js";
@@ -271,6 +272,8 @@ export class AuthoringInspector {
     });
     actions.append(rotateButton, deleteButton);
     this.content.append(actions);
+    if (definition.mechanism) this.content.append(mechanismPropertyForm(definition.id, instance.properties,
+      (values) => this.onUpdateProperties(instance.id, values)));
 
     const properties = document.createElement("details");
     const summary = document.createElement("summary");

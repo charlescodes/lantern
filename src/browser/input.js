@@ -35,6 +35,7 @@ export class InputController {
     this.mouseInside = false;
     this.rightHeld = false;
     this.pendingCast = null;
+    this.pendingInteract = false;
     this.pendingJump = false;
     this.pendingJumpTarget = null;
     this.editorButton = -1;
@@ -48,6 +49,8 @@ export class InputController {
     this.refreshPointerWorld();
     const cast = this.pendingCast;
     const jump = this.pendingJump;
+    const interact = this.pendingInteract;
+    this.pendingInteract = false;
     const jumpTarget = this.pendingJumpTarget;
     this.pendingCast = null;
     this.pendingJump = false;
@@ -56,12 +59,14 @@ export class InputController {
       move: this.mode === "play" && this.rightHeld ? { ...this.mouseWorld } : null,
       cast: this.mode === "play" ? cast : null,
       ...(this.mode === "play" && jump ? { jump: true } : {}),
+      ...(this.mode === "play" && interact ? { interact: true } : {}),
       ...(this.mode === "play" && jumpTarget ? { jumpTarget } : {}),
     };
   }
 
   /** @param {"play"|"edit"} mode */
   setMode(mode) {
+    this.pendingInteract = false;
     this.mode = mode;
     this.rightHeld = false;
     this.pendingJump = false;
@@ -112,6 +117,7 @@ export class InputController {
     this.canvas.addEventListener("wheel", (event) => this.#onWheel(event), { passive: false });
     window.addEventListener("mouseup", (event) => this.#onMouseUp(event));
     window.addEventListener("blur", () => {
+      this.pendingInteract = false;
       this.rightHeld = false;
       this.pendingJump = false;
       this.pendingJumpTarget = null;
@@ -279,6 +285,11 @@ export class InputController {
       }
     }
     if (isInstance("HTMLButtonElement", target)) return;
+    if (key === "e" && !event.shiftKey && !commandModifier && !event.altKey) {
+      event.preventDefault();
+      if (this.mode === "play" && !event.repeat) this.pendingInteract = true;
+      return;
+    }
     if (event.code === "Space") {
       event.preventDefault();
       if (this.mode === "play" && !event.repeat) {
@@ -306,7 +317,7 @@ export class InputController {
     } else if (key === "r") {
       event.preventDefault();
       this.actions.reset(event.shiftKey);
-    } else if (key === "e") {
+    } else if (key === "e" && event.shiftKey && !event.repeat) {
       event.preventDefault();
       this.actions.toggleMode();
     } else if (key === "f") {

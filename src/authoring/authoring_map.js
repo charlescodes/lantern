@@ -14,9 +14,10 @@ import {
   rockDefinitionId,
 } from "./definition_catalog.js";
 import { validateInstancePlacement } from "./placement_validation.js";
+import { compileMechanisms, emptyMechanisms } from "./mechanism_catalog.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 7;
+export const AUTHORING_MAP_VERSION = 8;
 /** M1C maps with authored navigation topology and legacy obelisk markers. */
 export const NAVIGATION_AUTHORING_MAP_VERSION = 6;
 /** M1B.4 autonomous-elevator maps without authored navigation topology. */
@@ -104,6 +105,7 @@ function normalizeCurrentDocument(input) {
       "connectors",
       "navigationNodes",
       "navigationLinks",
+      "mechanisms",
     ]),
     "",
   );
@@ -871,7 +873,17 @@ function normalizeCurrentDocument(input) {
     connectors,
     navigationNodes,
     navigationLinks,
+    mechanisms: source.mechanisms,
   };
+  if (!diagnostics.some((entry) => entry.severity === "error")) {
+    try {
+      const graph = compileMechanisms(document);
+      document.mechanisms = JSON.parse(JSON.stringify(source.mechanisms));
+      diagnostics.push(...graph.warnings);
+    } catch (error) {
+      issue("error", "mechanisms", "mechanism-graph", error.message);
+    }
+  }
   // A single cell may have exactly one aperture owner. Surface holes are
   // independent (including adjacent cells), but cannot silently overlap a
   // connector endpoint at the same layer/cell.
@@ -1237,7 +1249,13 @@ export function migrateAuthoringMapV6(input) {
     ...source,
     version: AUTHORING_MAP_VERSION,
     layers,
+    mechanisms: emptyMechanisms(),
   });
+}
+
+export function migrateAuthoringMapV7(input) {
+  if (input.mechanisms !== undefined) fail("mechanisms", "unknown-field", "Authoring v7 cannot contain mechanisms");
+  return validateAuthoringMap({ ...input, version: AUTHORING_MAP_VERSION, mechanisms: emptyMechanisms() });
 }
 
 /**
@@ -1365,6 +1383,7 @@ export function loadAuthoringMap(input) {
   if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
   const version = /** @type {Record<string,any>} */ (value).version;
   if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
+  if (version === 7) return migrateAuthoringMapV7(value);
   if (version === NAVIGATION_AUTHORING_MAP_VERSION) return migrateAuthoringMapV6(value);
   if (version === M1B_AUTHORING_MAP_VERSION) return migrateAuthoringMapV5(value);
   if (version === CLOCK_ELEVATOR_AUTHORING_MAP_VERSION) return migrateAuthoringMapV4(value);

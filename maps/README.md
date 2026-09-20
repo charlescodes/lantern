@@ -5,7 +5,8 @@ No `arena` parameter means `maps/default.json`. For example,
 `http://127.0.0.1:4173/?arena=navigation&renderer=3d` loads `navigation.json`.
 The renderer parameter does not select or alter map content.
 
-These are ordinary `lantern-authoring-map` v7 documents exported through the
+These are ordinary `lantern-authoring-map` documents (existing maps are v7;
+new saves and the mechanism acceptance map are v8) exported through the
 same save path as the editor. Floors, props, elevators, navigation nodes, and
 obelisk settings live here. The original procedural factories remain available
 for deterministic tests; browser startup uses these files.
@@ -17,6 +18,7 @@ for deterministic tests; browser startup uses these files.
 | Holes | `holes.json` |
 | Navigation | `navigation.json` |
 | Navigation testing v2 | `navigation-testing-v2.json` |
+| Mechanism controls and gates | `mechanisms.json` |
 
 To edit an arena, open its URL, use the editor, and **Save**. Replace the
 corresponding file here with the downloaded `lantern-scenario.json`, then reload
@@ -28,8 +30,14 @@ For elevator-aware enemy routes, choose the **Navigation** channel. Paint places
 cyan nodes and **Link endpoints** connects them to the purple elevator ports.
 The **Fill connector navigation** action can instead add the missing staging
 nodes and a sparse connector skeleton across all floors as one undoable edit.
-It writes ordinary v7 nodes and links; rerunning it does not replace or duplicate
+It writes ordinary authored nodes and links; rerunning it does not replace or duplicate
 an already complete skeleton.
+
+`?arena=mechanisms` exercises plates/gates, E-operated levers and wall chains,
+projectile wall buttons, all nine logic devices, fan-out, and cross-floor wires.
+Use Shift+E for edit mode. Follow the
+[acceptance route](../docs/notes/authored-mechanisms.md#acceptance-and-next-pass)
+in both renderers. Movers and traps belong to the next implementation pass.
 
 To add an arena, put another valid authored map here as `my-arena.json` and open
 `?arena=my-arena`. Names accept lowercase letters, digits, hyphens, and

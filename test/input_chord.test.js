@@ -116,6 +116,22 @@ test("right-button movement and left-button casting remain independent in a mous
   });
 });
 
+test("E queues one interaction edge; key repeat, edit mode, and blur do not replay it", () => {
+  withInput(({ input, window }) => {
+    dispatch(window, "keydown", { key: "e", code: "KeyE", repeat: false });
+    assert.equal(input.sampleCommand().interact, true);
+    assert.equal(input.sampleCommand().interact, undefined);
+    dispatch(window, "keydown", { key: "e", code: "KeyE", repeat: true });
+    assert.equal(input.sampleCommand().interact, undefined);
+    dispatch(window, "keydown", { key: "e", code: "KeyE", repeat: false });
+    dispatch(window, "blur", {});
+    assert.equal(input.sampleCommand().interact, undefined);
+    input.setMode("edit");
+    dispatch(window, "keydown", { key: "e", code: "KeyE", repeat: false });
+    assert.equal(input.sampleCommand().interact, undefined);
+  });
+});
+
 test("right-button movement can begin while the left button remains held", () => {
   withInput(({ canvas, input, window }) => {
     dispatch(canvas, "pointermove", { clientX: 570, clientY: 120 });

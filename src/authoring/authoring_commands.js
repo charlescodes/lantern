@@ -9,6 +9,35 @@ import {
 import { VERTICAL_PHYSICS } from "../config.js";
 import { getPlaceableDefinition } from "./definition_catalog.js";
 import { getOccupiedCells, normalizeQuarterTurns } from "./footprint.js";
+import { mechanismNodes } from "./mechanism_catalog.js";
+
+function pruneMechanismLinks(document) {
+  const ids = new Set(mechanismNodes(document).map((node) => node.id));
+  document.mechanisms.links = document.mechanisms.links.filter((link) => ids.has(link.from.nodeId) && ids.has(link.to.nodeId));
+}
+
+export function editMechanisms(input, action) {
+  const document = cloneAuthoringMap(input), graph = document.mechanisms;
+  if (action.type === "addMechanismNode") {
+    const id = `logic-${String(graph.nextNodeOrdinal++).padStart(4, "0")}`;
+    graph.nodes.push({ id, definitionId: action.definitionId, properties: action.properties ?? {} });
+  } else if (action.type === "updateMechanismNode") {
+    const node = graph.nodes.find((n) => n.id === action.nodeId);
+    if (!node) throw new RangeError("Unknown logic node");
+    node.properties = action.properties;
+  } else if (action.type === "removeMechanismNode") {
+    if (!graph.nodes.some((n) => n.id === action.nodeId)) throw new RangeError("Unknown logic node");
+    graph.nodes = graph.nodes.filter((n) => n.id !== action.nodeId);
+    pruneMechanismLinks(document);
+  } else if (action.type === "addMechanismLink") {
+    const id = `wire-${String(graph.nextLinkOrdinal++).padStart(4, "0")}`;
+    graph.links.push({ id, from: { ...action.from }, to: { ...action.to } });
+  } else if (action.type === "removeMechanismLink") {
+    if (!graph.links.some((l) => l.id === action.linkId)) throw new RangeError("Unknown wire");
+    graph.links = graph.links.filter((l) => l.id !== action.linkId);
+  } else throw new RangeError("Unknown mechanism edit");
+  return cloneAuthoringMap(document);
+}
 
 export const MAX_EDITABLE_MAP_DIMENSION = 128;
 
@@ -103,6 +132,7 @@ export function deleteLayer(input, layerId) {
     throw new RangeError("A layer with navigation nodes must have those nodes deleted first");
   }
   document.layers.splice(index, 1);
+  pruneMechanismLinks(document);
   return cloneAuthoringMap(document);
 }
 
@@ -216,6 +246,7 @@ export function resizeMap(input, widthInput, heightInput) {
       ? retainedNodeIds.has(endpoint.nodeId)
       : retainedConnectorIds.has(endpoint.connectorId))
   ));
+  pruneMechanismLinks(document);
   return cloneAuthoringMap(document);
 }
 
@@ -658,5 +689,6 @@ export function removeInstance(input, instanceId, layerId) {
   const index = layer.instances.findIndex((instance) => instance.id === instanceId);
   if (index < 0) throw new RangeError(`Unknown authoring instance "${instanceId}"`);
   layer.instances.splice(index, 1);
+  pruneMechanismLinks(document);
   return document;
 }

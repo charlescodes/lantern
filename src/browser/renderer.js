@@ -1,4 +1,5 @@
 // @ts-check
+import { mechanismVisual, mechanismWires, visibleMechanismInstances } from "../presentation/mechanism_view.js";
 
 import { EXPLOSION, OBELISK, SIMULATION, VERTICAL_PHYSICS } from "../config.js";
 import {
@@ -468,12 +469,19 @@ export class DebugRenderer {
   #drawAuthoringInstances(snapshot) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1.5);
-    for (const instance of snapshot.authoring?.instances ?? []) {
+    for (const instance of visibleMechanismInstances(snapshot)) {
       const definition = getPlaceableDefinition(instance.definitionId);
       if (!definition || isDynamicBodyDefinition(definition)) continue;
+      const mechanism = mechanismVisual(instance, snapshot.mechanisms?.devices.find((d) => d.id === instance.id));
       context.save();
       context.translate(instance.x, instance.z);
-      if (definition.traits.shape === "pillar") {
+      if (mechanism) {
+        context.translate(mechanism.x - instance.x, mechanism.z - instance.z);
+        context.fillStyle = `#${mechanism.color.toString(16).padStart(6, "0")}`;
+        context.fillRect(-mechanism.width / 2, -mechanism.depth / 2, mechanism.width, mechanism.depth);
+        context.strokeStyle = "#e9cc86"; context.lineWidth = line;
+        context.strokeRect(-mechanism.width / 2, -mechanism.depth / 2, mechanism.width, mechanism.depth);
+      } else if (definition.traits.shape === "pillar") {
         context.beginPath();
         context.ellipse(0.08, 0.12, 0.34, 0.22, 0, 0, Math.PI * 2);
         context.fillStyle = "rgba(0, 0, 0, 0.34)";
@@ -523,6 +531,18 @@ export class DebugRenderer {
    */
   #drawAuthoringOverlays(snapshot, editor) {
     const context = this.context;
+    const wires = mechanismWires(snapshot.authoring, editor.selectedMechanismId);
+    context.save();
+    context.lineWidth = this.camera.viewportLengthToWorld(2);
+    for (const segment of wires.segments) {
+      context.strokeStyle = `#${segment.color.toString(16)}`;
+      context.beginPath(); context.moveTo(segment.from.x, segment.from.z); context.lineTo(segment.to.x, segment.to.z); context.stroke();
+    }
+    context.font = `${this.camera.viewportLengthToWorld(10)}px monospace`;
+    for (const badge of wires.badges) {
+      context.fillStyle = "#d8b5ff"; context.fillText(badge.label, badge.x + 0.2, badge.z - 0.2);
+    }
+    context.restore();
     const line = this.camera.viewportLengthToWorld(1.5);
     const drawCells = (cells, fill, stroke, width = line) => {
       context.fillStyle = fill;

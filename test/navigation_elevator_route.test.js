@@ -215,7 +215,7 @@ test("two complete but insufficient dwell windows trigger the bounded cooldown",
 test("the authored navigation arena routes and physically traverses both chained connectors", () => {
   const scenario = createNavigationDebugArenaScenario();
   const document = scenario.toAuthoringJSON();
-  assert.equal(document.version, 7);
+  assert.equal(document.version, 8);
   assert.equal(document.layers.length, 3);
   assert.deepEqual(document.layers.map((layer) => [layer.width, layer.height]), [
     [24, 24],

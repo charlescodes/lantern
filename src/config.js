@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 23;
+export const SCHEMA_VERSION = 24;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";

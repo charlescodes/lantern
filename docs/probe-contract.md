@@ -57,9 +57,18 @@ versus observed behavior. Include renderer/browser/GPU facts for a presentation
 failure. A screenshot or clip is useful evidence, but it does not replace the
 authoritative state needed to reproduce a simulation failure.
 
+### Mechanisms
+
+`mechanisms()` exposes detached v24 graph counts, registers, logic/device state,
+and overwrite/coalescing counters. `mechanismEvents()` exposes the latest 64
+events from a separate 256-entry diagnostic ring. Delivery never reads this
+ring. Player interaction enters via `injectCommand({ interact: true })`;
+authoring mutations still use semantic commands. See the
+[mechanism contract](./notes/authored-mechanisms.md).
+
 ### Current gaps deliberately left for later
 
 There is no generic per-system event bus, no unbounded trace log, and no promise
 that every internal helper becomes public. M1C adds topology-specific
-diagnostics only when topology exists. Broader trigger/mechanism diagnostics and
-network inspection remain future work, not reasons to widen the probe now.
+diagnostics only when topology exists. M1E's bounded graph diagnostics do not
+introduce a general event bus; network inspection remains future work.

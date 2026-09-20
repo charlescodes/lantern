@@ -1,4 +1,6 @@
 // @ts-check
+import { MechanismRuntime } from "./mechanisms.js";
+import { MECHANISM_PROFILE, MECHANISM_LIMITS, wallFace } from "../authoring/mechanism_catalog.js";
 
 import {
   ACTOR_TEAM,
@@ -654,6 +656,7 @@ function cloneCanonicalCommand(command) {
     move: command.move ? { ...command.move } : null,
     cast: command.cast ? { ...command.cast } : null,
     jump: command.jump === true,
+    ...(command.interact === true ? { interact: true } : {}),
     jumpTarget: command.jumpTarget ? { ...command.jumpTarget } : null,
     actions: command.actions.map((action) => cloneUnknown(action)),
   };
@@ -724,7 +727,7 @@ export function canonicalizeCommand(input) {
     const action = canonicalAction(source);
     if (action) actions.push(action);
   }
-  return { move, cast, jump: source.jump === true, jumpTarget: pointFrom(source.jumpTarget), actions };
+  return { move, cast, jump: source.jump === true, ...(source.interact === true ? { interact: true } : {}), jumpTarget: pointFrom(source.jumpTarget), actions };
 }
 
 /** @param {number} current @param {number} target @param {number} maximumDelta */
@@ -871,6 +874,8 @@ export class Simulation {
    * }} [options]
    */
   constructor(options = {}) {
+    this.mechanismProfile = options.mechanismProfile ?? MECHANISM_PROFILE;
+    if (![MECHANISM_PROFILE, "none"].includes(this.mechanismProfile)) throw new RangeError("Invalid mechanism profile");
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
     this.authoredNavigationTopologyProfile = options.authoredNavigationTopologyProfile
@@ -1567,6 +1572,117 @@ export class Simulation {
     for (const connector of this.scenario.connectors) {
       this.#spawnAuthoredElevator(connector);
     }
+    this.#resetMechanisms();
+  }
+
+  #resetMechanisms() {
+    this.mechanisms = this.mechanismProfile === MECHANISM_PROFILE
+      ? new MechanismRuntime(this.scenario.authoringMap) : null;
+    this.mechanismDevices = this.mechanisms ? this.mechanisms.compiled.nodes
+      .filter((node) => node.definitionId.startsWith("mechanism."))
+      .map((node) => ({ ...node, layerIndex: this.layerIdToIndex.get(node.layerId),
+        open: false, blocked: false, on: node.properties.initialOn ?? false, contacts: new Set() })) : [];
+    if (!this.mechanisms) return;
+    this.#pressurePlateSystem(true);
+    this.mechanisms.evaluate(this.tickCount, true);
+    this.#applyMechanismGates(true);
+  }
+
+  #mechanismBodyOverlaps(kind, index, device, half = 0.5) {
+    if (this.#bodyValue(kind, index, "layerIndex") !== device.layerIndex) return false;
+    const footprint = this.#writeBodyFootprint(kind, index,
+      this.#bodyValue(kind, index, "x"), this.#bodyValue(kind, index, "z"));
+    this._plateContact.x = device.x; this._plateContact.z = device.z;
+    this._plateContact.halfWidth = half; this._plateContact.halfDepth = half;
+    return footprintOverlapsAxisAlignedRectangle(footprint, this._plateContact, this._apertureExtents);
+  }
+
+  #forMechanismBodies(callback) {
+    callback(BODY_PLAYER, 0, "player");
+    for (const [kind, pool, category] of [[BODY_ENEMY_WIZARD, this.enemies, "enemy"],
+      [BODY_ROCK, this.rocks, "prop"], [BODY_ENEMY_WIZARD_BODY, this.dynamicDeadBodies, "corpse"]]) {
+      for (let i = 0; i < pool.activeCount; i += 1) callback(kind, i, `${category}:${pool.id[i]}`);
+    }
+  }
+
+  #applyMechanismGates(initialize = false) {
+    if (!this.mechanisms) return;
+    let changed = false;
+    for (const device of this.mechanismDevices) {
+      if (device.definitionId !== "mechanism.gate") continue;
+      const requested = this.mechanisms.input(device, "open");
+      let blocked = false;
+      if (!requested) this.#forMechanismBodies((kind, index) => {
+        if (this.#mechanismBodyOverlaps(kind, index, device)) blocked = true;
+      });
+      if (blocked && !device.blocked && !initialize) this.mechanisms.write(device.id, "blocked");
+      device.blocked = blocked;
+      const open = requested || blocked;
+      const map = this.layerMaps[device.layerIndex];
+      const cx = Math.floor(device.x), cz = Math.floor(device.z);
+      if (map.get(cx, cz) !== Number(!open)) {
+        // Keep the compiled authored recipe pristine across runtime/reset/editor switches.
+        const overlay = map.clone(); overlay.set(cx, cz, Number(!open));
+        this.layerMaps[device.layerIndex] = overlay;
+        if (this.runtimeViewLayerId === device.layerId) this.map = overlay;
+        this.layerMapRevisions[device.layerIndex] += 1;
+        this.mapRevision += 1; changed = true;
+      }
+      if (device.open !== open && !initialize) this.mechanisms.write(device.id, open ? "opened" : "closed");
+      device.open = open;
+      this.mechanisms.write(device.id, "isOpen", open, initialize);
+      if (initialize) this.mechanisms.values[device.outputs.isOpen] = Number(open);
+    }
+    if (changed) {
+      this.destinationFields.reset(this.authoredNavigationTopologyProfile === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1 ? this.layerMaps : this.map);
+      this.navigationField.reset(this.map); this.reachability.reset(this.map); this.broadphase.reset(this.map);
+    }
+  }
+
+  #mechanismInteraction(requested) {
+    if (!requested || !this.mechanisms) return;
+    let best = null, bestDistance = Infinity;
+    for (const device of this.mechanismDevices) {
+      if (!["mechanism.lever", "mechanism.chain"].includes(device.definitionId) || device.layerIndex !== this.player.layerIndex) continue;
+      const point = device.definitionId === "mechanism.chain" ? wallFace(device) : device;
+      const dx = point.x - this.player.x, dz = point.z - this.player.z, distance = Math.hypot(dx, dz);
+      if (distance > 1.25 || distance > bestDistance
+        || distance > 1e-9 && (dx * this.player.movementDirectionX + dz * this.player.movementDirectionZ) / distance < 0.5
+        || gridRayBlocked(this.layerMaps[device.layerIndex], this.player.x, this.player.z, point.x, point.z)) continue;
+      if (distance === bestDistance && best && device.id > best.id) continue;
+      best = device; bestDistance = distance;
+    }
+    if (!best) return;
+    if (best.definitionId === "mechanism.chain") this.mechanisms.write(best.id, "pulled");
+    else {
+      best.on = !best.on;
+      this.mechanisms.write(best.id, "on", best.on);
+      this.mechanisms.write(best.id, "changed");
+    }
+  }
+
+  #mechanismButtonContacts() {
+    if (!this.mechanisms) return;
+    for (const device of this.mechanismDevices) {
+      if (device.definitionId !== "mechanism.button") continue;
+      const face = wallFace(device), contacts = new Set();
+      this.#forMechanismBodies((kind, index, id) => {
+        if (!this.#mechanismBodyOverlaps(kind, index, { ...device, x: face.x + face.dx * 0.04, z: face.z + face.dz * 0.04 }, 0.1)) return;
+        contacts.add(id);
+        if (!device.contacts.has(id)) this.mechanisms.write(device.id, "pressed");
+      });
+      device.contacts = contacts;
+    }
+  }
+
+  #mechanismProjectileContact(layerIndex, x, z, y, radius) {
+    if (!this.mechanisms) return;
+    for (const device of this.mechanismDevices) {
+      if (device.definitionId !== "mechanism.button" || device.layerIndex !== layerIndex) continue;
+      const face = wallFace(device);
+      if (Math.abs(y - (this.layerBaseY[layerIndex] + 0.8)) <= 0.6 + radius
+        && Math.hypot(x - face.x, z - face.z) <= radius + 0.24) this.mechanisms.write(device.id, "pressed");
+    }
   }
 
   #resetObeliskEncounters() {
@@ -1758,6 +1874,8 @@ export class Simulation {
       return this.tickCount;
     }
     const simulationTick = this.tickCount + 1;
+    this.mechanisms?.evaluate(simulationTick);
+    this.#applyMechanismGates();
     this.#encounterSystem(simulationTick);
     if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
       this.broadphase.rebuild(
@@ -1784,6 +1902,8 @@ export class Simulation {
     this.#bodyPhysicsSystem(SIMULATION.dt);
     this.#verticalResolutionSystem(SIMULATION.dt);
     this.#pressurePlateSystem();
+    this.#mechanismInteraction(command.interact === true);
+    this.#mechanismButtonContacts();
     this.#movementSoundSystem(simulationTick);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
@@ -1950,7 +2070,9 @@ export class Simulation {
         values.push({ ...plate, layerIndex, pressed: false, occupantCount: 0 });
       }
     }
-    return values;
+    return this.mechanismProfile === MECHANISM_PROFILE
+      ? values.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      : values;
   }
 
   #clearLayerRuntimeEvents() {
@@ -2269,9 +2391,32 @@ export class Simulation {
 
   /** Reject a newly authored solid that would be born around a live body. */
   #candidateOverlapsLiveSolid(candidate) {
+    const initialMaps = new Map();
+    if (this.mechanismProfile === MECHANISM_PROFILE) {
+      const initial = new MechanismRuntime(candidate.authoringMap);
+      for (const node of initial.compiled.nodes) {
+        if (node.definitionId !== "object.pressure-plate") continue;
+        const layerIndex = this.layerIdToIndex.get(node.layerId);
+        const plate = { ...node, layerIndex };
+        let pressed = false;
+        this.#forMechanismBodies((kind, index, id) => {
+          const category = id.split(":")[0];
+          if (node.properties[category] && this.#bodyPressesPlate(kind, index, plate)) pressed = true;
+        });
+        initial.write(node.id, "pressed", pressed, true);
+      }
+      initial.evaluate(this.tickCount, true);
+      for (const node of initial.compiled.nodes) {
+        const open = this.#mechanismAuthoringChanged(candidate) ? initial.input(node, "open")
+          : this.mechanismDevices?.find((d) => d.id === node.id)?.open;
+        if (node.definitionId !== "mechanism.gate" || !open) continue;
+        const map = initialMaps.get(node.layerId) ?? candidate.compiledLayer(node.layerId).map.clone();
+        map.set(Math.floor(node.x), Math.floor(node.z), 0); initialMaps.set(node.layerId, map);
+      }
+    }
     const intersects = (layerIndex, x, z, radius) => {
       const layerId = this.layerIds[layerIndex];
-      const map = layerId ? candidate.compiledLayer(layerId)?.map : null;
+      const map = initialMaps.get(layerId) ?? (layerId ? candidate.compiledLayer(layerId)?.map : null);
       return Boolean(map && firstSolidContact(map, x, z, radius, this._gridContact));
     };
     if (intersects(this.player.layerIndex, this.player.x, this.player.z, this.player.radius)) {
@@ -2296,7 +2441,17 @@ export class Simulation {
         radius,
       )) return "Authored solid geometry would overlap live dynamic clutter";
     }
+    if (this.mechanismProfile === MECHANISM_PROFILE) {
+      for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+        if (intersects(this.dynamicDeadBodies.layerIndex[index], this.dynamicDeadBodies.x[index], this.dynamicDeadBodies.z[index], this.dynamicDeadBodies.radius[index])) return "Authored solid geometry would overlap a dynamic corpse";
+      }
+    }
     return null;
+  }
+
+  #mechanismAuthoringChanged(candidate) {
+    return JSON.stringify(candidate.mechanisms) !== JSON.stringify(this.scenario.mechanisms)
+      || candidate.compiledLayerIds.some((id) => candidate.compiledLayer(id).baseY !== this.scenario.compiledLayer(id)?.baseY);
   }
 
   /** @param {ArenaScenario} candidate @param {string} requestedLayerId */
@@ -2316,6 +2471,8 @@ export class Simulation {
       throw new RangeError(candidate.lastMutationError ?? `Unknown authoring layer "${layerId}"`);
     }
     const previousScenario = this.scenario;
+    const resetMechanisms = this.#mechanismAuthoringChanged(candidate);
+    const previousPlates = this.pressurePlates;
     const previousLayerIds = [...this.layerIds];
     const previousLayerMapRevisions = this.layerMapRevisions.slice();
     this.scenario = candidate;
@@ -2363,11 +2520,21 @@ export class Simulation {
       }
       this.reachability.reset(this.map);
       this.broadphase.reset(this.map);
+      if (resetMechanisms) this.#resetMechanisms();
+      else if (this.mechanisms) {
+        for (const plate of this.pressurePlates) {
+          const previous = previousPlates.find((p) => p.id === plate.id);
+          if (previous) { plate.pressed = previous.pressed; plate.occupantCount = previous.occupantCount; }
+        }
+        for (const device of this.mechanismDevices ?? []) device.layerIndex = this.layerIdToIndex.get(device.layerId);
+        this.#applyMechanismGates(true);
+      }
     }
   }
 
   /** Switches the editor/view recipe without changing authored or live body state. @param {string} layerId */
   #activateScenarioLayer(layerId) {
+    const liveMap = this.layerMaps[this.layerIdToIndex.get(layerId)];
     const compiledLayer = this.scenario.compiledLayer(layerId);
     if (!compiledLayer) {
       throw new RangeError(`Unknown authoring layer "${layerId}"`);
@@ -2376,6 +2543,7 @@ export class Simulation {
       throw new RangeError(this.scenario.lastMutationError ?? `Could not activate layer "${layerId}"`);
     }
     this.layerMaps[this.layerIdToIndex.get(layerId) ?? 0] = this.scenario.map;
+    if (this.mechanisms && liveMap) this.layerMaps[this.layerIdToIndex.get(layerId)] = liveMap;
     this.#refreshPreparedAuthoringState();
     return true;
   }
@@ -7795,19 +7963,25 @@ export class Simulation {
   }
 
   /** Pressure plates are floor-only, momentary supported contacts. */
-  #pressurePlateSystem() {
+  #pressurePlateSystem(initialize = false) {
     for (let plateIndex = 0; plateIndex < this.pressurePlates.length; plateIndex += 1) {
       const plate = this.pressurePlates[plateIndex];
+      const filters = this.mechanisms?.byId.get(plate.id)?.properties;
       let count = 0;
-      if (this.#bodyPressesPlate(BODY_PLAYER, 0, plate)) count += 1;
+      if ((!filters || filters.player) && this.#bodyPressesPlate(BODY_PLAYER, 0, plate)) count += 1;
       for (let index = 0; index < this.enemies.activeCount; index += 1) {
-        if (this.#bodyPressesPlate(BODY_ENEMY_WIZARD, index, plate)) count += 1;
+        if ((!filters || filters.enemy) && this.#bodyPressesPlate(BODY_ENEMY_WIZARD, index, plate)) count += 1;
       }
       for (let index = 0; index < this.rocks.activeCount; index += 1) {
-        if (this.#bodyPressesPlate(BODY_ROCK, index, plate)) count += 1;
+        if ((!filters || filters.prop) && this.#bodyPressesPlate(BODY_ROCK, index, plate)) count += 1;
+      }
+      if (filters?.corpse) for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
+        if (this.#bodyPressesPlate(BODY_ENEMY_WIZARD_BODY, index, plate)) count += 1;
       }
       const pressed = count > 0;
-      if (pressed !== plate.pressed) {
+      this.mechanisms?.write(plate.id, "pressed", pressed, initialize);
+      if (!initialize && pressed !== plate.pressed) {
+        this.mechanisms?.write(plate.id, pressed ? "pressedEdge" : "releasedEdge");
         this.pressurePlateEvents.push({
           tick: this.tickCount,
           kind: pressed ? "PLATE_PRESSED" : "PLATE_RELEASED",
@@ -9293,6 +9467,7 @@ export class Simulation {
         const testX = startX + deltaX * alpha;
         const testZ = startZ + deltaZ * alpha;
         if (firstSolidContact(projectileMap, testX, testZ, pool.radius[index], this._gridContact)) {
+          this.#mechanismProjectileContact(projectileLayerIndex, testX, testZ, pool.worldY[index], pool.radius[index]);
           hitKind = "cell";
           hitX = testX;
           hitZ = testZ;
@@ -11838,6 +12013,12 @@ export class Simulation {
           occluderCells[map.index(Math.floor(state.x), Math.floor(state.z))] = 0;
         }
       }
+      if (!authored && this.mechanisms) {
+        occluderCells = [...occluderCells];
+        for (const device of this.mechanismDevices) {
+          if (device.definitionId === "mechanism.gate" && device.layerId === layerId) occluderCells[map.index(Math.floor(device.x), Math.floor(device.z))] = Number(!device.open);
+        }
+      }
       return {
         version: MAP_VERSION,
         layerId,
@@ -11864,6 +12045,8 @@ export class Simulation {
     };
     return {
       schemaVersion: SCHEMA_VERSION,
+      mechanismProfile: this.mechanismProfile,
+      mechanisms: this.mechanisms ? { ...this.mechanisms.snapshot(), devices: this.mechanismDevices.map((d) => ({ id: d.id, definitionId: d.definitionId, layerId: d.layerId, x: d.x, z: d.z, rotation: d.rotation, open: d.open, on: d.on, blocked: d.blocked })) } : null,
       seed: this.seed,
       rngState: this.rng.state,
       tick: this.tickCount,
@@ -12651,6 +12834,8 @@ export class Simulation {
         })),
         connectors: this.scenario.connectors.map((connector) => ({ ...connector })),
         navigationNodes: this.scenario.authoringMap.navigationNodes.map((node) => ({ ...node })),
+        mechanisms: cloneUnknown(this.scenario.authoringMap.mechanisms),
+        mechanismNodes: this.scenario.mechanisms.nodes.map((node) => cloneUnknown(node)),
         navigationLinks: this.scenario.authoringMap.navigationLinks.map((link) => ({
           ...link,
           a: { ...link.a },
@@ -13076,6 +13261,8 @@ export class Simulation {
         enemyHomeProfile: this.commandLogEnemyHomeProfile,
         obeliskEncounterProfile: this.commandLogObeliskEncounterProfile,
         obeliskDestructionProfile: this.commandLogObeliskDestructionProfile,
+        mechanismProfile: this.mechanismProfile,
+        mechanismCapacities: { ...MECHANISM_LIMITS },
         navigationTopologyCapacities: {
           authoredNodes: NAVIGATION_TOPOLOGY.authoredNodeCapacity,
           authoredLinks: NAVIGATION_TOPOLOGY.authoredLinkCapacity,
@@ -13107,6 +13294,7 @@ export class Simulation {
         !recording.initialAuthoringMap
         || (
           Number(recording.initialAuthoringMap.version) !== AUTHORING_MAP_VERSION
+          && Number(recording.initialAuthoringMap.version) !== 7
           && Number(recording.initialAuthoringMap.version) !== NAVIGATION_AUTHORING_MAP_VERSION
         )
       )
@@ -13217,6 +13405,7 @@ export class Simulation {
       || recordingSchema === 21
       || recordingSchema === 22
       || recordingSchema === 23
+      || recordingSchema === 24
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -13379,9 +13568,9 @@ export class Simulation {
             `Schema-v${recordingSchema} recording has invalid or missing obelisk-encounter profile`,
           );
         }
-        if (Number(recording.initialAuthoringMap?.version) !== AUTHORING_MAP_VERSION) {
+        if (Number(recording.initialAuthoringMap?.version) !== (recordingSchema >= 24 ? 8 : 7)) {
           throw new TypeError(
-            `Schema-v${recordingSchema} recording requires an authoring-map v7 baseline`,
+            `Schema-v${recordingSchema} recording requires an authoring-map v${recordingSchema >= 24 ? 8 : 7} baseline`,
           );
         }
       }
@@ -13395,6 +13584,10 @@ export class Simulation {
           );
         }
       }
+    }
+    if (recordingSchema >= 24 && (recording.configuration?.mechanismProfile !== MECHANISM_PROFILE
+      || Object.entries(MECHANISM_LIMITS).some(([key, value]) => recording.configuration?.mechanismCapacities?.[key] !== value))) {
+      throw new TypeError("Schema-v24 recording requires the mechanism profile and pinned capacities");
     }
     const enemyCapacity = recordingSchema >= 8
       ? Number(recording.configuration?.enemyCapacity ?? ENEMY_WIZARD.capacity)
@@ -13435,6 +13628,7 @@ export class Simulation {
       enemyHomeProfile,
       obeliskEncounterProfile,
       obeliskDestructionProfile,
+      mechanismProfile: recordingSchema >= 24 ? MECHANISM_PROFILE : "none",
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,

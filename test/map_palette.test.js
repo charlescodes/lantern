@@ -40,7 +40,7 @@ test("the centralized catalog contains the representative M1A definitions", () =
 
 test("palette groups are derived from catalog categories in stable order", () => {
   const groups = groupPaletteDefinitions(listPlaceableDefinitions());
-  assert.deepEqual(groups.map((group) => group.id), ["surface", "structure", "object", "connector"]);
+  assert.deepEqual(groups.map((group) => group.id), ["surface", "structure", "object", "connector", "mechanism"]);
   assert.deepEqual(
     groups[0].definitions.map((definition) => definition.id),
     ["surface.stone", "surface.moss", "surface.hole", "surface.breakaway"],

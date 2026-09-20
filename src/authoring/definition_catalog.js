@@ -7,6 +7,7 @@ import {
   ROCK_ARCHETYPES,
   VERTICAL_PHYSICS,
 } from "../config.js";
+import { MECHANISM_DEFINITIONS } from "./mechanism_catalog.js";
 
 const CATEGORY_LABELS = Object.freeze({
   surface: "Surfaces",
@@ -17,6 +18,7 @@ const CATEGORY_LABELS = Object.freeze({
 
 /** @param {Record<string, any>} definition */
 function freezeDefinition(definition) {
+  if (MECHANISM_DEFINITIONS[definition.id]) definition.mechanism = MECHANISM_DEFINITIONS[definition.id];
   if (definition.footprint?.cells) {
     for (const cell of definition.footprint.cells) Object.freeze(cell);
     Object.freeze(definition.footprint.cells);
@@ -36,6 +38,18 @@ function freezeDefinition(definition) {
  * during compilation rather than branching on palette button names.
  */
 export const PLACEABLE_DEFINITIONS = Object.freeze([
+  ...[
+    ["gate", "Gate", "G", true, false],
+    ["lever", "Floor lever", "L", false, false],
+    ["chain", "Wall pull-chain", "C", false, true],
+    ["button", "Wall button", "B", false, true],
+  ].map(([kind, label, glyph, solid, wall]) => freezeDefinition({
+    id: `mechanism.${kind}`, label, category: "mechanism", categoryLabel: "Mechanisms",
+    placementMode: "stamp", placementTarget: "instance", footprint: { cells: [{ x: 0, z: 0 }] },
+    debug: { fill: "#527b82", alternateFill: "#35535b", stroke: "#e9cc86", glyph }, renderAsset: null,
+    traits: { runtimeKind: `mechanism-${kind}`, snap: "cell-center", rotatable: true,
+      blocksMovement: solid, blocksSight: solid, wallMounted: wall },
+  })),
   freezeDefinition({
     id: "object.pressure-plate",
     label: "Pressure plate",

@@ -7,6 +7,7 @@ import { AuthoringEditorController } from "./browser/authoring_editor.js";
 import { AuthoringInspector } from "./browser/authoring_inspector.js";
 import { LayerPanel } from "./browser/layer_panel.js";
 import { MapPalette } from "./browser/map_palette.js";
+import { MechanismPanel } from "./browser/mechanism_panel.js";
 import { SpellLab } from "./browser/spell_lab.js";
 import { ArenaUi } from "./browser/ui.js";
 import { loadArenaScenario } from "./browser/arena_loader.js";
@@ -105,6 +106,7 @@ let performanceCapture;
 let mapPalette;
 let layerPanel;
 let authoringEditor;
+let mechanismPanel;
 let authoringInspector;
 let authoringHistory;
 
@@ -166,12 +168,16 @@ const runtime = new FixedStepRuntime({
       mapPalette?.sync(editorView);
       layerPanel?.sync(editorView);
       authoringInspector?.update(snapshot, editorView);
+      mechanismPanel?.update(snapshot, editorView);
     }
     const presentationSnapshot = mode === "edit" && snapshot.editorMap
       ? {
         ...snapshot,
         map: snapshot.editorMap,
         obelisks: snapshot.editorObelisks ?? [],
+        mechanisms: snapshot.mechanisms ? { ...snapshot.mechanisms,
+          devices: snapshot.mechanisms.devices.map((device) => ({ ...device, open: false, blocked: false,
+            on: snapshot.authoring.mechanismNodes.find((n) => n.id === device.id)?.properties.initialOn ?? false })) } : null,
       }
       : snapshot;
     const navigationTopologySnapshot = developerToolsOpen
@@ -533,6 +539,7 @@ mapPalette = new MapPalette({
   onRestore: restoreAuthoredPositions,
 });
 mapPalette.sync(authoringEditor.snapshot());
+mechanismPanel = new MechanismPanel(mapPalette.body, authoringEditor);
 
 layerPanel = new LayerPanel({
   onActivate: (layerId) => authoringEditor.activateLayer(layerId),
@@ -837,6 +844,8 @@ const probe = Object.freeze({
   pressurePlates() {
     return structuredClone(simulation.snapshot().pressurePlates ?? []);
   },
+  mechanisms() { return structuredClone(simulation.snapshot().mechanisms); },
+  mechanismEvents() { return structuredClone(simulation.snapshot().mechanisms?.recentEvents ?? []); },
   pressurePlateEvents() {
     return structuredClone(simulation.snapshot().recentPressurePlateEvents ?? []);
   },

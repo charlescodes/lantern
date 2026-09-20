@@ -17,7 +17,7 @@ export function groupPaletteDefinitions(definitions) {
     }
     group.definitions.push(definition);
   }
-  const order = ["surface", "structure", "object", "connector"];
+  const order = ["surface", "structure", "object", "connector", "mechanism"];
   groups.sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id));
   return groups;
 }
@@ -145,6 +145,7 @@ export class MapPalette {
       ["erase", "Erase"],
       ["eyedropper", "Eyedropper"],
       ["link", "Link endpoints"],
+      ["wire", "Wire mechanisms"],
     ]) {
       const button = document.createElement("button");
       button.type = "button";
@@ -166,6 +167,7 @@ export class MapPalette {
       ["instance", "Instances"],
       ["connector", "Connectors"],
       ["navigation", "Navigation"],
+      ["mechanisms", "Mechanisms"],
     ]) {
       const button = document.createElement("button");
       button.type = "button";

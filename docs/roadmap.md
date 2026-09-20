@@ -2,7 +2,7 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v23, authoring-map v7. M1C.1–M1C.5 are
+> `0.9.3`, recording schema v24, authoring-map v8. M1C.1–M1C.5 are
 > implemented; the separate M1C manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 
@@ -53,10 +53,12 @@ hidden runtime graph.
   then hand-build a complete temple. It should teach and test the established
   traversal systems and eventually offer three alternative exit goals. These
   are map assets, not a room-prefab schema.
-- **M1E — mechanisms:** extend proven, content-driven mechanisms only after the
-  temple exposes a real need. Pressure plates are a foundation; triggers,
-  levers, chains, doors, and richer trap behavior are not assumed together.
-  A door or moving blocker first needs the bounded geometry and camera questions
+- **M1E — mechanisms:** the user brought forward the foundation pass without
+  marking M1D complete. [Pass A (M1E.1 + M1E.2)](./plans/m1e-mechanisms.md)
+  implements bounded signal graphs, plates, full-cell gates, levers, wall
+  buttons/chains, logic, and editor wiring. Browser acceptance remains pending.
+  Pass B (M1E.3 + M1E.4) retains controlled elevators, moving blocks, and traps
+  as unimplemented work. A hinged door or sub-cell moving blocker needs the bounded geometry and camera questions
   in the [doors and dynamic occlusion candidate](./soft-specs/doors-and-dynamic-occlusion.md)
   resolved. The archived provisional “Candidate M1C” label for doors is
   historical and does not redefine the completed navigation M1C.

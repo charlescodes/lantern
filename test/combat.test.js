@@ -322,6 +322,8 @@ test("schema v23 records destructible obelisks while schema v22 keeps them invul
 
   const schema22 = structuredClone(recording);
   schema22.schemaVersion = 22;
+  schema22.initialAuthoringMap.version = 7;
+  delete schema22.initialAuthoringMap.mechanisms;
   delete schema22.configuration.obeliskDestructionProfile;
   const legacy = Simulation.replay(schema22);
   const legacyObelisk = legacy.snapshot().obelisks[0];

@@ -22,6 +22,7 @@ import {
   listPlaceableDefinitions,
 } from "../authoring/definition_catalog.js";
 import { getOccupiedCells, normalizeQuarterTurns } from "../authoring/footprint.js";
+import { MECHANISM_DEFINITIONS } from "../authoring/mechanism_catalog.js";
 
 /** @param {Record<string, any>|null} target */
 function cloneTarget(target) {
@@ -115,6 +116,9 @@ export class AuthoringEditorController {
     this.referenceLayerId = null;
     this.referenceLayer = null;
     this.referenceRevision = null;
+    this.wireSource = null;
+    this.wireTarget = null;
+    this.selectedMechanismId = null;
     this.state.reconcile(this.currentSnapshot.authoring);
   }
 
@@ -190,7 +194,7 @@ export class AuthoringEditorController {
   activateLayer(layerId) {
     const target = this.currentSnapshot.authoring.layers?.find((layer) => layer.id === layerId);
     if (!target) return false;
-    this.cancel();
+    this.cancel(true);
     const result = this.activateLayerRuntime(layerId);
     if (result.snapshot) this.currentSnapshot = result.snapshot;
     if (!result.ok) {
@@ -316,6 +320,7 @@ export class AuthoringEditorController {
     const target = this.state.activeChannel === "navigation"
       ? navigationTarget ?? pickAuthoringTarget(authoring, x, z)
       : pickAuthoringTarget(authoring, x, z);
+    if (effectiveTool === "wire") return this.selectMechanism(target?.instanceId);
     if (effectiveTool === "link") {
       if (!navigationTarget) {
         this.#message("Choose a navigation node or visible connector endpoint", false);
@@ -324,6 +329,7 @@ export class AuthoringEditorController {
       return this.#linkEndpoint(navigationTarget);
     }
     if (effectiveTool === "select") {
+      this.selectedMechanismId = null;
       this.state.setSelectedTarget(target);
       if (button === 0 && target?.kind === "instance") {
         const instance = this.#instance(target.instanceId);
@@ -387,7 +393,7 @@ export class AuthoringEditorController {
         this.state.setPlacementPreview(null);
         return Boolean(picked);
       }
-      if (this.state.activeChannel === "instance") {
+      if (this.state.activeChannel === "instance" || this.state.activeChannel === "mechanisms") {
         const picked = pickAuthoredInstance(authoring, x, z);
         this.gesture = picked
           ? { kind: "remove", button, instanceId: picked.instanceId }
@@ -421,7 +427,7 @@ export class AuthoringEditorController {
     if (!definition) return false;
     const channel = authoringChannelForDefinition(definition);
     if (channel !== this.state.activeChannel) return false;
-    if (channel === "instance" || channel === "connector") {
+    if (channel === "instance" || channel === "connector" || channel === "mechanisms") {
       this.gesture = { kind: "stamp", button };
       this.#refreshHoverAndPreview();
       return true;
@@ -487,8 +493,9 @@ export class AuthoringEditorController {
     return result;
   }
 
-  cancel() {
-    const hadGesture = Boolean(this.gesture) || this.state.cancelPendingLink();
+  cancel(preserveWire = false) {
+    const hadGesture = Boolean(this.gesture) || this.state.cancelPendingLink() || Boolean(this.wireSource);
+    if (!preserveWire) { this.wireSource = null; this.wireTarget = null; }
     this.gesture = null;
     this.state.setPlacementPreview(null);
     return hadGesture;
@@ -707,6 +714,7 @@ export class AuthoringEditorController {
   selectInstance(instanceId) {
     const instance = this.#instance(instanceId);
     if (!instance) return false;
+    this.selectedMechanismId = null;
     this.state.setSelectedTarget({
       kind: "instance",
       layerId: this.currentSnapshot.authoring.activeLayer.id,
@@ -756,6 +764,10 @@ export class AuthoringEditorController {
     };
     return {
       ...this.state.snapshot(),
+      selectedMechanismId: this.selectedMechanismId ?? this.state.selectedTarget?.instanceId ?? null,
+      wireSource: this.wireSource,
+      wireTarget: this.wireTarget,
+      wirePairs: this.compatibleWirePairs(),
       activeLayerId: this.activeLayerId,
       referenceLayerId: this.referenceLayerId,
       referenceLayer: cloneLayerSnapshot(this.referenceLayer),
@@ -1095,6 +1107,44 @@ export class AuthoringEditorController {
     return result.ok;
   }
 
+  editMechanism(action) { return this.#commit(action); }
+
+  selectMechanism(id) {
+    const node = (this.currentSnapshot.authoring.mechanismNodes ?? []).find((n) => n.id === id);
+    if (!node) { this.#message("Choose a mechanism source or target", false); return false; }
+    this.selectedMechanismId = id;
+    if (this.state.activeTool !== "wire") return true;
+    if (!this.wireSource) {
+      this.wireSource = id; this.wireTarget = null;
+      this.#message("Choose the target, on this floor, another floor, or in the graph list", true);
+      return true;
+    }
+    this.wireTarget = id;
+    const pairs = this.compatibleWirePairs();
+    if (pairs.length === 1) return this.completeWire(pairs[0].from, pairs[0].to);
+    this.#message(pairs.length ? "Choose explicit ports in the mechanism panel" : "No compatible ports", pairs.length > 0);
+    return pairs.length > 0;
+  }
+
+  compatibleWirePairs() {
+    const nodes = this.currentSnapshot.authoring.mechanismNodes ?? [];
+    const source = nodes.find((n) => n.id === this.wireSource), target = nodes.find((n) => n.id === this.wireTarget);
+    if (!source || !target) return [];
+    const pairs = [];
+    for (const [from, type] of Object.entries(MECHANISM_DEFINITIONS[source.definitionId].outputs)) {
+      for (const [to, inputType] of Object.entries(MECHANISM_DEFINITIONS[target.definitionId].inputs)) {
+        if (type === inputType) pairs.push({ from, to, type });
+      }
+    }
+    return pairs;
+  }
+
+  completeWire(from, to) {
+    const ok = this.#commit({ type: "addMechanismLink", from: { nodeId: this.wireSource, port: from }, to: { nodeId: this.wireTarget, port: to } });
+    if (ok) { this.wireSource = null; this.wireTarget = null; }
+    return ok;
+  }
+
   /** @param {"undo"|"redo"} operation */
   #traverseHistory(operation) {
     if (this.gesture) {
@@ -1156,6 +1206,10 @@ export class AuthoringEditorController {
 
   #reconcileLayers() {
     const authoring = this.currentSnapshot.authoring;
+    const mechanismIds = new Set((authoring.mechanismNodes ?? []).map((node) => node.id));
+    if (this.wireSource && !mechanismIds.has(this.wireSource)) this.wireSource = null;
+    if (this.wireTarget && !mechanismIds.has(this.wireTarget)) this.wireTarget = null;
+    if (this.selectedMechanismId && !mechanismIds.has(this.selectedMechanismId)) this.selectedMechanismId = null;
     const layerIds = new Set((authoring.layers ?? []).map((layer) => layer.id));
     const activeLayerId = authoring.activeEditorLayerId ?? authoring.activeLayer?.id;
     if (typeof activeLayerId === "string" && layerIds.has(activeLayerId)) {

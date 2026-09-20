@@ -449,6 +449,8 @@ test("schema v23 adds obelisk destruction while older encounter boundaries stay 
 
   const v22 = structuredClone(current);
   v22.schemaVersion = 22;
+  v22.initialAuthoringMap.version = 7;
+  delete v22.initialAuthoringMap.mechanisms;
   delete v22.configuration.obeliskDestructionProfile;
   const replay22 = Simulation.replay(v22);
   assert.equal(replay22.obeliskEncounterProfile, OBELISK_ENCOUNTER_PROFILE_V3);

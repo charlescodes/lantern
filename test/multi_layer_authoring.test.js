@@ -659,6 +659,7 @@ test("serialized maps exclude editor, history, reference, and disposable runtime
     "connectors",
     "navigationNodes",
     "navigationLinks",
+    "mechanisms",
   ]);
   assert.equal(text.includes("activeEditorLayerId"), false);
   assert.equal(text.includes("referenceLayerId"), false);

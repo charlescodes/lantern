@@ -16,6 +16,7 @@ import {
 } from "./definition_catalog.js";
 import { getOccupiedCells, getRuntimeBodyTransform } from "./footprint.js";
 import { validateInstancePlacement } from "./placement_validation.js";
+import { compileMechanisms } from "./mechanism_catalog.js";
 
 /** @param {string} path @param {string} code @param {string} message @param {string} [layerId] */
 function fail(path, code, message, layerId) {
@@ -401,7 +402,17 @@ export function compileAuthoringMap(input) {
       initialStop: connector.initialStop,
     };
   });
-  const navigationTopology = compileNavigationTopology(document, layers, connectors);
+  // Authored route costs describe the possible route with gates open. The live
+  // destination fields still consume the closed/open collision overlay and its
+  // revisions; a closed gate is never permission to walk through a solid cell.
+  const navigationLayers = layers.map((layer) => {
+    const gates = layer.instances.filter((instance) => instance.definitionId === "mechanism.gate");
+    if (!gates.length) return layer;
+    const map = layer.map.clone();
+    for (const gate of gates) map.set(Math.floor(gate.x), Math.floor(gate.z), 0);
+    return { ...layer, map };
+  });
+  const navigationTopology = compileNavigationTopology(document, navigationLayers, connectors);
   return {
     document,
     playerStart: { ...document.playerStart },
@@ -410,6 +421,7 @@ export function compileAuthoringMap(input) {
     layers,
     connectors,
     navigationTopology,
+    mechanisms: compileMechanisms(document),
     diagnostics: validated.diagnostics.map((entry) => ({ ...entry })),
     ...compatibilityProjection(startLayer),
   };

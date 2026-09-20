@@ -81,7 +81,7 @@ test("contact-heavy command recording replays to identical current-build state",
 
   const recording = simulation.exportCommandLog();
   const replayed = Simulation.replay(recording);
-  assert.equal(recording.schemaVersion, 23);
+  assert.equal(recording.schemaVersion, 24);
   assert.ok(contactTicks >= 120, `expected sustained contact, received ${contactTicks} ticks`);
   assert.deepEqual(comparable(replayed), comparable(simulation));
 });
@@ -138,12 +138,12 @@ test("snapshot, runtime, and recording use the current schema while scenarios re
   const runtime = new FixedStepRuntime({ simulation });
   const snapshot = simulation.snapshot();
   const recording = simulation.exportCommandLog();
-  assert.equal(SCHEMA_VERSION, 23);
-  assert.equal(snapshot.schemaVersion, 23);
-  assert.equal(runtime.metrics().schemaVersion, 23);
+  assert.equal(SCHEMA_VERSION, 24);
+  assert.equal(snapshot.schemaVersion, 24);
+  assert.equal(runtime.metrics().schemaVersion, 24);
   assert.deepEqual(Object.keys(runtime.metrics().snapshotMs), ["p50", "p95", "p99"]);
   assert.ok(runtime.metrics().snapshotMs.p99 >= 0);
-  assert.equal(recording.schemaVersion, 23);
+  assert.equal(recording.schemaVersion, 24);
   assert.equal(recording.configuration.spells.length, 1);
   assert.equal(recording.configuration.spells[0].id, "fireball");
   assert.equal(recording.configuration.spells[0].currentRevision, 1);

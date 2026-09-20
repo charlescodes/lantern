@@ -35,6 +35,7 @@ import {
 } from "./definition_catalog.js";
 import { compileAuthoringMap } from "./map_compiler.js";
 import { generateConnectorNavigationSkeleton } from "./navigation_skeleton.js";
+import { editMechanisms } from "./authoring_commands.js";
 
 export const DEFAULT_AUTHORING_HISTORY_CAPACITY = 256;
 
@@ -209,6 +210,8 @@ export function cloneAuthoringCommand(input) {
         const after = finiteInteger(patch.after, `${path}.after`);
         if (before < 1 || after < 1) throw new TypeError(`${path} ordinals must be positive integers`);
         normalized = { kind, field, before, after };
+      } else if (field === "mechanisms") {
+        normalized = { kind, field, before: cloneJson(patch.before), after: cloneJson(patch.after) };
       } else if (field === "playerStart") {
         normalized = {
           kind,
@@ -414,6 +417,9 @@ export function createAuthoringCommand(beforeInput, afterInput, label, options =
       before: { ...before.playerStart },
       after: { ...after.playerStart },
     });
+  }
+  if (!jsonEqual(before.mechanisms, after.mechanisms)) {
+    patches.push({ kind: "map", field: "mechanisms", before: cloneJson(before.mechanisms), after: cloneJson(after.mechanisms) });
   }
 
   const beforeLayers = new Map(
@@ -839,6 +845,14 @@ export function commandFromAuthoringAction(documentInput, action) {
   const activeLayer = before.layers.find((layer) => layer.id === layerId);
   if (!activeLayer) throw new RangeError(`Unknown authoring layer "${layerId}"`);
   switch (action.type) {
+    case "addMechanismNode":
+    case "updateMechanismNode":
+    case "removeMechanismNode":
+    case "addMechanismLink":
+    case "removeMechanismLink":
+      after = editMechanisms(before, action);
+      label = action.type;
+      break;
     case "setTile":
       after = Number(action.tile) === 1
         ? paintStructure(before, Math.trunc(Number(action.cx)), Math.trunc(Number(action.cz)), "structure.wall", layerId)
