@@ -2,8 +2,8 @@
 
 > **Status:** current planning authority. It orders future work but does not
 > redefine frozen release contracts. Current repository baseline: application
-> `0.9.3`, recording schema v24, authoring-map v8. M1C.1–M1C.5 are
-> implemented; the separate M1C manual acceptance and deferred crowding report
+> `0.9.3`, recording schema v25, authoring-map v9. M1C.1–M1C.5 and
+> M1E.1–M1E.4 are implemented; the separate manual acceptance and deferred crowding report
 > are recorded in their respective documents.
 
 ## Transition after M1B.4
@@ -53,12 +53,13 @@ hidden runtime graph.
   then hand-build a complete temple. It should teach and test the established
   traversal systems and eventually offer three alternative exit goals. These
   are map assets, not a room-prefab schema.
-- **M1E — mechanisms:** the user brought forward the foundation pass without
-  marking M1D complete. [Pass A (M1E.1 + M1E.2)](./plans/m1e-mechanisms.md)
-  implements bounded signal graphs, plates, full-cell gates, levers, wall
-  buttons/chains, logic, and editor wiring. Browser acceptance remains pending.
-  Pass B (M1E.3 + M1E.4) retains controlled elevators, moving blocks, and traps
-  as unimplemented work. A hinged door or sub-cell moving blocker needs the bounded geometry and camera questions
+- **M1E — mechanisms:** implemented in two passes without marking M1D complete.
+  The [M1E.1–M1E.4 plan](./plans/m1e-mechanisms.md) delivered bounded signal
+  graphs, controls, logic, wiring, trigger-controlled elevators, safe moving
+  blocks, and bolt/spell/spike/spear traps under schema v25 and authoring-map
+  v9. Automated acceptance and a 36,000-tick deterministic soak pass; the real
+  browser Canvas2D/Three.js interaction and readability route remains pending.
+  A hinged door or sub-cell moving blocker needs the bounded geometry and camera questions
   in the [doors and dynamic occlusion candidate](./soft-specs/doors-and-dynamic-occlusion.md)
   resolved. The archived provisional “Candidate M1C” label for doors is
   historical and does not redefine the completed navigation M1C.

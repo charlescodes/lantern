@@ -59,7 +59,7 @@ authoritative state needed to reproduce a simulation failure.
 
 ### Mechanisms
 
-`mechanisms()` exposes detached v24 graph counts, registers, logic/device state,
+`mechanisms()` exposes detached v25 graph counts, registers, logic/device state,
 and overwrite/coalescing counters. `mechanismEvents()` exposes the latest 64
 events from a separate 256-entry diagnostic ring. Delivery never reads this
 ring. Player interaction enters via `injectCommand({ interact: true })`;

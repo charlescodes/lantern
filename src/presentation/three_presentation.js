@@ -896,7 +896,7 @@ export class ThreePresentation {
     this.#syncSightFrame(view.sightFrame ?? null);
     if (this.flags.values.damageNumbers) this.damageNumbers.ingest(snapshot);
     this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
-    this.#updateAuthoringInstances(visibleMechanismInstances(snapshot), snapshot.pressurePlates ?? [], snapshot.mechanisms?.devices ?? []);
+    this.#updateAuthoringInstances(visibleMechanismInstances(snapshot), snapshot.pressurePlates ?? [], snapshot.mechanisms?.devices ?? [], alpha);
     this.#updateWallOcclusion(snapshot.player, alpha);
     this.#updateScorchMarks(snapshot);
     this.#updateKineticFragments(snapshot, alpha);
@@ -1109,7 +1109,7 @@ export class ThreePresentation {
     this.#setActiveBaseY(snapshot.map.baseY);
     this.#syncCamera();
     this.#updateMap(snapshot.map, snapshot.obelisks ?? [], snapshot.breakawayFloors ?? []);
-    this.#updateAuthoringInstances(visibleMechanismInstances(snapshot), snapshot.pressurePlates ?? [], snapshot.mechanisms?.devices ?? []);
+    this.#updateAuthoringInstances(visibleMechanismInstances(snapshot), snapshot.pressurePlates ?? [], snapshot.mechanisms?.devices ?? [], 0);
     this.#updateWallOcclusion(snapshot.player, 0);
     this.#updateKineticFragments(snapshot, 0);
     this.#updateObelisk(snapshot.obelisks ?? []);
@@ -1616,7 +1616,7 @@ export class ThreePresentation {
     );
     this.pressurePlateMesh.castShadow = true;
     this.pressurePlateMesh.receiveShadow = true;
-    this.mechanismMesh = createDynamicInstancedPool(this.authoringOverlayGeometry, this.pressurePlateMaterial, 256, "mechanism-devices", { instanceColors: true });
+    this.mechanismMesh = createDynamicInstancedPool(this.authoringOverlayGeometry, this.pressurePlateMaterial, 448, "mechanism-devices", { instanceColors: true });
     this.mechanismMesh.castShadow = true; this.mechanismMesh.receiveShadow = true;
     this.worldRoot.add(this.mechanismMesh);
     this.authoringOverlayMesh = createDynamicInstancedPool(
@@ -1638,13 +1638,16 @@ export class ThreePresentation {
   }
 
   /** @param {Array<Record<string, any>>} instances */
-  #updateAuthoringInstances(instances, pressurePlates = [], devices = []) {
+  #updateAuthoringInstances(instances, pressurePlates = [], devices = [], alpha = 1) {
     let nextHash = hashAuthoringInstances(instances);
     for (const plate of pressurePlates) {
       nextHash = Math.imul(nextHash ^ (plate.pressed ? 1 : 0), 16_777_619);
     }
     for (const device of devices) nextHash = Math.imul(nextHash ^ (device.open ? 1 : 0) ^ (device.on ? 2 : 0) ^ (device.blocked ? 4 : 0), 16_777_619);
-    if (nextHash === this.authoringInstanceHash) return;
+    for (const device of devices) nextHash = Math.imul(nextHash ^ (device.phase ?? 0), 16_777_619);
+    const moving = devices.some((device) => device.previousX !== undefined
+      && (device.previousX !== device.x || device.previousZ !== device.z));
+    if (!moving && nextHash === this.authoringInstanceHash) return;
     this.authoringInstanceHash = nextHash;
     if (!this.pillarMesh || !this.tableMesh || !this.pressurePlateMesh) {
       this.#replaceAuthoringMeshes(Math.max(1, this.mapWidth * this.mapHeight));
@@ -1656,7 +1659,7 @@ export class ThreePresentation {
     for (const instance of instances) {
       const definition = getPlaceableDefinition(instance.definitionId);
       if (isDynamicBodyDefinition(definition)) continue;
-      const visual = mechanismVisual(instance, devices.find((d) => d.id === instance.id));
+      const visual = mechanismVisual(instance, devices.find((d) => d.id === instance.id), alpha);
       if (visual) {
         this._position.set(visual.x, visual.y, visual.z);
         this._scale.set(visual.width / 0.94, visual.height / 0.025, visual.depth / 0.94);
@@ -2185,7 +2188,7 @@ export class ThreePresentation {
       this._scale.setScalar(projectile.radius * 1.15);
       this._matrix.compose(this._position, this._quaternion, this._scale);
       this.projectileMesh.setMatrixAt(count, this._matrix);
-      if (projectile.projectileKind === "thrown-stone") {
+      if (projectile.projectileKind === "thrown-stone" || projectile.projectileKind === "bolt") {
         this._color.setHex(0x77644d);
         this.projectileMesh.setColorAt(count, this._color);
         this._emissiveColor.setRGB(0, 0, 0);

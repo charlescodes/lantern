@@ -5,8 +5,8 @@ No `arena` parameter means `maps/default.json`. For example,
 `http://127.0.0.1:4173/?arena=navigation&renderer=3d` loads `navigation.json`.
 The renderer parameter does not select or alter map content.
 
-These are ordinary `lantern-authoring-map` documents (existing maps are v7;
-new saves and the mechanism acceptance map are v8) exported through the
+These are ordinary `lantern-authoring-map` documents (older saved maps migrate;
+new saves and the Pass B mechanism acceptance map are v9) exported through the
 same save path as the editor. Floors, props, elevators, navigation nodes, and
 obelisk settings live here. The original procedural factories remain available
 for deterministic tests; browser startup uses these files.
@@ -19,6 +19,7 @@ for deterministic tests; browser startup uses these files.
 | Navigation | `navigation.json` |
 | Navigation testing v2 | `navigation-testing-v2.json` |
 | Mechanism controls and gates | `mechanisms.json` |
+| Mechanism elevators, movers, and traps | `mechanisms-pass-b.json` |
 
 To edit an arena, open its URL, use the editor, and **Save**. Replace the
 corresponding file here with the downloaded `lantern-scenario.json`, then reload
@@ -33,11 +34,13 @@ nodes and a sparse connector skeleton across all floors as one undoable edit.
 It writes ordinary authored nodes and links; rerunning it does not replace or duplicate
 an already complete skeleton.
 
-`?arena=mechanisms` exercises plates/gates, E-operated levers and wall chains,
+`?arena=mechanisms` exercises the compact Pass A plates/gates, E-operated levers and wall chains,
 projectile wall buttons, all nine logic devices, fan-out, and cross-floor wires.
 Use Shift+E for edit mode. Follow the
-[acceptance route](../docs/notes/authored-mechanisms.md#acceptance-and-next-pass)
-in both renderers. Movers and traps belong to the next implementation pass.
+[acceptance route](../docs/notes/authored-mechanisms.md#acceptance)
+in both renderers. `?arena=mechanisms-pass-b` adds a triggered lift, a safe
+spiked mover, floor spikes, bolt/Fireball emitters, a wall spear, fan-out, and a
+cross-floor device wire.
 
 To add an arena, put another valid authored map here as `my-arena.json` and open
 `?arena=my-arena`. Names accept lowercase letters, digits, hyphens, and

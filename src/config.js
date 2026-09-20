@@ -1,6 +1,6 @@
 // @ts-check
 
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 export const MAP_VERSION = 1;
 export const SCENARIO_VERSION = 3;
 export const APPLICATION_VERSION = "0.9.3";
@@ -51,12 +51,14 @@ export const ENEMY_ARCHETYPE_NAMES = Object.freeze([
 export const PROJECTILE_KIND = Object.freeze({
   fireball: 1,
   thrownStone: 2,
+  bolt: 3,
 });
 
 export const PROJECTILE_KIND_NAMES = Object.freeze([
   null,
   "fireball",
   "thrown-stone",
+  "bolt",
 ]);
 
 // Projectile flight stays horizontally simple, but each kind owns a stable
@@ -65,6 +67,7 @@ export const PROJECTILE_KIND_NAMES = Object.freeze([
 export const PROJECTILE_FLIGHT_HEIGHT_METERS = Object.freeze({
   [PROJECTILE_KIND.fireball]: 0.9,
   [PROJECTILE_KIND.thrownStone]: 0.9,
+  [PROJECTILE_KIND.bolt]: 0.9,
 });
 
 export const NAVIGATION_TOPOLOGY = Object.freeze({
@@ -111,12 +114,14 @@ export const NAVIGATION_PATROL = Object.freeze({ dwellTicks: 60, replanCooldownT
 export const ACTOR_TEAM = Object.freeze({
   player: 1,
   enemy: 2,
+  environment: 3,
 });
 
 export const PROJECTILE_OWNER_KIND = Object.freeze({
   player: 1,
   enemyWizard: 2,
   enemyUrchin: 3,
+  environment: 4,
 });
 
 export const SIMULATION = Object.freeze({
@@ -280,6 +285,13 @@ export const PROJECTILE = Object.freeze({
   lifetime: 4,
   cooldown: 0.2,
   spawnGap: 0.02,
+});
+
+export const MECHANISM_COMBAT = Object.freeze({
+  boltRadius: 0.06, boltSpeed: 12, boltLifetime: 4, boltDamage: 15,
+  contactDamage: 25, spikeTicks: 12, spikeActiveProgress: 6, spikeHeight: 0.8,
+  spikeCooldown: 30, spearExtend: 8, spearHold: 6, spearRetract: 8,
+  spearReach: 1.5, spearRadius: 0.08, corpseHeight: 0.3,
 });
 
 export const PARTICLE = Object.freeze({

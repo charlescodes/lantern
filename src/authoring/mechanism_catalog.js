@@ -3,12 +3,24 @@
 export const MECHANISM_LIMITS = Object.freeze({ logicNodes: 256, nodes: 512, links: 1024,
   controls: 128, gates: 128, movers: 64, traps: 128, events: 256 });
 export const MECHANISM_PROFILE = "authored-mechanisms-v1";
+export const MECHANISM_PROFILE_V2 = "authored-mechanisms-v2";
 const level = "level", pulse = "pulse";
 const integer = (value, min, max) => ({ type: "integer", default: value, min, max });
 const boolean = (value) => ({ type: "boolean", default: value });
+export const isMoverDefinition = (id) => id === "mechanism.mover" || id === "mechanism.spiked-mover";
+export const isTrapDefinition = (id) => ["mechanism.bolt-emitter", "mechanism.spell-emitter", "mechanism.floor-spikes", "mechanism.wall-spear"].includes(id);
+const moverProperties = { distanceCells: integer(1, 1, 16), speed: { type: "number", default: 2, min: 0.25, max: 8 } };
 const def = (inputs, outputs, properties = {}, stateful = false) =>
   Object.freeze({ inputs, outputs, properties, stateful });
 export const MECHANISM_DEFINITIONS = Object.freeze({
+  "mechanism.mover": def({ positionB: level }, { atA: level, atB: level, blocked: level, arrivedA: pulse, arrivedB: pulse, blockedEdge: pulse }, moverProperties, true),
+  "mechanism.spiked-mover": def({ positionB: level }, { atA: level, atB: level, blocked: level, arrivedA: pulse, arrivedB: pulse, blockedEdge: pulse }, moverProperties, true),
+  "mechanism.bolt-emitter": def({ fire: pulse }, {}),
+  "mechanism.spell-emitter": def({ fire: pulse }, {}, { spellId: { type: "enum", default: "fireball", values: ["fireball"] }, mode: { type: "enum", default: "projectile", values: ["projectile", "instant-impact"] } }),
+  "mechanism.floor-spikes": def({ extended: level }, {}),
+  "mechanism.wall-spear": def({ thrust: pulse }, {}),
+  "connector.elevator.two-stop": def({ callLower: pulse, callUpper: pulse, cycle: pulse },
+    { atLower: level, atUpper: level, arrivedLower: pulse, arrivedUpper: pulse }, {}, true),
   "object.pressure-plate": def({}, { pressed: level, pressedEdge: pulse, releasedEdge: pulse }, {
     player: boolean(true), enemy: boolean(true), prop: boolean(true), corpse: boolean(false),
   }),
@@ -41,6 +53,7 @@ export function mechanismProperties(definitionId, input = {}) {
   for (const [key, descriptor] of Object.entries(definition.properties)) {
     const value = input[key] === undefined ? descriptor.default : input[key];
     if (descriptor.type === "boolean" && typeof value !== "boolean"
+      || descriptor.type === "number" && (typeof value !== "number" || !Number.isFinite(value) || value < descriptor.min || value > descriptor.max)
       || descriptor.type === "integer" && (!Number.isInteger(value) || value < descriptor.min || value > descriptor.max)
       || descriptor.type === "enum" && !descriptor.values.includes(value)) {
       throw new RangeError(`Invalid ${definitionId}.${key}`);
@@ -60,15 +73,20 @@ export function wallFace(instance) {
   return { dx, dz, x: instance.x + dx * 0.501, z: instance.z + dz * 0.501 };
 }
 
-export function mechanismNodes(document) {
+export function mechanismNodes(document, profile = MECHANISM_PROFILE_V2) {
   return [...document.layers.flatMap((layer) => layer.instances
-    .filter((instance) => MECHANISM_DEFINITIONS[instance.definitionId])
-    .map((instance) => ({ ...instance, layerId: layer.id }))), ...(document.mechanisms?.nodes ?? []).map((node) => ({ ...node }))]
+    .filter((instance) => MECHANISM_DEFINITIONS[instance.definitionId]
+      && (profile === MECHANISM_PROFILE_V2 || (!isMoverDefinition(instance.definitionId) && !isTrapDefinition(instance.definitionId))))
+    .map((instance) => ({ ...instance, layerId: layer.id }))),
+    ...(profile === MECHANISM_PROFILE_V2 ? (document.connectors ?? [])
+      .filter((connector) => connector.controlMode === "triggered")
+      .map((connector) => ({ ...connector, properties: {}, nodeKind: "connector" })) : []),
+    ...(document.mechanisms?.nodes ?? []).map((node) => ({ ...node }))]
     .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** Compile once at the authoring boundary. Runtime delivery uses resolved slots. */
-export function compileMechanisms(document) {
+export function compileMechanisms(document, profile = MECHANISM_PROFILE_V2) {
   const graph = document.mechanisms;
   const fail = (message) => { throw new RangeError(message); };
   const record = (value, fields, label) => {
@@ -90,8 +108,10 @@ export function compileMechanisms(document) {
     record(node, ["id", "definitionId", "properties"], "logic node");
     if (!node.definitionId?.startsWith("logic.")) fail("Non-spatial nodes must use logic definitions");
   }
-  const nodes = mechanismNodes(document);
+  const nodes = mechanismNodes(document, profile);
   if (nodes.length > MECHANISM_LIMITS.nodes) fail("Mechanism node capacity exceeded");
+  if (nodes.filter(n => isMoverDefinition(n.definitionId)).length > MECHANISM_LIMITS.movers
+    || nodes.filter(n => isTrapDefinition(n.definitionId)).length > MECHANISM_LIMITS.traps) fail("Mechanism device capacity exceeded");
   const count = (ids) => nodes.filter((n) => ids.includes(n.definitionId)).length;
   if (count(["mechanism.gate"]) > MECHANISM_LIMITS.gates
     || count(["mechanism.lever", "mechanism.chain", "mechanism.button"]) > MECHANISM_LIMITS.controls) fail("Mechanism device capacity exceeded");

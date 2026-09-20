@@ -1,6 +1,11 @@
 // @ts-check
 import { MechanismRuntime } from "./mechanisms.js";
-import { MECHANISM_PROFILE, MECHANISM_LIMITS, wallFace } from "../authoring/mechanism_catalog.js";
+import { MechanismMoverPool } from "./mechanism_mover_pool.js";
+import { MechanismTraps } from "./mechanism_traps.js";
+import { KinematicPush, moverBodyOverlap } from "./kinematic_mover.js";
+import { deriveMechanismCastSeed } from "../spells/random.js";
+import { MECHANISM_COMBAT } from "../config.js";
+import { MECHANISM_PROFILE, MECHANISM_PROFILE_V2, MECHANISM_LIMITS, wallFace } from "../authoring/mechanism_catalog.js";
 
 import {
   ACTOR_TEAM,
@@ -796,6 +801,7 @@ function bodyKindName(code) {
 
 /** @param {number} code */
 function ownerKindName(code) {
+  if (code === PROJECTILE_OWNER_KIND.environment) return "environment";
   if (code === PROJECTILE_OWNER_KIND.enemyWizard) return "enemyWizard";
   if (code === PROJECTILE_OWNER_KIND.enemyUrchin) return "enemyUrchin";
   return "player";
@@ -830,6 +836,7 @@ function enemyRetreatExitHealth(pool, index) {
 
 /** @param {number} code */
 function teamName(code) {
+  if (code === ACTOR_TEAM.environment) return "environment";
   if (code === ACTOR_TEAM.enemy) return "enemy";
   if (code === ACTOR_TEAM.player) return "player";
   return "neutral";
@@ -874,8 +881,8 @@ export class Simulation {
    * }} [options]
    */
   constructor(options = {}) {
-    this.mechanismProfile = options.mechanismProfile ?? MECHANISM_PROFILE;
-    if (![MECHANISM_PROFILE, "none"].includes(this.mechanismProfile)) throw new RangeError("Invalid mechanism profile");
+    this.mechanismProfile = options.mechanismProfile ?? MECHANISM_PROFILE_V2;
+    if (![MECHANISM_PROFILE, MECHANISM_PROFILE_V2, "none"].includes(this.mechanismProfile)) throw new RangeError("Invalid mechanism profile");
     this.scenario = options.scenario?.clone()
       ?? (options.map ? new ArenaScenario(options.map) : createDebugArenaScenario());
     this.authoredNavigationTopologyProfile = options.authoredNavigationTopologyProfile
@@ -1576,16 +1583,37 @@ export class Simulation {
   }
 
   #resetMechanisms() {
-    this.mechanisms = this.mechanismProfile === MECHANISM_PROFILE
-      ? new MechanismRuntime(this.scenario.authoringMap) : null;
+    if (this.mechanismProfile === MECHANISM_PROFILE_V2) {
+      for (let i = this.elevators.activeCount - 1; i >= 0; i--) if (this.elevators.triggered[i]) this.elevators.removeSwap(i);
+      for (const connector of this.scenario.connectors) if (connector.controlMode === "triggered") this.#spawnAuthoredElevator(connector);
+    }
+    this.mechanisms = this.mechanismProfile !== "none"
+      ? new MechanismRuntime(this.scenario.authoringMap, this.mechanismProfile) : null;
     this.mechanismDevices = this.mechanisms ? this.mechanisms.compiled.nodes
       .filter((node) => node.definitionId.startsWith("mechanism."))
       .map((node) => ({ ...node, layerIndex: this.layerIdToIndex.get(node.layerId),
         open: false, blocked: false, on: node.properties.initialOn ?? false, contacts: new Set() })) : [];
+    this.movers = this.mechanismProfile === MECHANISM_PROFILE_V2
+      ? new MechanismMoverPool(this.mechanisms.compiled.nodes, this.layerIdToIndex, this.layerBaseY) : null;
+    this.traps = this.mechanismProfile === MECHANISM_PROFILE_V2
+      ? new MechanismTraps(this.mechanisms.compiled.nodes, 1 + this.enemies.capacity) : null;
+    this.hazardActors = []; this.trapVolumes = [];
+    if (this.movers) {
+      this.moverScratch = new KinematicPush(1 + this.enemies.capacity + this.rocks.capacity + this.dynamicDeadBodies.capacity);
+      this.moverBodyStorage = Array.from({ length: this.moverScratch.capacity }, () => ({}));
+      this.moverBodies = [];
+      this.moverBlockedAt = (body, x, z) => this.#moverBlockedAt(body, x, z);
+      this.movers.publish(this.mechanisms, true);
+    }
     if (!this.mechanisms) return;
+    this.#mechanismElevatorOutputs(true);
     this.#pressurePlateSystem(true);
     this.mechanisms.evaluate(this.tickCount, true);
     this.#applyMechanismGates(true);
+    this.moverNavigationMaps = null;
+    this.moverMaskKeys = [];
+    this.moverBaseMaps = [];
+    this.#refreshMoverBlockers();
   }
 
   #mechanismBodyOverlaps(kind, index, device, half = 0.5) {
@@ -1605,6 +1633,235 @@ export class Simulation {
     }
   }
 
+  #mechanismElevatorRequests() {
+    if (this.mechanismProfile !== MECHANISM_PROFILE_V2) return;
+    for (const node of this.mechanisms.compiled.nodes) {
+      if (node.nodeKind !== "connector") continue;
+      const index = this.elevators.findIndexByAuthoringId(node.id);
+      if (index < 0) continue;
+      this.elevators.mechanismRequest(index, this.mechanisms.input(node, "callLower"),
+        this.mechanisms.input(node, "callUpper"), this.mechanisms.input(node, "cycle"));
+    }
+  }
+
+  #moverBlockedAt(body, x, z) {
+    const map = this.layerMaps[body.layerIndex];
+    if (body.box ? firstSolidBoxContact(map, x, z, body.halfX, body.halfZ, this._gridContact)
+      : firstSolidContact(map, x, z, body.radius, this._gridContact)) return true;
+    return this.#projectileElevatorContact(x, z, body.y + body.height / 2,
+      Math.min(body.halfX, body.halfZ), body.layerIndex) >= 0;
+  }
+
+  #beginTraps() {
+    if (!this.traps?.nodes.length) return;
+    this.hazardActors = [{ kind: BODY_PLAYER, index: 0, key: "player" }];
+    for (let i = 0; i < this.enemies.activeCount; i++) if (this.enemies.health[i] > 0) {
+      this.hazardActors.push({ kind: BODY_ENEMY_WIZARD, index: i, key: `enemy:${this.enemies.id[i]}:${this.enemies.spawnSequence[i]}` });
+    }
+    this.traps.begin(this.mechanisms, this.hazardActors);
+  }
+
+  #trapObstacle(x, z, y, radius, layerIndex) {
+    if (firstSolidContact(this.layerMaps[layerIndex], x, z, radius, this._gridContact)) return true;
+    if (this.#projectileMoverContact(x, z, y, radius, layerIndex) >= 0
+      || this.#projectileElevatorContact(x, z, y, radius, layerIndex) >= 0) return true;
+    for (let i = 0; i < this.rocks.activeCount; i++) if (this.rocks.layerIndex[i] === layerIndex
+      && this.#projectileDynamicBodyHeightContact(y, radius, i)
+      && this.#circleDynamicBodyContact(x, z, radius, i, this._bodyContact)) return true;
+    for (let i = 0; i < this.dynamicDeadBodies.activeCount; i++) if (this.dynamicDeadBodies.layerIndex[i] === layerIndex
+      && Math.abs(y - this.dynamicDeadBodies.worldY[i] - MECHANISM_COMBAT.corpseHeight / 2) < radius + MECHANISM_COMBAT.corpseHeight / 2
+      && Math.hypot(x - this.dynamicDeadBodies.x[i], z - this.dynamicDeadBodies.z[i]) < radius + this.dynamicDeadBodies.radius[i]) return true;
+    return false;
+  }
+
+  #refreshTrapVolumes() {
+    for (let i = 0; i < this.traps.nodes.length; i++) {
+      const node = this.traps.nodes[i], layer = this.layerIdToIndex.get(node.layerId);
+      this.trapVolumes[i] = this.traps.volume(i, layer, this.layerBaseY[layer], this.movers.records.find(m => m.id === node.id),
+        (face, reach, y, layerIndex) => {
+          for (let distance = 0.1; distance <= reach; distance += 0.025) {
+            if (this.#trapObstacle(face.x + face.dx * distance, face.z + face.dz * distance, y, MECHANISM_COMBAT.spearRadius, layerIndex)) return Math.max(0, distance - 0.025);
+          }
+          return reach;
+        });
+    }
+  }
+
+  #hazardOverlaps(i, actor) {
+    const volume = this.trapVolumes[i]; if (!volume) return false;
+    const kind = actor.kind, index = actor.index;
+    if (this.#bodyValue(kind, index, "health") <= 0 || this.#bodyValue(kind, index, "layerIndex") !== volume.layerIndex) return false;
+    const y = this.#bodyValue(kind, index, "worldY"), height = kind === BODY_PLAYER ? 1.6 : enemyDefinition(this.enemies.archetype[index]).presentationHeight;
+    if (y >= volume.y + volume.height || y + height <= volume.y) return false;
+    return circleBoxContact(this.#bodyValue(kind, index, "x"), this.#bodyValue(kind, index, "z"),
+      this.#bodyValue(kind, index, "radius"), volume.x, volume.z, volume.halfX, volume.halfZ, this._bodyContact);
+  }
+
+  #sampleTraps() {
+    if (!this.traps?.nodes.length) return;
+    this.#refreshTrapVolumes();
+    for (let i = 0; i < this.traps.nodes.length; i++) for (const actor of this.hazardActors) {
+      if (this.#hazardOverlaps(i, actor)) this.traps.sample(i, actor.key);
+    }
+  }
+
+  #finishTraps(tick) {
+    if (!this.traps?.nodes.length) return;
+    this.#sampleTraps();
+    this.traps.finish(tick, this.hazardActors, (i, actor) => this.#hazardOverlaps(i, actor), (actor, node) => {
+      const source = { owner: { kind: "environment", id: node.id, team: "environment" }, originX: node.x, originZ: node.z };
+      if (actor.kind === BODY_PLAYER) this.#damagePlayer(MECHANISM_COMBAT.contactDamage, source, "trap-contact");
+      else this.#damageEnemy(actor.index, MECHANISM_COMBAT.contactDamage, source, "trap-contact");
+    });
+  }
+
+  #fireMechanismEmitters() {
+    if (!this.traps) return;
+    for (let i = 0; i < this.traps.nodes.length; i++) {
+      const node = this.traps.nodes[i];
+      const bolt = node.definitionId === "mechanism.bolt-emitter";
+      if ((!bolt && node.definitionId !== "mechanism.spell-emitter") || !this.mechanisms.input(node, "fire")) continue;
+      const spell = bolt ? null : this.spells.get(node.properties.spellId);
+      const definition = spell ? this.#capturedSpellDefinition(spell.code, spell.currentRevision) : null;
+      const radius = bolt ? MECHANISM_COMBAT.boltRadius : definition.projectile.radius;
+      const face = wallFace(node), layerIndex = this.layerIdToIndex.get(node.layerId);
+      const x = face.x + face.dx * (radius + PROJECTILE.spawnGap), z = face.z + face.dz * (radius + PROJECTILE.spawnGap);
+      const y = this.layerBaseY[layerIndex] + 0.9;
+      if (this.#trapObstacle(x, z, y, radius, layerIndex)) {
+        this.traps.refused[i]++; this.mechanisms.event("blockedMuzzle", node.id); continue;
+      }
+      const effectSeed = bolt ? 0 : deriveMechanismCastSeed(this.seed, node.id, spell.code, this.traps.ordinal[i]);
+      const source = { projectileId: null, layerIndex, spellCode: spell?.code ?? 0,
+        definitionRevision: spell?.currentRevision ?? 0, effectId: bolt ? 0 : this.nextEffectId, effectSeed,
+        owner: { kind: "environment", id: node.id, team: "environment" } };
+      if (!bolt && node.properties.mode === "instant-impact") {
+        const event = this.#createCapturedExplosion(source, { kind: "emitter", id: node.id }, x, z, face.dx, face.dz, null);
+        this.#applyExplosion(event); this.impactEvents.push(event); this.#emitParticles(event);
+        this.#deliverFireballExplosionHearing(event, ACTOR_TEAM.environment);
+      } else {
+        const speed = bolt ? MECHANISM_COMBAT.boltSpeed : definition.projectile.speed;
+        const id = this.projectiles.spawn({ x, z, worldY: y, layerIndex, radius, vx: face.dx * speed, vz: face.dz * speed,
+          lifetime: bolt ? MECHANISM_COMBAT.boltLifetime : definition.projectile.lifetime,
+          ownerId: deriveMechanismCastSeed(0, node.id, 0, 0), sourceAuthoringId: node.id,
+          ownerKind: PROJECTILE_OWNER_KIND.environment, ownerTeam: ACTOR_TEAM.environment,
+          projectileKind: bolt ? PROJECTILE_KIND.bolt : PROJECTILE_KIND.fireball, ...source });
+        if (!id) { this.traps.refused[i]++; this.mechanisms.event("projectilePoolFull", node.id); continue; }
+      }
+      this.traps.ordinal[i] = (this.traps.ordinal[i] + 1) >>> 0;
+      if (!bolt) this.nextEffectId = (this.nextEffectId + 1) >>> 0 || 1;
+      this.mechanisms.event("fired", node.id);
+    }
+  }
+
+  #navigationMap(layerIndex = this.layerIdToIndex.get(this.runtimeViewLayerId)) {
+    return this.moverNavigationMaps?.[layerIndex] ?? this.layerMaps[layerIndex] ?? this.map;
+  }
+
+  #refreshMoverBlockers() {
+    if (!this.movers?.activeCount) { this.moverNavigationMaps = null; return; }
+    this.moverNavigationMaps ??= this.layerMaps.slice();
+    for (let layerIndex = 0; layerIndex < this.layerMaps.length; layerIndex++) {
+      const cells = new Set();
+      for (const mover of this.movers.records) if (mover.layerIndex === layerIndex) {
+        for (let z = Math.floor(mover.z - 0.5 + 1e-9); z <= Math.floor(mover.z + 0.5 - 1e-9); z++) {
+          for (let x = Math.floor(mover.x - 0.5 + 1e-9); x <= Math.floor(mover.x + 0.5 - 1e-9); x++) cells.add(`${x}:${z}`);
+        }
+      }
+      const key = [...cells].sort().join(","), base = this.layerMaps[layerIndex];
+      if (this.moverMaskKeys[layerIndex] === key && this.moverBaseMaps[layerIndex] === base) continue;
+      const overlay = base.clone();
+      for (const cell of cells) { const [x, z] = cell.split(":").map(Number); overlay.set(x, z, 1); }
+      if (this.moverMaskKeys[layerIndex] !== key) { this.layerMapRevisions[layerIndex]++; this.mapRevision++; }
+      this.moverMaskKeys[layerIndex] = key; this.moverBaseMaps[layerIndex] = base;
+      this.moverNavigationMaps[layerIndex] = overlay;
+    }
+  }
+
+  #prepareMoverBodies() {
+    this.moverBodies.length = 0;
+    this.#forMechanismBodies((kind, index, id) => {
+      const body = this.moverBodyStorage[this.moverBodies.length];
+      const box = kind === BODY_ROCK && this.rocks.collider[index] === DYNAMIC_COLLIDER_FIXED_BOX;
+      const radius = this.#bodyValue(kind, index, "radius");
+      Object.assign(body, { kind, index, id, box, radius,
+        halfX: box ? this.#dynamicBodyHalfX(index) : radius,
+        halfZ: box ? this.#dynamicBodyHalfZ(index) : radius,
+        layerIndex: this.#bodyValue(kind, index, "layerIndex"), y: this.#bodyValue(kind, index, "worldY"),
+        height: kind === BODY_ROCK ? this.rocks.height[index] : kind === BODY_ENEMY_WIZARD_BODY ? 0.3
+          : kind === BODY_ENEMY_WIZARD ? enemyDefinition(this.enemies.archetype[index]).presentationHeight : 1.6 });
+      this.moverBodies.push(body);
+    });
+    this.moverBodies.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  }
+
+  #refreshMoverBodies(start = false) {
+    for (const body of this.moverBodies) {
+      body.x = this.#bodyValue(body.kind, body.index, "x");
+      body.z = this.#bodyValue(body.kind, body.index, "z");
+      if (start) { body.startX = body.x; body.startZ = body.z; }
+    }
+  }
+
+  #resolveMoverContacts() {
+    this.#refreshMoverBodies();
+    for (const body of this.moverBodies) for (const mover of this.movers.records) {
+      if (!moverBodyOverlap(body, body.x, body.z, mover, mover.x, mover.z)) continue;
+      const hit = this._bodyContact;
+      if (body.box) boxBoxContact(body.x, body.z, body.halfX, body.halfZ, mover.x, mover.z, 0.5, 0.5, hit);
+      else circleBoxContact(body.x, body.z, body.radius, mover.x, mover.z, 0.5, 0.5, hit);
+      let x = body.x - hit.nx * (hit.penetration + 0.001), z = body.z - hit.nz * (hit.penetration + 0.001);
+      if (this.#moverBlockedAt(body, x, z)) { x = body.startX; z = body.startZ; }
+      this.#setBodyValue(body.kind, body.index, "x", x); this.#setBodyValue(body.kind, body.index, "z", z);
+      for (const [vx, vz] of body.kind === BODY_PLAYER || body.kind === BODY_ENEMY_WIZARD
+        ? [["locomotionVx", "locomotionVz"], ["externalVx", "externalVz"]] : [["vx", "vz"]]) {
+        const a = this.#bodyValue(body.kind, body.index, vx), b = this.#bodyValue(body.kind, body.index, vz);
+        const closure = a * hit.nx + b * hit.nz;
+        if (closure > 0) {
+          this.#setBodyValue(body.kind, body.index, vx, a - closure * hit.nx);
+          this.#setBodyValue(body.kind, body.index, vz, b - closure * hit.nz);
+        }
+      }
+      body.x = x; body.z = z;
+    }
+  }
+
+  #stepMovers(dt) {
+    this.#refreshMoverBodies();
+    for (const mover of this.movers.records) {
+      const i = mover.index, goal = this.movers.target[i] ? mover.properties.distanceCells : 0;
+      const progress = this.movers.progress[i];
+      if (goal === progress) continue;
+      const next = approach(progress, goal, mover.properties.speed * dt), delta = next - progress;
+      if (!this.moverScratch.tryMove(mover, this.moverBodies, this.moverBodies.length,
+        mover.dx * delta, mover.dz * delta, this.moverBlockedAt, this.movers.records)) {
+        this.movers.blocked[i] = 1; continue;
+      }
+      for (let b = 0; b < this.moverBodies.length; b++) if (this.moverScratch.touched[b]) {
+        const body = this.moverBodies[b];
+        body.x = this.moverScratch.x[b]; body.z = this.moverScratch.z[b];
+        this.#setBodyValue(body.kind, body.index, "x", body.x); this.#setBodyValue(body.kind, body.index, "z", body.z);
+      }
+      this.movers.progress[i] = next;
+      mover.x = this.movers.x[i] = this.movers.nodes[i].x + mover.dx * next;
+      mover.z = this.movers.z[i] = this.movers.nodes[i].z + mover.dz * next;
+    }
+  }
+
+  #mechanismElevatorOutputs(initialize = false) {
+    if (this.mechanismProfile !== MECHANISM_PROFILE_V2 || !this.mechanisms) return;
+    for (const node of this.mechanisms.compiled.nodes) {
+      if (node.nodeKind !== "connector") continue;
+      const i = this.elevators.findIndexByAuthoringId(node.id);
+      if (i < 0) continue;
+      const stopped = this.elevators.motion[i] === ELEVATOR_MOTION.DWELLING;
+      for (const [stop, port, arrival] of [[ELEVATOR_STOP.LOWER, "atLower", "arrivedLower"], [ELEVATOR_STOP.UPPER, "atUpper", "arrivedUpper"]]) {
+        const value = stopped && this.elevators.currentStop[i] === stop;
+        if (value && !this.mechanisms.values[node.outputs[port]] && !initialize) this.mechanisms.write(node.id, arrival);
+        this.mechanisms.write(node.id, port, value, initialize);
+      }
+    }
+  }
+
   #applyMechanismGates(initialize = false) {
     if (!this.mechanisms) return;
     let changed = false;
@@ -1615,6 +1872,8 @@ export class Simulation {
       if (!requested) this.#forMechanismBodies((kind, index) => {
         if (this.#mechanismBodyOverlaps(kind, index, device)) blocked = true;
       });
+      if (!requested && this.movers?.records.some(m => m.layerId === device.layerId
+        && Math.abs(m.x - device.x) < 1 && Math.abs(m.z - device.z) < 1)) blocked = true;
       if (blocked && !device.blocked && !initialize) this.mechanisms.write(device.id, "blocked");
       device.blocked = blocked;
       const open = requested || blocked;
@@ -1854,6 +2113,7 @@ export class Simulation {
       travelDurationSeconds: connector.travelDurationSeconds,
       dwellTicks: connector.dwellTicks,
       initialStop: connector.initialStop,
+      controlMode: this.mechanismProfile === MECHANISM_PROFILE_V2 ? connector.controlMode : "autonomous",
     });
   }
 
@@ -1876,6 +2136,10 @@ export class Simulation {
     const simulationTick = this.tickCount + 1;
     this.mechanisms?.evaluate(simulationTick);
     this.#applyMechanismGates();
+    this.#refreshMoverBlockers();
+    this.#mechanismElevatorRequests();
+    this.movers?.beginTick(this.mechanisms);
+    this.#beginTraps();
     this.#encounterSystem(simulationTick);
     if (this.enemyAiProfile === ENEMY_AI_PROFILE_INVESTIGATIVE) {
       this.broadphase.rebuild(
@@ -1901,9 +2165,12 @@ export class Simulation {
     this.#holeRimAttractionSystem(SIMULATION.dt);
     this.#bodyPhysicsSystem(SIMULATION.dt);
     this.#verticalResolutionSystem(SIMULATION.dt);
+    this.movers?.publish(this.mechanisms);
+    this.#refreshMoverBlockers();
     this.#pressurePlateSystem();
     this.#mechanismInteraction(command.interact === true);
     this.#mechanismButtonContacts();
+    this.#finishTraps(simulationTick);
     this.#movementSoundSystem(simulationTick);
     for (const spell of this.spells.entriesById.values()) {
       this.spellCooldowns[spell.code] = approach(
@@ -1924,6 +2191,7 @@ export class Simulation {
     }
     this.#castSystem(command.cast);
     this.#enemyCastSystem(simulationTick);
+    this.#fireMechanismEmitters();
     this.#projectileSystem(SIMULATION.dt);
     if (this.movementSoundProfile === MOVEMENT_SOUND_PROFILE_V1) {
       this.#deliverQueuedSoundEvents();
@@ -2070,7 +2338,7 @@ export class Simulation {
         values.push({ ...plate, layerIndex, pressed: false, occupantCount: 0 });
       }
     }
-    return this.mechanismProfile === MECHANISM_PROFILE
+    return this.mechanismProfile !== "none"
       ? values.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
       : values;
   }
@@ -2302,6 +2570,11 @@ export class Simulation {
 
   /** @param {ArenaScenario} previousScenario @param {ArenaScenario} candidate */
   #validateConnectorAuthoringMutation(previousScenario, candidate) {
+    if (this.mechanismProfile === MECHANISM_PROFILE_V2 && this.#mechanismAuthoringChanged(candidate)) {
+      for (let i = 0; i < this.elevators.activeCount; i++) if (this.elevators.triggered[i] && this.#elevatorHasRider(this.elevators.id[i])) {
+        throw new RangeError("Triggered elevator cannot be reset while a body is riding it");
+      }
+    }
     const previous = new Map(previousScenario.connectors.map((connector) => [connector.id, connector]));
     const next = new Map(candidate.connectors.map((connector) => [connector.id, connector]));
     for (const [id, before] of previous) {
@@ -2391,9 +2664,21 @@ export class Simulation {
 
   /** Reject a newly authored solid that would be born around a live body. */
   #candidateOverlapsLiveSolid(candidate) {
+    if (this.mechanismProfile === MECHANISM_PROFILE_V2) {
+      const candidates = new MechanismMoverPool(candidate.mechanisms.nodes, this.layerIdToIndex, this.layerBaseY);
+      for (const mover of candidates.records) {
+        if (!this.#mechanismAuthoringChanged(candidate)) {
+          const live = this.movers?.records.find(m => m.id === mover.id);
+          if (live) { mover.x = live.x; mover.z = live.z; }
+        }
+        let overlap = false;
+        this.#forMechanismBodies((kind, index) => { if (this.#mechanismBodyOverlaps(kind, index, mover)) overlap = true; });
+        if (overlap) return "Authored mover would overlap a live body";
+      }
+    }
     const initialMaps = new Map();
-    if (this.mechanismProfile === MECHANISM_PROFILE) {
-      const initial = new MechanismRuntime(candidate.authoringMap);
+    if (this.mechanismProfile !== "none") {
+      const initial = new MechanismRuntime(candidate.authoringMap, this.mechanismProfile);
       for (const node of initial.compiled.nodes) {
         if (node.definitionId !== "object.pressure-plate") continue;
         const layerIndex = this.layerIdToIndex.get(node.layerId);
@@ -2441,7 +2726,7 @@ export class Simulation {
         radius,
       )) return "Authored solid geometry would overlap live dynamic clutter";
     }
-    if (this.mechanismProfile === MECHANISM_PROFILE) {
+    if (this.mechanismProfile !== "none") {
       for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
         if (intersects(this.dynamicDeadBodies.layerIndex[index], this.dynamicDeadBodies.x[index], this.dynamicDeadBodies.z[index], this.dynamicDeadBodies.radius[index])) return "Authored solid geometry would overlap a dynamic corpse";
       }
@@ -2527,7 +2812,9 @@ export class Simulation {
           if (previous) { plate.pressed = previous.pressed; plate.occupantCount = previous.occupantCount; }
         }
         for (const device of this.mechanismDevices ?? []) device.layerIndex = this.layerIdToIndex.get(device.layerId);
+        for (const mover of this.movers?.records ?? []) mover.layerIndex = this.layerIdToIndex.get(mover.layerId);
         this.#applyMechanismGates(true);
+        this.#refreshMoverBlockers();
       }
     }
   }
@@ -4012,7 +4299,7 @@ export class Simulation {
         continue;
       }
       const result = visualCheck(
-        this.map,
+        this.#navigationMap(),
         pool.x[index],
         pool.z[index],
         pool.facingX[index],
@@ -4081,7 +4368,7 @@ export class Simulation {
   /** @param {number} index */
   #selectVisibleHostileProjectile(index) {
     const pool = this.enemies;
-    const map = this.layerMaps[pool.layerIndex[index]] ?? this.map;
+    const map = this.#navigationMap(pool.layerIndex[index]);
     const range = PERCEPTIVE_WIZARD.visualRangeMeters;
     const candidateCount = this.broadphase.queryProjectiles(
       pool.x[index] - range,
@@ -4094,7 +4381,8 @@ export class Simulation {
     for (let candidate = 0; candidate < candidateCount; candidate += 1) {
       const projectileIndex = this.broadphase.projectileCandidates[candidate];
       if (this.projectiles.layerIndex[projectileIndex] !== pool.layerIndex[index]) continue;
-      if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player) continue;
+      if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player
+        && !(this.mechanismProfile === MECHANISM_PROFILE_V2 && this.projectiles.ownerTeam[projectileIndex] === ACTOR_TEAM.environment)) continue;
       const spellCode = this.projectiles.spellCode[projectileIndex];
       if (
         spellCode > 0
@@ -4333,7 +4621,7 @@ export class Simulation {
         continue;
       }
       const result = visualCheck(
-        this.map,
+        this.#navigationMap(),
         pool.x[index],
         pool.z[index],
         pool.facingX[index],
@@ -4735,7 +5023,7 @@ export class Simulation {
       }
     }
     this.destinationFields.update(
-      layerAware ? this.layerMaps : this.map,
+      layerAware ? this.moverNavigationMaps ?? this.layerMaps : this.#navigationMap(),
       PERCEPTIVE_WIZARD.navigationExpansionsPerTick,
     );
   }
@@ -5617,11 +5905,12 @@ export class Simulation {
       const projectileIndex = usesPerceptionProfile(this.enemyAiProfile)
         ? this.broadphase.projectileCandidates[candidate]
         : candidate;
-      if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player) continue;
+      if (this.projectiles.ownerTeam[projectileIndex] !== ACTOR_TEAM.player
+        && !(this.mechanismProfile === MECHANISM_PROFILE_V2 && this.projectiles.ownerTeam[projectileIndex] === ACTOR_TEAM.environment)) continue;
       if (
         usesPerceptionProfile(this.enemyAiProfile)
         && !visualCheck(
-          this.map,
+          this.#navigationMap(),
           pool.x[index],
           pool.z[index],
           pool.facingX[index],
@@ -5740,7 +6029,7 @@ export class Simulation {
       if (threat) {
         const projectileIndex = threat.index;
         const direction = chooseDodgeDirection(
-          this.map,
+          this.#navigationMap(),
           { x: pool.x[index], z: pool.z[index], radius: pool.radius[index] },
           {
             id: this.projectiles.id[projectileIndex],
@@ -5880,7 +6169,7 @@ export class Simulation {
     const layerIndex = pool.layerIndex[index];
     const layerAware = this.authoredNavigationTopologyProfile
       === AUTHORED_NAVIGATION_TOPOLOGY_PROFILE_V1;
-    const map = layerAware ? this.layerMaps[layerIndex] ?? this.map : this.map;
+    const map = this.#navigationMap(layerAware ? layerIndex : undefined);
     const step = this.destinationFields.isCurrent(
       slot,
       layerAware ? this.layerMapRevisions[layerIndex] : this.mapRevision,
@@ -6060,7 +6349,7 @@ export class Simulation {
       if (threat) {
         const projectileIndex = threat.index;
         const direction = chooseDodgeDirection(
-          this.map,
+          this.#navigationMap(),
           { x: pool.x[index], z: pool.z[index], radius: pool.radius[index] },
           {
             id: this.projectiles.id[projectileIndex],
@@ -6413,7 +6702,7 @@ export class Simulation {
         pool.aimInterceptTime[index] = 0;
         pool.aimLeadTime[index] = 0;
         const sight = visualCheck(
-          this.map,
+          this.#navigationMap(),
           pool.x[index],
           pool.z[index],
           pool.facingX[index],
@@ -6468,7 +6757,7 @@ export class Simulation {
       pool.aimLeadTime[index] = leadTime;
       if (!usesPerceptionProfile(this.enemyAiProfile)) {
         const blocked = gridRayBlocked(
-          this.map,
+          this.#navigationMap(),
           pool.x[index],
           pool.z[index],
           this.player.x,
@@ -7221,6 +7510,7 @@ export class Simulation {
       this.#acquireElevatorSupportForBody(BODY_ENEMY_WIZARD_BODY, index);
     }
     this.elevators.step(dt);
+    this.#mechanismElevatorOutputs();
     this.#carryElevatorSupportedBody(BODY_PLAYER, 0);
     for (let index = 0; index < this.enemies.activeCount; index += 1) {
       this.#carryElevatorSupportedBody(BODY_ENEMY_WIZARD, index);
@@ -7975,6 +8265,10 @@ export class Simulation {
       for (let index = 0; index < this.rocks.activeCount; index += 1) {
         if ((!filters || filters.prop) && this.#bodyPressesPlate(BODY_ROCK, index, plate)) count += 1;
       }
+      if (filters?.prop) for (const mover of this.movers?.records ?? []) {
+        const reach = 0.5 + plate.width / 2;
+        if (mover.layerIndex === plate.layerIndex && Math.abs(mover.x - plate.x) < reach && Math.abs(mover.z - plate.z) < reach) count++;
+      }
       if (filters?.corpse) for (let index = 0; index < this.dynamicDeadBodies.activeCount; index += 1) {
         if (this.#bodyPressesPlate(BODY_ENEMY_WIZARD_BODY, index, plate)) count += 1;
       }
@@ -8098,6 +8392,8 @@ export class Simulation {
 
   /** @param {number} dt */
   #bodyPhysicsSystem(dt) {
+    const hasMovers = this.movers?.activeCount > 0;
+    if (hasMovers) this.#prepareMoverBodies();
     const player = this.player;
     const enemies = this.enemies;
     const deadBodies = this.dynamicDeadBodies;
@@ -8173,10 +8469,13 @@ export class Simulation {
     const maximumTravel = Math.max(0.001, minimumRadius * DYNAMIC_PHYSICS.travelRadiusFraction);
     const substeps = Math.min(
       DYNAMIC_PHYSICS.maximumSubsteps,
-      Math.max(1, Math.ceil((maximumSpeed * dt) / maximumTravel)),
+      Math.max(1, Math.ceil((maximumSpeed * dt) / maximumTravel), hasMovers
+        ? Math.ceil(Math.max(...this.movers.records.map(m => m.properties.speed)) * dt / 0.025) : 1),
     );
     const stepDt = dt / substeps;
     for (let substep = 0; substep < substeps; substep += 1) {
+      this.#sampleTraps();
+      if (hasMovers) this.#refreshMoverBodies(true);
       this.#syncPlayerVelocity();
       player.x += player.vx * stepDt;
       player.z += player.vz * stepDt;
@@ -8377,7 +8676,10 @@ export class Simulation {
         for (let index = 0; index < deadBodies.activeCount; index += 1) {
           this.#resolveDeadBodyGrid(index, false);
         }
+        if (hasMovers) this.#resolveMoverContacts();
       }
+      if (hasMovers) this.#stepMovers(stepDt);
+      this.#sampleTraps();
     }
 
     for (let index = 0; index < this.rocks.activeCount; index += 1) {
@@ -9405,6 +9707,13 @@ export class Simulation {
   }
 
   /** @param {number} dt */
+  #projectileMoverContact(x, z, y, radius, layerIndex) {
+    for (const mover of this.movers?.records ?? []) if (mover.layerIndex === layerIndex
+      && this.#projectileVerticalIntervalContact(y, radius, mover.y, mover.y + mover.height)
+      && circleBoxContact(x, z, radius, mover.x, mover.z, 0.5, 0.5, this._bodyContact)) return mover.index;
+    return -1;
+  }
+
   #projectileSystem(dt) {
     const pool = this.projectiles;
     this.broadphase.rebuild(
@@ -9426,6 +9735,7 @@ export class Simulation {
       const startX = pool.x[index];
       const startZ = pool.z[index];
       const projectileLayerIndex = pool.layerIndex[index];
+      const environmental = pool.ownerTeam[index] === ACTOR_TEAM.environment;
       const projectileMap = this.layerMaps[projectileLayerIndex] ?? this.map;
       const deltaX = pool.vx[index] * dt;
       const deltaZ = pool.vz[index] * dt;
@@ -9440,7 +9750,7 @@ export class Simulation {
         Math.max(startZ, startZ + deltaZ) + rockPadding,
       );
       const enemyPadding = pool.radius[index] + ENEMY_WIZARD.radius;
-      const enemyCandidateCount = pool.ownerTeam[index] === ACTOR_TEAM.player
+      const enemyCandidateCount = pool.ownerTeam[index] === ACTOR_TEAM.player || environmental
         ? this.broadphase.queryEnemies(
           Math.min(startX, startX + deltaX) - enemyPadding,
           Math.min(startZ, startZ + deltaZ) - enemyPadding,
@@ -9458,6 +9768,7 @@ export class Simulation {
       let hitKind = "";
       let hitRockIndex = -1;
       let hitElevatorIndex = -1;
+      let hitMoverIndex = -1;
       let hitActorIndex = -1;
       let hitDeadBodyIndex = -1;
       let hitX = startX;
@@ -9473,6 +9784,8 @@ export class Simulation {
           hitZ = testZ;
           break;
         }
+        hitMoverIndex = this.#projectileMoverContact(testX, testZ, pool.worldY[index], pool.radius[index], projectileLayerIndex);
+        if (hitMoverIndex >= 0) { hitKind = "mover"; hitX = testX; hitZ = testZ; break; }
         hitElevatorIndex = this.#projectileElevatorContact(
           testX,
           testZ,
@@ -9511,6 +9824,8 @@ export class Simulation {
         for (let candidate = 0; candidate < deadBodyCandidateCount; candidate += 1) {
           const bodyIndex = this.broadphase.deadBodyCandidates[candidate];
           if (this.dynamicDeadBodies.layerIndex[bodyIndex] !== projectileLayerIndex) continue;
+          if (environmental && !this.#projectileVerticalIntervalContact(pool.worldY[index], pool.radius[index],
+            this.dynamicDeadBodies.worldY[bodyIndex], this.dynamicDeadBodies.worldY[bodyIndex] + MECHANISM_COMBAT.corpseHeight)) continue;
           if (
             Math.hypot(
               testX - this.dynamicDeadBodies.x[bodyIndex],
@@ -9525,9 +9840,10 @@ export class Simulation {
           }
         }
         if (hitKind) break;
-        if (pool.ownerTeam[index] === ACTOR_TEAM.enemy) {
+        if (pool.ownerTeam[index] === ACTOR_TEAM.enemy || environmental) {
           if (
             this.player.layerIndex === projectileLayerIndex
+            && (!environmental || this.#projectileVerticalIntervalContact(pool.worldY[index], pool.radius[index], this.player.worldY, this.player.worldY + 1.6))
             &&
             Math.hypot(testX - this.player.x, testZ - this.player.z)
             <= pool.radius[index] + this.player.radius
@@ -9536,10 +9852,13 @@ export class Simulation {
             hitX = testX;
             hitZ = testZ;
           }
-        } else if (pool.ownerTeam[index] === ACTOR_TEAM.player) {
+        }
+        if (!hitKind && (pool.ownerTeam[index] === ACTOR_TEAM.player || environmental)) {
           for (let candidate = 0; candidate < enemyCandidateCount; candidate += 1) {
             const enemyIndex = this.broadphase.enemyCandidates[candidate];
             if (this.enemies.layerIndex[enemyIndex] !== projectileLayerIndex) continue;
+            if (environmental && !this.#projectileVerticalIntervalContact(pool.worldY[index], pool.radius[index],
+              this.enemies.worldY[enemyIndex], this.enemies.worldY[enemyIndex] + enemyDefinition(this.enemies.archetype[enemyIndex]).presentationHeight)) continue;
             if (
               Math.hypot(
                 testX - this.enemies.x[enemyIndex],
@@ -9558,6 +9877,13 @@ export class Simulation {
       }
 
       if (hitKind) {
+        if (pool.projectileKind[index] === PROJECTILE_KIND.bolt) {
+          const source = { owner: { kind: "environment", id: pool.sourceAuthoringId[index] ?? pool.ownerId[index], team: "environment" },
+            projectileId: pool.id[index], travelDirection: { x: pool.vx[index], z: pool.vz[index] } };
+          if (hitKind === "player") this.#damagePlayer(MECHANISM_COMBAT.boltDamage, source, "direct");
+          else if (hitActorIndex >= 0) this.#damageEnemy(hitActorIndex, MECHANISM_COMBAT.boltDamage, source, "direct");
+          pool.removeSwap(index); continue;
+        }
         if (pool.projectileKind[index] === PROJECTILE_KIND.thrownStone) {
           if (hitKind === "player") {
             this.#damagePlayer(ENEMY_URCHIN.projectile.damage, {
@@ -9586,6 +9912,7 @@ export class Simulation {
           hitDeadBodyIndex,
           hitX,
           hitZ,
+          hitMoverIndex,
         );
         this.#applyExplosion(event);
         if (
@@ -9765,6 +10092,7 @@ export class Simulation {
     deadBodyIndex,
     hitX,
     hitZ,
+    moverIndex = -1,
   ) {
     const pool = this.projectiles;
     const spellCode = pool.spellCode[projectileIndex];
@@ -9813,6 +10141,13 @@ export class Simulation {
         contactZ = this.rocks.z[rockIndex] + nz * this.rocks.radius[rockIndex];
       }
       hit = { kind: "rock", id: this.rocks.id[rockIndex] };
+    } else if (hitKind === "mover") {
+      const mover = this.movers.records[moverIndex];
+      nx = this._bodyContact.nx; nz = this._bodyContact.nz;
+      contactX = clamp(hitX, mover.x - 0.5, mover.x + 0.5);
+      contactZ = clamp(hitZ, mover.z - 0.5, mover.z + 0.5);
+      nx = -nx; nz = -nz;
+      hit = { kind: "mover", id: mover.id };
     } else if (hitKind === "elevator") {
       nx = this._bodyContact.nx;
       nz = this._bodyContact.nz;
@@ -9870,6 +10205,16 @@ export class Simulation {
         ? { kind: "obelisk", id: obelisk.spawnId, cx: cell.cx, cz: cell.cz }
         : { kind: "cell", cx: cell.cx, cz: cell.cz };
     }
+    return this.#createCapturedExplosion({ projectileId: pool.id[projectileIndex], layerIndex: pool.layerIndex[projectileIndex],
+      spellCode, definitionRevision, effectId: pool.effectId[projectileIndex], effectSeed: pool.effectSeed[projectileIndex],
+      owner: { kind: ownerKindName(pool.ownerKind[projectileIndex]), id: pool.sourceAuthoringId[projectileIndex] ?? pool.ownerId[projectileIndex], team: teamName(pool.ownerTeam[projectileIndex]) } },
+    hit, contactX, contactZ, nx, nz, cell);
+  }
+
+  #createCapturedExplosion(source, hit, contactX, contactZ, nx, nz, cell) {
+    const { spellCode, definitionRevision } = source;
+    const spell = this.spells.getByCode(spellCode);
+    const definition = this.#capturedSpellDefinition(spellCode, definitionRevision);
     const originX = contactX + nx * EXPLOSION.originEpsilon;
     const originZ = contactZ + nz * EXPLOSION.originEpsilon;
     const spawnHeight = Number(
@@ -9879,19 +10224,15 @@ export class Simulation {
       type: "explosion",
       id: this.nextExplosionId,
       tick: this.tickCount + 1,
-      projectileId: pool.id[projectileIndex],
-      layerIndex: pool.layerIndex[projectileIndex],
-      layerId: this.layerIds[pool.layerIndex[projectileIndex]] ?? null,
+      projectileId: source.projectileId,
+      layerIndex: source.layerIndex,
+      layerId: this.layerIds[source.layerIndex] ?? null,
       spellId: spell?.id ?? FIREBALL_SPELL_ID,
       spellCode,
       definitionRevision,
-      effectId: pool.effectId[projectileIndex],
-      effectSeed: pool.effectSeed[projectileIndex],
-      owner: {
-        kind: ownerKindName(pool.ownerKind[projectileIndex]),
-        id: pool.ownerId[projectileIndex],
-        team: teamName(pool.ownerTeam[projectileIndex]),
-      },
+      effectId: source.effectId,
+      effectSeed: source.effectSeed,
+      owner: { ...source.owner },
       hit,
       x: originX,
       y: spawnHeight,
@@ -9963,7 +10304,7 @@ export class Simulation {
     );
     const blocked = hasBlastResponse
       ? gridRayBlocked(
-        this.layerMaps[event.layerIndex] ?? this.map,
+        this.#navigationMap(event.layerIndex),
         event.originX,
         event.originZ,
         this.player.x,
@@ -10028,7 +10369,7 @@ export class Simulation {
     );
     const blocked = hasBlastResponse
       ? gridRayBlocked(
-        this.layerMaps[event.layerIndex] ?? this.map,
+        this.#navigationMap(event.layerIndex),
         event.originX,
         event.originZ,
         pool.x[index],
@@ -10193,7 +10534,7 @@ export class Simulation {
     if (this.enemyAiProfile !== ENEMY_AI_PROFILE_PERCEPTIVE) return;
     const pool = this.enemies;
     const playerVisible = visualCheck(
-      this.map,
+      this.#navigationMap(),
       pool.x[index],
       pool.z[index],
       pool.facingX[index],
@@ -10297,7 +10638,7 @@ export class Simulation {
     response ??= zeroImpulseResponse(event, state.x, state.z, OBELISK.radius);
     const blocked = !directHit && hasBlastResponse
       ? gridRayBlocked(
-        this.layerMaps[event.layerIndex] ?? this.map,
+        this.#navigationMap(event.layerIndex),
         event.originX,
         event.originZ,
         state.x,
@@ -10397,7 +10738,7 @@ export class Simulation {
     });
     if (!response) return;
     const blocked = gridRayBlocked(
-      this.layerMaps[event.layerIndex] ?? this.map,
+      this.#navigationMap(event.layerIndex),
       event.originX,
       event.originZ,
       this.rocks.x[index],
@@ -10455,7 +10796,7 @@ export class Simulation {
     );
     const blocked = hasBlastResponse
       ? gridRayBlocked(
-        this.layerMaps[event.layerIndex] ?? this.map,
+        this.#navigationMap(event.layerIndex),
         event.originX,
         event.originZ,
         pool.x[index],
@@ -11832,6 +12173,7 @@ export class Simulation {
     for (let index = 0; index < projectiles.length; index += 1) {
       const projectileKindCode = this.projectiles.projectileKind[index];
       const projectileKind = PROJECTILE_KIND_NAMES[projectileKindCode] ?? "fireball";
+      const sourceAuthoringId = this.projectiles.sourceAuthoringId[index];
       projectiles[index] = {
         kind: "projectile",
         id: this.projectiles.id[index],
@@ -11840,9 +12182,10 @@ export class Simulation {
         ownerTeam: teamName(this.projectiles.ownerTeam[index]),
         owner: {
           kind: ownerKindName(this.projectiles.ownerKind[index]),
-          id: this.projectiles.ownerId[index],
+          id: sourceAuthoringId ?? this.projectiles.ownerId[index],
           team: teamName(this.projectiles.ownerTeam[index]),
         },
+        ...(sourceAuthoringId === null ? {} : { sourceAuthoringId }),
         projectileKind,
         projectileKindCode,
         spellId: projectileKindCode === PROJECTILE_KIND.fireball
@@ -11970,6 +12313,9 @@ export class Simulation {
         travelDurationSeconds: this.elevators.travelDurationSeconds[index],
         currentStop: ELEVATOR_STOP_NAMES[this.elevators.currentStop[index]],
         requestedStop: ELEVATOR_STOP_NAMES[this.elevators.requestedStop[index]],
+        ...(this.mechanismProfile === MECHANISM_PROFILE_V2
+          ? { controlMode: this.elevators.triggered[index] ? "triggered" : "autonomous" }
+          : {}),
         motionState: ELEVATOR_MOTION_NAMES[this.elevators.motion[index]],
         dwellTicksRemaining: this.elevators.dwellRemaining[index],
         debugRequest: this.elevators.hasDebugRequest[index]
@@ -12018,6 +12364,9 @@ export class Simulation {
         for (const device of this.mechanismDevices) {
           if (device.definitionId === "mechanism.gate" && device.layerId === layerId) occluderCells[map.index(Math.floor(device.x), Math.floor(device.z))] = Number(!device.open);
         }
+        for (const cell of (this.moverMaskKeys?.[layerIndex] ?? "").split(",").filter(Boolean)) {
+          const [x, z] = cell.split(":").map(Number); occluderCells[map.index(x, z)] = 1;
+        }
       }
       return {
         version: MAP_VERSION,
@@ -12046,7 +12395,15 @@ export class Simulation {
     return {
       schemaVersion: SCHEMA_VERSION,
       mechanismProfile: this.mechanismProfile,
-      mechanisms: this.mechanisms ? { ...this.mechanisms.snapshot(), devices: this.mechanismDevices.map((d) => ({ id: d.id, definitionId: d.definitionId, layerId: d.layerId, x: d.x, z: d.z, rotation: d.rotation, open: d.open, on: d.on, blocked: d.blocked })) } : null,
+      mechanisms: this.mechanisms ? { ...this.mechanisms.snapshot(), devices: this.mechanismDevices.map((d) => {
+        const mover = this.movers?.records.find(m => m.id === d.id);
+        const trap = this.traps?.byId.get(d.id);
+        return { id: d.id, definitionId: d.definitionId, layerId: d.layerId, x: mover?.x ?? d.x, z: mover?.z ?? d.z,
+          rotation: d.rotation, open: d.open, on: d.on, blocked: mover ? !!this.movers.blocked[mover.index] : d.blocked,
+          ...(mover ? { previousX: this.movers.previousX[mover.index], previousZ: this.movers.previousZ[mover.index], progress: this.movers.progress[mover.index] } : {}),
+          ...(trap === undefined ? {} : { phase: this.traps.phase[trap], activationOrdinal: this.traps.ordinal[trap],
+            refused: this.traps.refused[trap], ignored: this.traps.ignored[trap], reach: this.traps.reach(trap) }) };
+      }) } : null,
       seed: this.seed,
       rngState: this.rng.state,
       tick: this.tickCount,
@@ -12688,6 +13045,7 @@ export class Simulation {
     const spellCode = this.projectiles.spellCode[index];
     const projectileKindCode = this.projectiles.projectileKind[index];
     const projectileKind = PROJECTILE_KIND_NAMES[projectileKindCode] ?? "fireball";
+    const sourceAuthoringId = this.projectiles.sourceAuthoringId[index];
     return {
       kind: "projectile",
       id: this.projectiles.id[index],
@@ -12696,9 +13054,10 @@ export class Simulation {
       ownerTeam: teamName(this.projectiles.ownerTeam[index]),
       owner: {
         kind: ownerKindName(this.projectiles.ownerKind[index]),
-        id: this.projectiles.ownerId[index],
+        id: sourceAuthoringId ?? this.projectiles.ownerId[index],
         team: teamName(this.projectiles.ownerTeam[index]),
       },
+      ...(sourceAuthoringId === null ? {} : { sourceAuthoringId }),
       projectileKind,
       projectileKindCode,
       spell: projectileKindCode === PROJECTILE_KIND.fireball
@@ -13294,6 +13653,7 @@ export class Simulation {
         !recording.initialAuthoringMap
         || (
           Number(recording.initialAuthoringMap.version) !== AUTHORING_MAP_VERSION
+          && Number(recording.initialAuthoringMap.version) !== 8
           && Number(recording.initialAuthoringMap.version) !== 7
           && Number(recording.initialAuthoringMap.version) !== NAVIGATION_AUTHORING_MAP_VERSION
         )
@@ -13406,6 +13766,7 @@ export class Simulation {
       || recordingSchema === 22
       || recordingSchema === 23
       || recordingSchema === 24
+      || recordingSchema === 25
     ) {
       gameplayProfile = String(recording.configuration?.gameplayProfile ?? "");
       enemyAiProfile = String(recording.configuration?.enemyAiProfile ?? "");
@@ -13568,9 +13929,9 @@ export class Simulation {
             `Schema-v${recordingSchema} recording has invalid or missing obelisk-encounter profile`,
           );
         }
-        if (Number(recording.initialAuthoringMap?.version) !== (recordingSchema >= 24 ? 8 : 7)) {
+        if (Number(recording.initialAuthoringMap?.version) !== (recordingSchema >= 25 ? 9 : recordingSchema >= 24 ? 8 : 7)) {
           throw new TypeError(
-            `Schema-v${recordingSchema} recording requires an authoring-map v${recordingSchema >= 24 ? 8 : 7} baseline`,
+            `Schema-v${recordingSchema} recording requires an authoring-map v${recordingSchema >= 25 ? 9 : recordingSchema >= 24 ? 8 : 7} baseline`,
           );
         }
       }
@@ -13585,7 +13946,7 @@ export class Simulation {
         }
       }
     }
-    if (recordingSchema >= 24 && (recording.configuration?.mechanismProfile !== MECHANISM_PROFILE
+    if (recordingSchema >= 24 && (recording.configuration?.mechanismProfile !== (recordingSchema >= 25 ? MECHANISM_PROFILE_V2 : MECHANISM_PROFILE)
       || Object.entries(MECHANISM_LIMITS).some(([key, value]) => recording.configuration?.mechanismCapacities?.[key] !== value))) {
       throw new TypeError("Schema-v24 recording requires the mechanism profile and pinned capacities");
     }
@@ -13628,12 +13989,25 @@ export class Simulation {
       enemyHomeProfile,
       obeliskEncounterProfile,
       obeliskDestructionProfile,
-      mechanismProfile: recordingSchema >= 24 ? MECHANISM_PROFILE : "none",
+      mechanismProfile: recordingSchema >= 25 ? MECHANISM_PROFILE_V2 : recordingSchema >= 24 ? MECHANISM_PROFILE : "none",
       soundEventCapacity,
       dynamicDeadBodyCapacity,
       inertDeadBodyCapacity,
     });
-    for (const entry of recording.commands) simulation.tick(entry.command);
+    for (const entry of recording.commands) {
+      const command = structuredClone(entry.command);
+      if (recordingSchema < 25) {
+        const normalize = (value) => {
+          if (!value || typeof value !== "object") return;
+          if (value.kind === "connector") for (const side of ["before", "after"]) {
+            if (value[side]) value[side].controlMode ??= "autonomous";
+          }
+          for (const nested of Object.values(value)) normalize(nested);
+        };
+        normalize(command);
+      }
+      simulation.tick(command);
+    }
     return simulation;
   }
 }

@@ -289,6 +289,7 @@ export function placeElevatorConnector(input, x, z, options) {
     ),
     dwellSeconds: Number(options.dwellSeconds ?? VERTICAL_PHYSICS.defaultDwellSeconds),
     initialStop: options.initialStop ?? "lower",
+    controlMode: options.controlMode ?? "autonomous",
   };
   document.connectors.push(connector);
   document.nextConnectorOrdinal = ordinal + 1;
@@ -301,6 +302,7 @@ export function removeConnector(input, connectorId) {
   const index = document.connectors.findIndex((connector) => connector.id === connectorId);
   if (index < 0) throw new RangeError(`Unknown authoring connector "${connectorId}"`);
   document.connectors.splice(index, 1);
+  pruneMechanismLinks(document);
   document.navigationLinks = document.navigationLinks.filter((link) => (
     ![link.a, link.b].some((endpoint) => (
       endpoint.kind === "connector-endpoint" && endpoint.connectorId === connectorId
@@ -324,6 +326,7 @@ export function updateConnector(input, connectorId, changes) {
     "travelDurationSeconds",
     "dwellSeconds",
     "initialStop",
+    "controlMode",
   ]) {
     if (changes[field] !== undefined) connector[field] = changes[field];
   }
@@ -331,6 +334,7 @@ export function updateConnector(input, connectorId, changes) {
     connector.x = Math.floor(Number(changes.x ?? connector.x)) + 0.5;
     connector.z = Math.floor(Number(changes.z ?? connector.z)) + 0.5;
   }
+  pruneMechanismLinks(document);
   return cloneAuthoringMap(document);
 }
 

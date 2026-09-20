@@ -123,7 +123,7 @@ test("Three renders visible-floor mechanism devices and updates gate geometry wi
   presentation.render(snapshot, 0, view(snapshot, sightFrame));
   const mesh = presentation.mechanismMesh;
   assert.equal(mesh.count, 1);
-  assert.equal(mesh.instanceMatrix.count, 256);
+  assert.equal(mesh.instanceMatrix.count, 448);
   const matrix = new THREE.Matrix4();
   mesh.getMatrixAt(0, matrix);
   assert.ok(Math.abs(matrix.elements[13] - 0.95) < 1e-6);

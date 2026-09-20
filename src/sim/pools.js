@@ -37,6 +37,7 @@ export class ProjectilePool {
     this.lifetime = new Float32Array(capacity);
     this.radius = new Float32Array(capacity);
     this.ownerId = new Uint32Array(capacity);
+    this.sourceAuthoringId = new Array(capacity).fill(null);
     this.ownerKind = new Uint8Array(capacity);
     this.ownerTeam = new Uint8Array(capacity);
     this.projectileKind = new Uint8Array(capacity);
@@ -51,9 +52,10 @@ export class ProjectilePool {
     this.activeCount = 0;
     this.dropped = 0;
     this.nextId = 1;
+    this.sourceAuthoringId.fill(null);
   }
 
-  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,worldY?:number,ownerId?:number,ownerKind?:number,ownerTeam?:number,projectileKind?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
+  /** @param {{x:number,z:number,vx:number,vz:number,lifetime:number,radius:number,worldY?:number,ownerId?:number,sourceAuthoringId?:string|null,ownerKind?:number,ownerTeam?:number,projectileKind?:number,spellCode?:number,definitionRevision?:number,effectId?:number,effectSeed?:number,layerIndex?:number}} value */
   spawn(value) {
     if (this.activeCount >= this.capacity) {
       this.dropped += 1;
@@ -78,6 +80,7 @@ export class ProjectilePool {
     this.lifetime[index] = value.lifetime;
     this.radius[index] = value.radius;
     this.ownerId[index] = value.ownerId ?? 0;
+    this.sourceAuthoringId[index] = value.sourceAuthoringId ?? null;
     this.ownerKind[index] = value.ownerKind ?? 1;
     this.ownerTeam[index] = value.ownerTeam ?? 1;
     this.projectileKind[index] = projectileKind;
@@ -108,6 +111,7 @@ export class ProjectilePool {
       this.lifetime[index] = this.lifetime[last];
       this.radius[index] = this.radius[last];
       this.ownerId[index] = this.ownerId[last];
+      this.sourceAuthoringId[index] = this.sourceAuthoringId[last];
       this.ownerKind[index] = this.ownerKind[last];
       this.ownerTeam[index] = this.ownerTeam[last];
       this.projectileKind[index] = this.projectileKind[last];
@@ -117,6 +121,7 @@ export class ProjectilePool {
       this.effectSeed[index] = this.effectSeed[last];
       this.layerIndex[index] = this.layerIndex[last];
     }
+    this.sourceAuthoringId[last] = null;
     this.activeCount = last;
     return true;
   }

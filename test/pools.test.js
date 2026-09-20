@@ -16,6 +16,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
     radius: 0.3,
     worldY: 3.75,
     ownerId: 77,
+    sourceAuthoringId: "mechanism-bolt-emitter-0007",
     ownerKind: 2,
     ownerTeam: 2,
   });
@@ -29,7 +30,7 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
       id: pool.id[0], x: pool.x[0], z: pool.z[0], previousX: pool.previousX[0], previousZ: pool.previousZ[0],
       worldY: pool.worldY[0], previousWorldY: pool.previousWorldY[0],
       vx: pool.vx[0], vz: pool.vz[0], age: pool.age[0], lifetime: pool.lifetime[0], radius: pool.radius[0],
-      ownerId: pool.ownerId[0], ownerKind: pool.ownerKind[0], ownerTeam: pool.ownerTeam[0],
+      ownerId: pool.ownerId[0], sourceAuthoringId: pool.sourceAuthoringId[0], ownerKind: pool.ownerKind[0], ownerTeam: pool.ownerTeam[0],
     },
     {
       id: lastId,
@@ -44,10 +45,13 @@ test("projectile swap-and-pop copies every component, including stable ID", () =
       radius: Math.fround(0.3),
       worldY: Math.fround(3.75), previousWorldY: Math.fround(3.75),
       ownerId: 77,
+      sourceAuthoringId: "mechanism-bolt-emitter-0007",
       ownerKind: 2,
       ownerTeam: 2,
     },
   );
+  pool.reset();
+  assert.equal(pool.sourceAuthoringId.every(value => value === null), true);
 });
 
 test("particle swap-and-pop copies every component and flags", () => {

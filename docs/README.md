@@ -1,12 +1,12 @@
 # Lantern Documentation
 
-Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v24 and authoring-map v8. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
+Lantern `0.9.3` is the current application release. The development runtime is at snapshot/recording schema v25 and authoring-map v9. Documents are separated by purpose so historical milestone contracts remain intact without obscuring the current runtime boundary.
 
 | Boundary | Current value | Primary owner |
 | --- | --- | --- |
 | Application/package | `0.9.3` | root README and release milestone |
-| Snapshot/recording | v24 | [platform contract](./platform.md) |
-| Authoring map | v8 | [map-authoring contract](./notes/map-authoring-foundation.md) |
+| Snapshot/recording | v25 | [platform contract](./platform.md) |
+| Authoring map | v9 | [map-authoring contract](./notes/map-authoring-foundation.md) |
 | Legacy scenario/map | scenario v3 / map v1 | [platform contract](./platform.md) |
 | Fireball definition | v1 | [Spell Lab milestone](./milestones/0.5.0-spell-lab.md) |
 | Performance report | v4 | [platform contract](./platform.md) |
@@ -46,9 +46,9 @@ These documents preserve future intent and candidate experiments. They are mutab
 
 ## Current behavior and subsystem references
 
-- [Authored mechanisms](./notes/authored-mechanisms.md) — M1E.1 + M1E.2: bounded signals, gates, controls, logic, wiring, and the two-pass handoff. Browser acceptance remains pending.
+- [Authored mechanisms](./notes/authored-mechanisms.md) — M1E.1–M1E.4: bounded signals, gates, controls, logic, triggered lifts, safe movers, traps, wiring, replay boundaries, and acceptance routes. Browser acceptance remains pending.
 - [Platform contract](./platform.md) — browser-first host, fixed-step simulation, and presentation boundary.
-- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — authoring-map v8, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, the M1C.1 topology data envelope, and editable obelisk instances.
+- [M1A.1–M1A.4 authoring kit](./notes/map-authoring-foundation.md) — current authoring-map v9, multi-layer editing, deterministic selection, bounded semantic undo/redo, structured validation, atomic persistence, map-level connectors, the M1C.1 topology data envelope, and editable mechanism/obelisk instances.
 - [M1C authored navigation topology](./plans/m1c-authored-navigation-topology.md) — implemented v6 topology data, editor tooling, route diagnostics, patrol, and cross-floor pursuit under the schema-v15 compatibility boundary.
 - [Editable, floor-aware obelisks](./plans/editable-floor-aware-obelisks.md) — implemented independent authored generators and reliable per-enemy cross-floor homes under schemas v19-v20.
 - [M1B.1–M1B.4 vertical bodies, elevator, holes, jumping, and breakaways](./notes/generic-vertical-bodies-and-elevator.md) — continuous gameplay Y, contact-derived supports, per-body layer handoff, reusable apertures, an unstoppable two-stop lift, multi-floor falls, committed jumps, grounded plates, live connector authoring, and breakaway floors.
@@ -110,8 +110,8 @@ retain reproduction context even when one item in a mixed backlog is resolved.
 These identifiers evolve independently:
 
 - Application/package release: `0.9.3`.
-- Snapshot and command-recording schema: v24.
-- Authoring-map schema: `lantern-authoring-map` v8; v7, v6, v5, v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
+- Snapshot and command-recording schema: v25.
+- Authoring-map schema: `lantern-authoring-map` v9; v8, v7, v6, v5, v4, v3, v2, v1, and legacy map/scenario documents migrate explicitly.
 - Legacy compiled scenario schema: v3; scenario v2 and map v1 remain importable and scenario v3 remains the recording compatibility projection.
 - Fireball definition format: v1.
 - Performance-report schema: v4.

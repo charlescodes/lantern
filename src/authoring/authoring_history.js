@@ -1008,6 +1008,7 @@ export function commandFromAuthoringAction(documentInput, action) {
           : { travelDurationSeconds: Number(action.travelDurationSeconds) }),
         ...(action.dwellSeconds === undefined ? {} : { dwellSeconds: Number(action.dwellSeconds) }),
         ...(action.initialStop === undefined ? {} : { initialStop: action.initialStop }),
+        ...(action.controlMode === undefined ? {} : { controlMode: action.controlMode }),
       });
       after = result.document;
       label = "Place Two-stop Elevator";

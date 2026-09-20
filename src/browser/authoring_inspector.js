@@ -390,6 +390,10 @@ export class AuthoringInspector {
       { value: "lower", label: "Lower" },
       { value: "upper", label: "Upper" },
     ]);
+    const controlMode = addSelect("Control mode", "controlMode", connector.controlMode ?? "autonomous", [
+      { value: "autonomous", label: "Autonomous" },
+      { value: "triggered", label: "Triggered (wired calls)" },
+    ]);
     const apply = document.createElement("button");
     apply.type = "submit";
     apply.className = "accent-button";
@@ -407,6 +411,7 @@ export class AuthoringInspector {
         travelDurationSeconds: Number(travelDurationSeconds.value),
         dwellSeconds: Number(dwellSeconds.value),
         initialStop: initialStop.value,
+        controlMode: controlMode.value,
       };
       if ([changes.x, changes.z, changes.platformWidth, changes.apertureWidth,
         changes.travelDurationSeconds, changes.dwellSeconds].some((value) => !Number.isFinite(value))) {

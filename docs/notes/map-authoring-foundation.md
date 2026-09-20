@@ -1,10 +1,11 @@
 # M1A.1–M1A.4 Map-authoring kit
 
-> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v8 · **Current runtime recording schema:** v24
+> **Status:** current non-release implementation contract · **Authoring format:** `lantern-authoring-map` v9 · **Current runtime recording schema:** v25
 
-M1E.1 + M1E.2 add the bounded `mechanisms` graph, gate/control definitions,
-descriptor-driven properties, and semantic wiring edits. V7 migrates by adding
-an empty graph; every new save is v8. See the
+M1E.1–M1E.4 add the bounded `mechanisms` graph, gate/control definitions,
+triggered connector mode, movers, traps, descriptor-driven properties, and
+semantic wiring edits. V7 migrates by adding an empty v8 graph; v8 then migrates
+to v9 with autonomous connector defaults. Every new save is v9. See the
 [mechanism contract](./authored-mechanisms.md) for ports, clock timing, limits,
 validation, live-edit/reset behavior, and the acceptance map.
 
@@ -112,9 +113,9 @@ Load/import parses into a candidate, detects and migrates its supported version,
 
 ## Legacy loading and recordings
 
-Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. V6 migrates its singleton obelisk marker to an ordinary, stable `object.obelisk` instance on the marker's owning layer. V7 adds an empty mechanism graph when migrated to v8. Saving after any migration emits authoring-map v8 only.
+Map v1 and scenario v2/v3 JSON remain loadable. The compatibility loader validates dimensions, binary legacy tiles, player spawn, entity kinds, rock archetypes, and obelisk constraints, then creates one `ground` layer at `baseY: 0`, a stone surface, wall structure grid, deterministic legacy rock IDs, and explicit top-level start ownership. Authoring-map v1 from M1A.1–M1A.3 migrates explicitly: its former active layer becomes the v2 player-start owner and its per-layer player marker becomes the top-level spawn. Authoring-map v2 then migrates to v3 by adding an empty deterministic connector envelope; v3 migrates to v4 where `surface.hole` is a catalog-backed surface value, so no grid reshape is needed. V4 connector speed and occupancy-policy data migrates to v5's autonomous clock duration. V5 migrates additively to v6 with empty navigation arrays and ordinals of one; exact off-center connector coordinates are preserved with a warning until explicitly moved. V6 migrates its singleton obelisk marker to an ordinary, stable `object.obelisk` instance on the marker's owning layer. V7 adds an empty mechanism graph when migrated to v8. V8 migrates to v9 by adding `controlMode: "autonomous"` to every connector; Pass B device IDs and connector mode are rejected at the frozen v8 boundary. Saving after any migration emits authoring-map v9 only.
 
-Snapshot/recording schema is v24; current recordings require authoring-map v8. Recordings keep their compiled scenario-v3
+Snapshot/recording schema is v25; current recordings require authoring-map v9. Schema-v24 recordings retain their required authoring-map v8 and `authored-mechanisms-v1` behavior. Recordings keep their compiled scenario-v3
 field for frozen compatibility and retain `initialAuthoringMap` for current
 authoring data. Schema v15 introduced and pinned the authored-topology profile
 and capacities; schemas v20–v23 require the v7 authoring baseline used for

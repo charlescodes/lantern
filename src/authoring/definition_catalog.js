@@ -40,6 +40,12 @@ function freezeDefinition(definition) {
 export const PLACEABLE_DEFINITIONS = Object.freeze([
   ...[
     ["gate", "Gate", "G", true, false],
+    ["mover", "Moving block", "M", false, false],
+    ["spiked-mover", "Spiked moving block", "X", false, false],
+    ["bolt-emitter", "Bolt emitter", "B", false, true],
+    ["spell-emitter", "Spell emitter", "F", false, true],
+    ["floor-spikes", "Floor spikes", "^", false, false],
+    ["wall-spear", "Wall spear", "S", false, true],
     ["lever", "Floor lever", "L", false, false],
     ["chain", "Wall pull-chain", "C", false, true],
     ["button", "Wall button", "B", false, true],

@@ -400,6 +400,7 @@ export function compileAuthoringMap(input) {
       dwellTicks: Math.max(0, Math.round(connector.dwellSeconds * SIMULATION.tickHz)),
       travelTicks: Math.max(1, Math.round(connector.travelDurationSeconds * SIMULATION.tickHz)),
       initialStop: connector.initialStop,
+      controlMode: connector.controlMode,
     };
   });
   // Authored route costs describe the possible route with gates open. The live

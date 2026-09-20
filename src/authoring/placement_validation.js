@@ -1,7 +1,7 @@
 // @ts-check
 
 import { PLAYER } from "../config.js";
-import { wallFace } from "./mechanism_catalog.js";
+import { wallFace, isMoverDefinition, mechanismProperties } from "./mechanism_catalog.js";
 import { circleCellContact, firstSolidContact } from "../sim/collision.js";
 import {
   getPlaceableDefinition,
@@ -138,6 +138,8 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
     if (instance.id === options.ignoreInstanceId) continue;
     const otherDefinition = getPlaceableDefinition(instance.definitionId);
     if (!otherDefinition) continue;
+    if ((isMoverDefinition(definitionId) && ["object.pressure-plate", "mechanism.floor-spikes"].includes(instance.definitionId))
+      || (isMoverDefinition(instance.definitionId) && ["object.pressure-plate", "mechanism.floor-spikes"].includes(definitionId))) continue;
     const otherCells = getOccupiedCells(otherDefinition, instance);
     const otherIsDynamicCircle = isDynamicCircleDefinition(otherDefinition)
       || isAuthoredEnemyDefinition(otherDefinition);
@@ -249,6 +251,24 @@ export function validateInstancePlacement(document, definitionId, candidate, opt
     }
   }
 
+  if (isMoverDefinition(definitionId)) {
+    let properties;
+    try { properties = mechanismProperties(definitionId, candidate.properties); }
+    catch (error) { return invalid("mover_properties", error.message, layerId, definitionId, transform, occupiedCells); }
+    const { dx, dz } = wallFace(transform);
+    for (let step = 0; step <= properties.distanceCells; step++) {
+      const cx = Math.floor(numericX) + dx * step, cz = Math.floor(numericZ) + dz * step;
+      const surface = layer.surface.legend[layer.surface.cells[cz * layer.width + cx]];
+      const blocked = cx < 0 || cz < 0 || cx >= layer.width || cz >= layer.height
+        || structureCells.has(`${cx}:${cz}`) || !surface || surface.includes("hole") || surface.includes("breakaway")
+        || document.connectors.some(c => (c.lowerLayerId === layerId || c.upperLayerId === layerId) && Math.floor(c.x) === cx && Math.floor(c.z) === cz)
+        || layer.instances.some(i => i.id !== options.ignoreInstanceId && i.definitionId !== "mechanism.gate"
+          && !isMoverDefinition(i.definitionId) && !isDynamicBodyDefinition(getPlaceableDefinition(i.definitionId))
+          && getPlaceableDefinition(i.definitionId)?.traits.blocksMovement
+          && getOccupiedCells(getPlaceableDefinition(i.definitionId), i).some(c => c.cx === cx && c.cz === cz));
+      if (blocked) return invalid("mover_lane", `Mover lane is blocked at (${cx}, ${cz})`, layerId, definitionId, transform, occupiedCells);
+    }
+  }
   return {
     valid: true,
     code: "ok",

@@ -15,7 +15,8 @@
     "test:soak:ai": "node --test test/ai_soak.test.js",
     "test:soak:perception": "node --test test/perception_soak.test.js",
     "test:soak:sound": "node --test test/movement_sound_soak.test.js",
-    "test:soak:navigation": "node --test test/navigation_soak.test.js"
+    "test:soak:navigation": "node --test test/navigation_soak.test.js",
+    "test:soak:mechanisms": "node --test test/mechanisms_soak.test.js"
   },
   "engines": {
     "node": ">=20"

@@ -421,6 +421,7 @@ export function compileNavigationTopology(document, layers, connectors) {
   });
   connectors.forEach((connector, connectorIndex) => {
     const lower = portIndexByKey.get(`connector:${connector.id}:lower`);
+    if (connector.controlMode === "triggered") return;
     const upper = portIndexByKey.get(`connector:${connector.id}:upper`);
     const cost = connector.travelTicks + connector.dwellTicks;
     const stableOrder = document.navigationLinks.length * 2 + connectorIndex * 2;

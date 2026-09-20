@@ -4,8 +4,8 @@ import { MECHANISM_DEFINITIONS, MECHANISM_LIMITS, compileMechanisms } from "../a
 
 /** Bounded synchronous signal machine. Sources are written only for the next tick. */
 export class MechanismRuntime {
-  constructor(document) {
-    this.compiled = compileMechanisms(document);
+  constructor(document, profile) {
+    this.compiled = compileMechanisms(document, profile);
     const { nodes, inputCount, outputCount } = this.compiled;
     this.byId = new Map(nodes.map((node) => [node.id, node]));
     this.values = new Uint8Array(outputCount);

@@ -320,7 +320,8 @@ export class AuthoringEditorController {
     const target = this.state.activeChannel === "navigation"
       ? navigationTarget ?? pickAuthoringTarget(authoring, x, z)
       : pickAuthoringTarget(authoring, x, z);
-    if (effectiveTool === "wire") return this.selectMechanism(target?.instanceId);
+    if (effectiveTool === "wire") return this.selectMechanism(
+      target?.instanceId ?? pickAuthoredConnector(authoring, x, z)?.connectorId);
     if (effectiveTool === "link") {
       if (!navigationTarget) {
         this.#message("Choose a navigation node or visible connector endpoint", false);

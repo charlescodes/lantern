@@ -14,10 +14,10 @@ import {
   rockDefinitionId,
 } from "./definition_catalog.js";
 import { validateInstancePlacement } from "./placement_validation.js";
-import { compileMechanisms, emptyMechanisms } from "./mechanism_catalog.js";
+import { compileMechanisms, emptyMechanisms, isMoverDefinition, isTrapDefinition } from "./mechanism_catalog.js";
 
 export const AUTHORING_MAP_FORMAT = "lantern-authoring-map";
-export const AUTHORING_MAP_VERSION = 8;
+export const AUTHORING_MAP_VERSION = 9;
 /** M1C maps with authored navigation topology and legacy obelisk markers. */
 export const NAVIGATION_AUTHORING_MAP_VERSION = 6;
 /** M1B.4 autonomous-elevator maps without authored navigation topology. */
@@ -596,6 +596,7 @@ function normalizeCurrentDocument(input) {
           "travelDurationSeconds",
           "dwellSeconds",
           "initialStop",
+          "controlMode",
         ]),
         path,
       );
@@ -676,6 +677,10 @@ function normalizeCurrentDocument(input) {
         issue("error", `${path}.dwellSeconds`, "connector-dwell", "Dwell must be from 0 through 60 seconds.");
       }
       const initialStop = connector.initialStop === "upper" ? "upper" : "lower";
+      const controlMode = connector.controlMode ?? "autonomous";
+      if (!["autonomous", "triggered"].includes(controlMode)) {
+        issue("error", `${path}.controlMode`, "connector-control-mode", "Control mode must be autonomous or triggered.");
+      }
       if (connector.initialStop !== "lower" && connector.initialStop !== "upper") {
         issue("error", `${path}.initialStop`, "connector-initial-stop", "Initial stop must be lower or upper.");
       }
@@ -691,6 +696,7 @@ function normalizeCurrentDocument(input) {
         travelDurationSeconds,
         dwellSeconds,
         initialStop,
+        controlMode,
       };
     });
 
@@ -1258,6 +1264,16 @@ export function migrateAuthoringMapV7(input) {
   return validateAuthoringMap({ ...input, version: AUTHORING_MAP_VERSION, mechanisms: emptyMechanisms() });
 }
 
+export function migrateAuthoringMapV8(input) {
+  if (input.layers?.some(layer => layer.instances?.some(instance => isMoverDefinition(instance.definitionId) || isTrapDefinition(instance.definitionId)))) {
+    fail("layers", "definition-version", "Authoring v8 cannot contain Pass B devices");
+  }
+  if (input.connectors?.some((connector) => connector.controlMode !== undefined)) {
+    fail("connectors", "unknown-field", "Authoring v8 cannot contain controlMode");
+  }
+  return validateAuthoringMap({ ...input, version: AUTHORING_MAP_VERSION });
+}
+
 /**
  * Explicitly migrates map-v1 and scenario-v2/v3 data into the authoring format.
  * @param {unknown} input
@@ -1383,6 +1399,7 @@ export function loadAuthoringMap(input) {
   if (!isAuthoringMapDocument(value)) return migrateLegacyMap(value);
   const version = /** @type {Record<string,any>} */ (value).version;
   if (version === AUTHORING_MAP_VERSION) return validateAuthoringMap(value);
+  if (version === 8) return migrateAuthoringMapV8(value);
   if (version === 7) return migrateAuthoringMapV7(value);
   if (version === NAVIGATION_AUTHORING_MAP_VERSION) return migrateAuthoringMapV6(value);
   if (version === M1B_AUTHORING_MAP_VERSION) return migrateAuthoringMapV5(value);

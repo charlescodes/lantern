@@ -200,7 +200,7 @@ export class DebugRenderer {
     context.lineJoin = "round";
 
     this.#drawMap(snapshot, view, developerToolsOpen);
-    this.#drawAuthoringInstances(snapshot);
+    this.#drawAuthoringInstances(snapshot, alpha);
     this.#drawElevators(snapshot, developerToolsOpen);
     if (developerToolsOpen && view.mode === "edit" && view.authoringEditor) {
       this.#drawAuthoringOverlays(snapshot, view.authoringEditor);
@@ -465,14 +465,14 @@ export class DebugRenderer {
     }
   }
 
-  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot */
-  #drawAuthoringInstances(snapshot) {
+  /** @param {ReturnType<import('../sim/simulation.js').Simulation['snapshot']>} snapshot @param {number} alpha */
+  #drawAuthoringInstances(snapshot, alpha) {
     const context = this.context;
     const line = this.camera.viewportLengthToWorld(1.5);
     for (const instance of visibleMechanismInstances(snapshot)) {
       const definition = getPlaceableDefinition(instance.definitionId);
       if (!definition || isDynamicBodyDefinition(definition)) continue;
-      const mechanism = mechanismVisual(instance, snapshot.mechanisms?.devices.find((d) => d.id === instance.id));
+      const mechanism = mechanismVisual(instance, snapshot.mechanisms?.devices.find((d) => d.id === instance.id), alpha);
       context.save();
       context.translate(instance.x, instance.z);
       if (mechanism) {
@@ -1176,7 +1176,7 @@ export class DebugRenderer {
     const line = this.camera.viewportLengthToWorld(1);
     for (const projectile of snapshot.projectiles) {
       if (projectile.layerId !== (snapshot.map.layerId ?? snapshot.runtimeLayerId)) continue;
-      if (projectile.projectileKind === "thrown-stone") {
+      if (projectile.projectileKind === "thrown-stone" || projectile.projectileKind === "bolt") {
         context.beginPath();
         context.arc(projectile.x, projectile.z, projectile.radius, 0, Math.PI * 2);
         context.fillStyle = COLORS.stone;

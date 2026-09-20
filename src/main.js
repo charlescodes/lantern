@@ -177,6 +177,9 @@ const runtime = new FixedStepRuntime({
         obelisks: snapshot.editorObelisks ?? [],
         mechanisms: snapshot.mechanisms ? { ...snapshot.mechanisms,
           devices: snapshot.mechanisms.devices.map((device) => ({ ...device, open: false, blocked: false,
+            phase: 0, reach: 0,
+            x: snapshot.authoring.mechanismNodes.find((n) => n.id === device.id)?.x ?? device.x,
+            z: snapshot.authoring.mechanismNodes.find((n) => n.id === device.id)?.z ?? device.z,
             on: snapshot.authoring.mechanismNodes.find((n) => n.id === device.id)?.properties.initialOn ?? false })) } : null,
       }
       : snapshot;

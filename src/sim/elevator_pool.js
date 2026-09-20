@@ -46,6 +46,7 @@ export class ElevatorPool {
     this.debugRequestedStop = new Uint8Array(capacity);
     this.hasDebugRequest = new Uint8Array(capacity);
     this.motion = new Uint8Array(capacity);
+    this.triggered = new Uint8Array(capacity);
     this.supportedBodyCount = new Uint16Array(capacity);
     this.rejectedLoadCount = new Uint32Array(capacity);
     this.failedEjectionCount = new Uint32Array(capacity);
@@ -65,7 +66,7 @@ export class ElevatorPool {
         "apertureWidth", "lowerY", "upperY", "worldY", "previousWorldY", "velocityY",
         "speed", "travelDurationSeconds", "dwellTicks", "dwellRemaining", "currentStop",
         "requestedStop", "debugRequestedStop", "hasDebugRequest", "motion",
-        "supportedBodyCount", "rejectedLoadCount", "failedEjectionCount",
+        "supportedBodyCount", "rejectedLoadCount", "failedEjectionCount", "triggered",
       ]) this[field][index] = this[field][last];
       this.authoringId[index] = this.authoringId[last];
     }
@@ -108,6 +109,7 @@ export class ElevatorPool {
     this.debugRequestedStop[index] = initialStop;
     this.hasDebugRequest[index] = 0;
     this.motion[index] = ELEVATOR_MOTION.DWELLING;
+    this.triggered[index] = Number(value.controlMode === "triggered");
     this.supportedBodyCount[index] = 0;
     this.rejectedLoadCount[index] = 0;
     this.failedEjectionCount[index] = 0;
@@ -149,6 +151,7 @@ export class ElevatorPool {
           this.requestedStop[index] = this.debugRequestedStop[index];
           this.hasDebugRequest[index] = 0;
         } else {
+          if (this.triggered[index]) continue;
           this.requestedStop[index] = this.currentStop[index] === ELEVATOR_STOP.LOWER
             ? ELEVATOR_STOP.UPPER
             : ELEVATOR_STOP.LOWER;
@@ -194,10 +197,25 @@ export class ElevatorPool {
   /** @param {number} index */
   cycle(index) {
     if (index < 0 || index >= this.activeCount) return false;
+    if (this.triggered[index] && this.motion[index] === ELEVATOR_MOTION.DWELLING) {
+      return this.request(index, this.currentStop[index] === ELEVATOR_STOP.LOWER
+        ? ELEVATOR_STOP.UPPER : ELEVATOR_STOP.LOWER);
+    }
     if (this.motion[index] === ELEVATOR_MOTION.DWELLING) this.dwellRemaining[index] = 0;
     else this.request(index, this.requestedStop[index] === ELEVATOR_STOP.LOWER
       ? ELEVATOR_STOP.UPPER
       : ELEVATOR_STOP.LOWER);
     return true;
+  }
+
+  /** Resolve one synchronous input set, never in link delivery order. */
+  mechanismRequest(index, lower, upper, cycle) {
+    if (!this.triggered[index] || (!lower && !upper && !cycle)) return;
+    const dwelling = this.motion[index] === ELEVATOR_MOTION.DWELLING;
+    const opposite = (dwelling ? this.currentStop[index] : this.requestedStop[index]) === ELEVATOR_STOP.LOWER
+      ? ELEVATOR_STOP.UPPER : ELEVATOR_STOP.LOWER;
+    const stop = lower && upper ? opposite : lower ? ELEVATOR_STOP.LOWER : upper ? ELEVATOR_STOP.UPPER : opposite;
+    if (dwelling && stop === this.currentStop[index]) return;
+    this.request(index, stop);
   }
 }

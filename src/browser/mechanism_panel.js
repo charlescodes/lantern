@@ -17,7 +17,7 @@ export function mechanismPropertyForm(definitionId, properties, onApply) {
         option.selected = choice === value; input.append(option);
       }
     } else if (descriptor.type === "boolean") { input.type = "checkbox"; input.checked = value; }
-    else { input.type = "number"; input.min = String(descriptor.min); input.max = String(descriptor.max); input.step = "1"; input.value = String(value); }
+    else { input.type = "number"; input.min = String(descriptor.min); input.max = String(descriptor.max); input.step = descriptor.type === "number" ? "any" : "1"; input.value = String(value); }
     label.append(input); form.append(label); inputs.set(key, input);
   }
   const apply = document.createElement("button"); apply.type = "submit"; apply.textContent = "Apply properties";
@@ -28,7 +28,7 @@ export function mechanismPropertyForm(definitionId, properties, onApply) {
     try {
       const values = Object.fromEntries([...inputs].map(([key, input]) => [key,
         definition.properties[key].type === "boolean" ? input.checked
-          : definition.properties[key].type === "integer" ? Number(input.value) : input.value]));
+          : ["integer", "number"].includes(definition.properties[key].type) ? Number(input.value) : input.value]));
       const result = onApply(mechanismProperties(definitionId, values));
       status.textContent = result === false || result?.ok === false ? "Edit rejected; see editor status" : "Applied";
     } catch (error) { status.textContent = error.message; }
@@ -62,7 +62,7 @@ export class MechanismPanel {
     button("Add logic device", () => this.editor.editMechanism({ type: "addMechanismNode", definitionId: definitionSelect.value }));
     const list = document.createElement("div"); list.className = "mechanism-node-list"; this.root.append(list);
     for (const node of snapshot.authoring.mechanismNodes ?? []) {
-      button(`${node.id} · ${node.definitionId} [${node.layerId ?? "logic"}]`, () => this.editor.selectMechanism(node.id), list);
+      button(`${node.id} · ${node.definitionId} [${node.nodeKind === "connector" ? `${node.lowerLayerId} ↔ ${node.upperLayerId}` : node.layerId ?? "logic"}]`, () => this.editor.selectMechanism(node.id), list);
     }
     if (view.wireSource) {
       const status = document.createElement("p"); status.textContent = `Source: ${view.wireSource} → ${view.wireTarget ?? "choose target"}`; this.root.append(status);
@@ -75,21 +75,23 @@ export class MechanismPanel {
       const apply = (properties) => this.editor.editMechanism(selected.layerId
         ? { type: "updateInstanceProperties", authoringId: selected.id, layerId: selected.layerId, properties }
         : { type: "updateMechanismNode", nodeId: selected.id, properties });
-      this.root.append(mechanismPropertyForm(selected.definitionId, selected.properties, apply));
-      if (!selected.layerId) button("Delete logic device", () => this.editor.editMechanism({ type: "removeMechanismNode", nodeId: selected.id }));
+      if (selected.nodeKind === "connector") {
+        const notice = document.createElement("p"); notice.textContent = "Edit lift timing and mode in the connector inspector."; this.root.append(notice);
+      } else this.root.append(mechanismPropertyForm(selected.definitionId, selected.properties, apply));
+      if (!selected.layerId && selected.nodeKind !== "connector") button("Delete logic device", () => this.editor.editMechanism({ type: "removeMechanismNode", nodeId: selected.id }));
       const advanced = document.createElement("details"), summary = document.createElement("summary"), json = document.createElement("textarea");
       summary.textContent = "Advanced properties JSON"; json.value = JSON.stringify(selected.properties ?? {}, null, 2); advanced.append(summary, json);
       const status = document.createElement("output");
       button("Apply JSON", () => {
         try { apply(mechanismProperties(selected.definitionId, JSON.parse(json.value))); }
         catch (error) { status.textContent = error.message; }
-      }, advanced); advanced.append(status); this.root.append(advanced);
+      }, advanced); advanced.append(status); if (selected.nodeKind !== "connector") this.root.append(advanced);
     }
     for (const link of snapshot.authoring.mechanisms?.links ?? []) {
       if (selected && link.from.nodeId !== selected.id && link.to.nodeId !== selected.id) continue;
       const endpoint = (e) => {
         const node = snapshot.authoring.mechanismNodes.find((n) => n.id === e.nodeId);
-        return `${e.nodeId}.${e.port} [${node?.layerId ?? "logic"}]`;
+        return `${e.nodeId}.${e.port} [${node?.nodeKind === "connector" ? `${node.lowerLayerId} ↔ ${node.upperLayerId}` : node?.layerId ?? "logic"}]`;
       };
       button(`Unwire ${endpoint(link.from)} → ${endpoint(link.to)}`, () => this.editor.editMechanism({ type: "removeMechanismLink", linkId: link.id }));
     }

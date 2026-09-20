@@ -34,7 +34,7 @@ function plateGate() {
 test("v7 migration is additive; graph links validate and cascade through undo/redo", () => {
   const old = blank(); old.version = 7; delete old.mechanisms;
   const next = loadAuthoringMap(old);
-  assert.equal(next.version, 8); assert.deepEqual(next.mechanisms.nodes, []); assert.equal(old.version, 7);
+  assert.equal(next.version, 9); assert.deepEqual(next.mechanisms.nodes, []); assert.equal(old.version, 7);
   const puzzle = plateGate();
   const command = commandFromAuthoringAction(puzzle.document, { type: "removeInstance", authoringId: puzzle.plate });
   const deleted = applyAuthoringCommand(puzzle.document, command);
@@ -46,6 +46,26 @@ test("v7 migration is additive; graph links validate and cascade through undo/re
   assert.throws(() => validateAuthoringMap(invalid), /incompatible/);
   invalid.mechanisms.links[0].from.nodeId = "missing";
   assert.throws(() => validateAuthoringMap(invalid), /Missing endpoint/);
+});
+
+test("v8 migration preserves Pass A, defaults autonomous lifts, and rejects backported Pass B fields", () => {
+  const old = blank(); old.version = 8;
+  old.connectors = [{ id: "elevator-0001", definitionId: "connector.elevator.two-stop",
+    lowerLayerId: "ground", upperLayerId: "ground", x: 4.5, z: 4.5,
+    platformWidth: 0.9, apertureWidth: 0.9, travelDurationSeconds: 2,
+    dwellSeconds: 1, initialStop: "lower" }];
+  // Migration policy is testable without requiring the intentionally invalid
+  // same-layer connector to pass complete geometry validation.
+  const withMode = structuredClone(old); withMode.connectors[0].controlMode = "triggered";
+  assert.throws(() => loadAuthoringMap(withMode), /v8 cannot contain controlMode/);
+  const withMover = structuredClone(old); withMover.connectors = [];
+  withMover.layers[0].instances.push({ id: "mover", definitionId: "mechanism.mover",
+    x: 5.5, z: 5.5, rotation: 0, properties: { distanceCells: 1, speed: 2 } });
+  assert.throws(() => loadAuthoringMap(withMover), /v8 cannot contain Pass B devices/);
+
+  const passA = blank(); passA.version = 8;
+  const migrated = loadAuthoringMap(passA);
+  assert.equal(migrated.version, 9);
 });
 
 test("plate opens gates before the first snapshot; edges have one tick latency; closing stalls safely", () => {
@@ -318,6 +338,17 @@ test("logic/device/total/link bounds reject atomically, including unknown proper
   document.mechanisms.nodes[0].properties = {};
   document.mechanisms.nodes.push({ ...document.mechanisms.nodes[0] });
   assert.throws(() => compileMechanisms(document), /duplicate/);
+  const movers = blank();
+  movers.layers[0].instances = Array.from({ length: MECHANISM_LIMITS.movers + 1 }, (_, i) => ({
+    id: `m${i}`, definitionId: "mechanism.mover", x: 1.5, z: 1.5, rotation: 0,
+    properties: { distanceCells: 1, speed: 2 },
+  }));
+  assert.throws(() => compileMechanisms(movers), /capacity/);
+  const traps = blank();
+  traps.layers[0].instances = Array.from({ length: MECHANISM_LIMITS.traps + 1 }, (_, i) => ({
+    id: `t${i}`, definitionId: "mechanism.floor-spikes", x: 1.5, z: 1.5, rotation: 0,
+  }));
+  assert.throws(() => compileMechanisms(traps), /capacity/);
 });
 
 test("gates wait for dynamic corpses; plate corpse activation is opt-in", () => {

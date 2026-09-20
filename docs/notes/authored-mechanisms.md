@@ -1,7 +1,7 @@
-# Authored mechanisms: controls, logic, and gates
+# Authored mechanisms: signals, actuators, and traps
 
-> **Boundary:** authoring-map v8, snapshot/recording v24,
-> `authored-mechanisms-v1`. M1E.1 + M1E.2 are implemented as Pass A.
+> **Boundary:** authoring-map v9, snapshot/recording v25,
+> `authored-mechanisms-v2`. M1E.1–M1E.4 are implemented in Pass A and Pass B.
 > Automated checks passed; browser/GPU acceptance remains manual.
 
 Maps own a declarative graph, not executable scripts or subscriptions. Ordinary
@@ -12,19 +12,22 @@ types, repeated inputs, duplicate IDs, invalid properties, capacity overflow,
 and combinational cycles. Fan-out is legal; fan-in uses `logic.any`/`logic.all`.
 Unused inputs warn but remain valid while a puzzle is under construction.
 
-The existing v7 map collection remains importable. Migration adds an empty
-mechanism section; saves emit v8. Recordings v2–v23 force profile `none` and
-retain historical plate behavior. A genuine v23 recording and its expected
+The existing map collection remains importable. V7 migration adds an empty
+mechanism section; v8→v9 defaults every connector to autonomous and saves emit
+v9. Recordings v2–v23 force profile `none`; v24 requires authoring-map v8 and
+the frozen `authored-mechanisms-v1` membership/timing. A genuine v23 recording and its expected
 physics are frozen in `test/fixtures/mechanisms-legacy-v23.json`, generated from
 unmodified commit `450e98e8ae3e8aafc2043227902c58008cf0efca`.
+Genuine v24 Pass A and autonomous-elevator recordings are frozen in
+`test/fixtures/mechanisms-legacy-v24.json`, captured from commit `1fb4f45`.
 The package/application stays at 0.9.3.
 
 ## Clock and authority
 
 At tick N, copy the source/stateful output registers collected at N−1, clear
 pending pulses, evaluate combinational nodes in stable topological order, then
-capture every input before advancing stateful nodes once. Apply gate requests
-before AI, navigation, elevator motion, or physics. Movement, pressure, player
+capture every input before advancing stateful nodes once. Apply gate, elevator,
+and mover requests before AI, navigation, elevator motion, or physics. Movement, pressure, player
 interaction, and projectile impacts collect sources for N+1. Multiple pulses
 from one output during one collection tick coalesce. Diagnostic retention is
 independent from signal delivery.
@@ -55,6 +58,12 @@ edits retain mechanism state. Source JSON is never rewritten by gate motion.
 | `mechanism.lever` | — | `on` level; `changed` pulse | `initialOn`, default false; E toggles. |
 | `mechanism.chain` | — | `pulled` pulse | E only; projectiles never pull it. |
 | `mechanism.button` | — | `pressed` pulse | Body-contact entry or swept projectile collision; normal projectile impact still happens. |
+| `connector.elevator.two-stop` | `callLower`, `callUpper`, `cycle` pulses | `atLower`, `atUpper` levels; `arrivedLower`, `arrivedUpper` pulses | A graph node only when `controlMode` is `triggered`. In-flight travel is unstoppable and banks at most one return. Simultaneous dwelling calls choose the opposite stop. |
+| `mechanism.mover`, `mechanism.spiked-mover` | `positionB` level | `atA`, `atB`, `blocked` levels; `arrivedA`, `arrivedB`, `blockedEdge` pulses | Straight 1–16-cell rail; `speed` 0.25–8m/s (default 2). Transactionally pushes living actors and dynamic props, stalls instead of crushing, and never rewrites authored A. Spiked movers deal 25 damage once per contact entry. |
+| `mechanism.bolt-emitter` | `fire` pulse | — | Wall mounted; emits a neutral 12m/s bolt for 15 direct damage through the bounded projectile pool. Bolts can press buttons and never explode. |
+| `mechanism.spell-emitter` | `fire` pulse | — | Wall mounted; `spellId` currently `fireball`, with `projectile` or `instant-impact` mode. Each accepted activation derives a source-local deterministic seed and captures the definition revision. |
+| `mechanism.floor-spikes` | `extended` level | — | Non-blocking 12-tick rise/retract; active from progress six, 25 damage, 30-tick per-source/target cooldown. |
+| `mechanism.wall-spear` | `thrust` pulse | — | Wall mounted; 8-tick extension, 6-tick hold, 8-tick retraction, 1.5m clipped reach, and 25 damage once per actor per thrust. Busy pulses are ignored and counted. |
 | `logic.not` | `value` level | `value` level | Boolean inversion. |
 | `logic.all`, `logic.any` | `a`, `b` levels | `value` level | AND / OR. |
 | `logic.toggle` | `toggle`, `reset` pulses | `on` level | `initialOn`, default false. |
@@ -72,17 +81,19 @@ E is an edge command; key repeat does not retrigger. Shift+E now toggles the
 developer editor. Wall controls anchor in a wall cell: rotations 0/1/2/3 face
 +Z/−X/−Z/+X, and require an open adjacent front cell.
 
-Gate changes clone disposable collision overlays, update the affected floor's
+Gate and mover occupancy changes clone disposable collision overlays, update the affected floor's
 revision, reset destination/reachability caches, and update snapshot occluders
 used by TrueSight. Authored navigation can describe routes through open gates;
-live movement still respects a currently closed gate. Both renderers consume
-the same device visual descriptions. Gates are full-cell barriers, not hinged
+live movement still respects a currently closed gate and mover cell. Triggered
+elevators are excluded from enemy navigation arcs until AI gains an explicit
+control-operating capability. Both renderers consume the same device visual
+descriptions. Gates and movers are conservative full-cell occluders, not hinged
 doors; sub-cell occlusion remains a separate project.
 
 ## Authoring and inspection
 
 Open the toolbox with `;`, enter edit with Shift+E, and select **Mechanisms**.
-Stamp plates, gates, levers, buttons, and chains; rotate wall devices with R.
+Stamp plates, gates, levers, buttons, chains, movers, and traps; rotate wall devices with R.
 Use **Wire mechanisms**, then click the source and target. A single compatible
 port pair connects immediately; multiple choices appear as explicit buttons in
 the graph panel. A pending source survives a floor switch. Escape cancels it.
@@ -93,25 +104,27 @@ advanced JSON is collapsed and uses the same validation. Incoming/outgoing
 wires show endpoint ports and floor badges, with an Unwire action. Directed
 lines and remote-endpoint markers appear only in edit mode. Each operation is
 one undoable authoring command, including cascade deletion. Future generators
-emit exactly this same v8 map format.
+emit exactly this same v9 map format.
 
 `__lantern.mechanisms()` returns detached counts, clock registers, logic state,
 device state, and diagnostic counters. `__lantern.mechanismEvents()` returns
 the latest 64 events from a 256-entry ring. Ring overwrites and coalesced pulses
 are counted. These reads cannot mutate delivery.
 
-Limits pinned in v24 recordings: 256 logic nodes, 512 total mechanism nodes,
-1024 links, 128 controls, 128 gates. The reserved Pass B mover/trap limits are
-64/128; no mover or trap implementation exists yet. Input/output registers,
+Limits pinned in v25 recordings: 256 logic nodes, 512 total mechanism nodes,
+1024 links, 128 controls, 128 gates, 64 movers, and 128 traps. V24 recordings
+retain their original Pass A profile and pinned values. Input/output registers,
 counters, and countdowns use bounded typed arrays.
 
-## Acceptance and next pass
+## Acceptance
 
-Run `node --test test/mechanisms.test.js test/input_chord.test.js`, then
-`npm run check`. Tests cover real v23 compatibility, v7 migration, exact current
-replay, clock boundaries, reset conflicts, graph validation/capacities, control
-impacts, safe closing, atomic edits, semantic undo, cross-floor wiring, and a
-2400-tick deterministic acceptance-map run.
+Run the focused mechanism suites, including `test/mechanism_elevators.test.js`,
+`test/mechanism_movers.test.js`, `test/mechanism_traps.test.js`,
+`test/mechanism_acceptance.test.js`, and `test/mechanisms_soak.test.js`, then
+`npm run check`. Tests cover genuine v23/v24 compatibility, migration, exact
+current replay, clock boundaries, lift arbitration, safe transactional pushing,
+environmental damage, trap phases, atomic edits, semantic undo, cross-floor
+wiring, the integrated map, and a two-run 36,000-tick bounded soak.
 
 Open `?arena=mechanisms` and repeat with `&renderer=3d`:
 
@@ -128,7 +141,24 @@ Open `?arena=mechanisms` and repeat with `&renderer=3d`:
    wiring, delete a linked device, undo/redo, save/load, and reset. Confirm
    wire overlays disappear in play and hidden devices stay concealed.
 
+Then open `?arena=mechanisms-pass-b` and repeat with `&renderer=3d`:
+
+1. Confirm the plate holds the entry gate and the timer chain starts the bolt
+   lane. Move the medium rock onto the solve plate to cancel the timer and hold
+   its exit gate open.
+2. Strike the wall button with a projectile and confirm the facing Fireball
+   emitter casts normally. Bolts must render as bolts, press buttons on impact,
+   and never use Fireball explosion/light presentation.
+3. Pull the lift lever and confirm the triggered elevator waits indefinitely
+   while idle, completes an unstoppable trip, then honors one banked return.
+4. Toggle the mover lever. Confirm its fan-out extends the floor spikes, the
+   spiked block pushes without overlap, stops safely at obstruction, and its
+   collision/occlusion appearance tracks the conservative occupied cell.
+5. Ride to the upper gallery and pull its chain; confirm the cross-floor wire
+   thrusts the lower-floor spear without revealing hidden runtime state.
+6. In edit mode, inspect the mover rail, connector mode/node, runtime phases,
+   floor badges, wire directions, save/load, undo/redo, and reset poses.
+
 No browser/GPU run was available in the implementation environment. This
-manual route remains the final readability/usability gate. Pass B is M1E.3 +
-M1E.4 in the [train plan](../plans/m1e-mechanisms.md): triggered elevators,
-moving blocks, bolt/spell/spike/spear traps, and their integrated acceptance room.
+manual route remains the final readability/usability gate; automated renderer
+and snapshot tests do not substitute for Canvas2D/Three.js/WebGL inspection.

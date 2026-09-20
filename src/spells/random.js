@@ -64,6 +64,13 @@ export function deriveSampleSeed(effectSeed, ordinal) {
   );
 }
 
+/** Source-local seed domain; never consumes another caster's random sequence. */
+export function deriveMechanismCastSeed(simulationSeed, authoringId, spellCode, ordinal) {
+  let hash = mixUint32((simulationSeed >>> 0) ^ 0x4d454348);
+  for (let i = 0; i < authoringId.length; i++) hash = mixUint32(hash ^ authoringId.charCodeAt(i));
+  return mixUint32(hash ^ Math.imul(spellCode, 0x85ebca6b) ^ Math.imul(ordinal, 0xc2b2ae35));
+}
+
 /** @param {number} seed @param {keyof typeof LANE_HASHES|string} lane */
 export function laneUint32(seed, lane) {
   const laneHash = LANE_HASHES[/** @type {keyof typeof LANE_HASHES} */ (lane)];

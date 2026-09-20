@@ -4,14 +4,12 @@ This directory holds decision-complete plans for work that has been approved
 but is not yet a frozen milestone record. The [roadmap](../roadmap.md) owns
 ordering. Historical milestone documents remain under `docs/milestones/`.
 
-## Active
-
-- [M1E authored mechanisms](./m1e-mechanisms.md) — two implementation passes.
-  Pass A (M1E.1 + M1E.2) is implemented with manual browser acceptance pending;
-  Pass B (M1E.3 + M1E.4) remains planned. See the
-  [runtime contract](../notes/authored-mechanisms.md) for the delivered boundary.
-
 ## Implemented
+
+- [M1E authored mechanisms](./m1e-mechanisms.md) — delivered both passes through
+  schema v25 and authoring-map v9. Automated checks include the integrated map
+  and deterministic soak; manual browser/GPU acceptance remains pending. See
+  the [runtime contract](../notes/authored-mechanisms.md).
 
 - [M1C authored navigation topology](./m1c-authored-navigation-topology.md) —
   delivered persisted topology, editor tooling, deterministic patrol,
