@@ -297,7 +297,8 @@ body[data-mode="edit"] #arena {
   top: 14px;
   right: 14px;
   display: none;
-  width: min(310px, calc(100% - 28px));
+  flex-direction: column;
+  width: min(390px, calc(100% - 28px));
   max-height: calc(100% - 72px);
   overflow: hidden;
   border: 1px solid rgba(141, 111, 54, 0.82);
@@ -308,10 +309,11 @@ body[data-mode="edit"] #arena {
 }
 
 body[data-mode="edit"] .editor-palette {
-  display: block;
+  display: flex;
 }
 
 .map-palette-heading {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -341,9 +343,13 @@ body[data-mode="edit"] .editor-palette {
 }
 
 .map-palette-body {
-  max-height: calc(100% - 50px);
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 8px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .map-palette-selection {
@@ -460,19 +466,46 @@ body[data-mode="edit"] .editor-palette {
   margin-top: 8px;
 }
 
-.map-palette-group h3 {
-  margin: 0 0 4px;
+.map-palette-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 2px;
+  cursor: pointer;
   color: var(--muted);
   font-size: 8px;
   font-weight: 600;
   letter-spacing: 0.11em;
   text-transform: uppercase;
+  user-select: none;
+}
+
+.map-palette-group-title:hover,
+.map-palette-group-title:focus-visible {
+  color: var(--ink);
+}
+
+.map-palette-group-count {
+  min-width: 18px;
+  padding: 2px 4px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--mint);
+  font-size: 7px;
+  line-height: 1;
+  text-align: center;
+}
+
+.map-palette-group[open] .map-palette-group-title {
+  margin-bottom: 4px;
 }
 
 .map-palette-controls,
 .map-palette-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 4px;
 }
 

@@ -193,11 +193,19 @@ export class MapPalette {
     this.body.append(this.navigationHelp);
 
     for (const group of groupPaletteDefinitions(this.definitions)) {
-      const section = document.createElement("section");
+      const section = document.createElement("details");
       section.className = "map-palette-group";
       section.dataset.category = group.id;
-      const label = document.createElement("h3");
-      label.textContent = group.label;
+      section.open = true;
+      const label = document.createElement("summary");
+      label.className = "map-palette-group-title";
+      const labelText = document.createElement("span");
+      labelText.textContent = group.label;
+      const count = document.createElement("span");
+      count.className = "map-palette-group-count";
+      count.textContent = String(group.definitions.length);
+      count.setAttribute("aria-label", `${group.definitions.length} definitions`);
+      label.append(labelText, count);
       const controls = document.createElement("div");
       controls.className = "map-palette-controls";
       for (const definition of group.definitions) {

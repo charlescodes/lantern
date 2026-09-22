@@ -66,4 +66,7 @@ test("editor markup provides one generated palette mount and generated history c
   assert.match(main, /onUndo: \(\) => authoringEditor\.undo\(\)/);
   assert.match(main, /onFillConnectorNavigation: \(\) => authoringEditor\.fillConnectorNavigation\(\)/);
   assert.match(palette, /Fill connector navigation/);
+  assert.match(palette, /document\.createElement\("details"\)/);
+  assert.match(palette, /document\.createElement\("summary"\)/);
+  assert.match(palette, /section\.open = true/);
 });
